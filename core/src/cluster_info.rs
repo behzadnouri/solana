@@ -1748,6 +1748,7 @@ impl ClusterInfo {
         requests: Vec<PullData>,
         stakes: &HashMap<Pubkey, u64>,
     ) -> Option<Packets> {
+        // println!("handle_pull_requests(...)");
         // split the requests into addrs and filters
         let mut caller_and_filters = vec![];
         let mut addrs = vec![];
@@ -1770,6 +1771,7 @@ impl ClusterInfo {
             )
             .generate_pull_responses(&caller_and_filters, now);
         time.stop();
+        // println!("# pull resps: {}", pull_responses.len());
 
         let mut process = Measure::start("process");
         self.time_gossip_write_lock("process_pull_reqs", &self.stats.process_pull_requests)
@@ -1793,6 +1795,7 @@ impl ClusterInfo {
             })
             .collect();
 
+        // println!("# pull resps: {}", pull_responses.len());
         if pull_responses.is_empty() {
             return None;
         }
@@ -1861,7 +1864,7 @@ impl ClusterInfo {
             stats.len() - sent.len()
         );
         info!("callers: {:#?}", callers);
-        info!(
+        println!(
             "handle_pull_requests: {} {} {} {} sent: {} total: {} total_bytes: {} caller_and_filters: {}",
             time,
             filter,
@@ -1872,6 +1875,7 @@ impl ClusterInfo {
             total_bytes,
             caller_and_filters_len,
         );
+        assert!(false);
         if packets.is_empty() {
             return None;
         }

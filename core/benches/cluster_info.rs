@@ -68,8 +68,11 @@ fn bench_pull_response(bencher: &mut Bencher) {
         cluster_info.push_lowest_slot(Pubkey::new_rand(), thread_rng().gen_range(0, 100));
     }
     let recycler = PacketsRecycler::default();
+    let now = timestamp();
     let pull_requests: Vec<_> = (0..100).into_iter().map(|_| {
-        let crds_data = CrdsData::ContactInfo(ContactInfo::default());
+        let mut contact_info = ContactInfo::default();
+        contact_info.wallclock = now;
+        let crds_data = CrdsData::ContactInfo(contact_info);
         let caller = CrdsValue { signature: Signature::default(), data: crds_data };
         let filter = CrdsFilter::default();
         let from_addr = "127.0.0.1:800".parse().unwrap();

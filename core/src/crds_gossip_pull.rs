@@ -19,6 +19,7 @@ use rand::Rng;
 use solana_runtime::bloom::Bloom;
 use solana_sdk::hash::Hash;
 use solana_sdk::pubkey::Pubkey;
+use solana_measure::measure::Measure;
 use std::cmp;
 use std::collections::VecDeque;
 use std::collections::{HashMap, HashSet};
@@ -407,6 +408,7 @@ impl CrdsGossipPull {
         filters: &[(CrdsValue, CrdsFilter)],
         now: u64,
     ) -> Vec<Vec<CrdsValue>> {
+        let mut time = Measure::start("filter_crds_values");
         let mut ret = vec![vec![]; filters.len()];
         let msg_timeout = CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS;
         let jitter = rand::thread_rng().gen_range(0, msg_timeout / 4);
@@ -414,6 +416,7 @@ impl CrdsGossipPull {
         //skip filters from callers that are too old
         let future = now.saturating_add(msg_timeout);
         let past = now.saturating_sub(msg_timeout);
+        // info!("# filters: {}", filters.len());
         let recent: Vec<_> = filters
             .iter()
             .enumerate()
@@ -423,6 +426,7 @@ impl CrdsGossipPull {
             "gossip_filter_crds_values-dropped_requests",
             start - recent.len()
         );
+        // info!("# recent: {}", recent.len());
         if recent.is_empty() {
             return ret;
         }
@@ -454,6 +458,8 @@ impl CrdsGossipPull {
                 });
         }
         inc_new_counter_info!("gossip_filter_crds_values-dropped_values", total_skipped);
+        time.stop();
+        info!("filter-crds-values: {}", time);
         ret
     }
     pub fn make_timeouts_def(
