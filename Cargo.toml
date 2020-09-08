@@ -70,3 +70,8 @@ members = [
 exclude = [
     "programs/bpf",
 ]
+
+
+[profile.bench]
+debug = true
+

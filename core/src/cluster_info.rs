@@ -343,7 +343,8 @@ impl Signable for PruneData {
     }
 }
 
-struct PullData {
+#[derive(Clone)]
+pub struct PullData {
     pub from_addr: SocketAddr,
     pub caller: CrdsValue,
     pub filter: CrdsFilter,
@@ -1761,7 +1762,7 @@ impl ClusterInfo {
 
     // Pull requests take an incoming bloom filter of contained entries from a node
     // and tries to send back to them the values it detects are missing.
-    fn handle_pull_requests(
+    pub fn handle_pull_requests(
         &self,
         recycler: &PacketsRecycler,
         requests: Vec<PullData>,
@@ -1788,6 +1789,11 @@ impl ClusterInfo {
 
         self.time_gossip_write_lock("process_pull_reqs", &self.stats.process_pull_requests)
             .process_pull_requests(caller_and_filters, now);
+
+        assert_eq!(pull_responses.len(), 100);
+        for resp in &pull_responses {
+            assert_eq!(resp.len(), 0);
+        }
 
         // Filter bad to addresses
         let pull_responses: Vec<_> = pull_responses

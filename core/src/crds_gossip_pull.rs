@@ -16,6 +16,7 @@ use crate::crds_gossip_error::CrdsGossipError;
 use crate::crds_value::{CrdsValue, CrdsValueLabel};
 use rand::distributions::{Distribution, WeightedIndex};
 use rand::Rng;
+use solana_measure::measure::Measure;
 use solana_runtime::bloom::Bloom;
 use solana_sdk::hash::Hash;
 use solana_sdk::pubkey::Pubkey;
@@ -418,6 +419,7 @@ impl CrdsGossipPull {
         filters: &[(CrdsValue, CrdsFilter)],
         now: u64,
     ) -> Vec<Vec<CrdsValue>> {
+        let mut time = Measure::start("filter_crds_values");
         let mut ret = vec![vec![]; filters.len()];
         let msg_timeout = CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS;
         let jitter = rand::thread_rng().gen_range(0, msg_timeout / 4);
@@ -425,6 +427,7 @@ impl CrdsGossipPull {
         //skip filters from callers that are too old
         let future = now.saturating_add(msg_timeout);
         let past = now.saturating_sub(msg_timeout);
+        // info!("# filters: {}", filters.len());
         let recent: Vec<_> = filters
             .iter()
             .enumerate()
@@ -434,14 +437,18 @@ impl CrdsGossipPull {
             "gossip_filter_crds_values-dropped_requests",
             start - recent.len()
         );
+        // info!("# recent: {}", recent.len());
         if recent.is_empty() {
             return ret;
         }
         let mut total_skipped = 0;
+        let mut total_hits = 0;
+        let mut total_pushed = 0;
         let mask_ones: Vec<_> = recent
             .iter()
             .map(|(_i, (_caller, filter))| (!0u64).checked_shr(filter.mask_bits).unwrap_or(!0u64))
             .collect();
+        // info!("# crds.masks: {}", crds.masks.len());
         for (label, mask) in crds.masks.iter() {
             recent
                 .iter()
@@ -450,6 +457,7 @@ impl CrdsGossipPull {
                     if filter.test_mask_u64(*mask, *mask_ones) {
                         let item = crds.table.get(label).unwrap();
 
+                        total_hits += 1;
                         //skip values that are too new
                         if item.value.wallclock()
                             > caller.wallclock().checked_add(jitter).unwrap_or_else(|| 0)
@@ -460,11 +468,17 @@ impl CrdsGossipPull {
 
                         if !filter.filter_contains(&item.value_hash) {
                             ret[*i].push(item.value.clone());
+                            total_pushed += 1;
                         }
                     }
                 });
         }
         inc_new_counter_info!("gossip_filter_crds_values-dropped_values", total_skipped);
+        time.stop();
+        info!("filter-crds-values: {}", time);
+        info!("total hits: {}", total_hits);
+        info!("total skipped: {}", total_skipped);
+        info!("total pushed: {}", total_pushed);
         ret
     }
     pub fn make_timeouts_def(
