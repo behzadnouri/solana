@@ -905,6 +905,29 @@ mod test {
     }
 
     #[test]
+    fn test_mask_bits() {
+        let bloom_size = MAX_BLOOM_SIZE;
+        let mut prev = u32::MAX;
+        for k in (0..1024).step_by(1) {
+            let num_values = k * 1000;
+            let num = cmp::max(CRDS_GOSSIP_DEFAULT_BLOOM_ITEMS, num_values);
+            let filters: Vec<_> = CrdsFilterSet::new(num, bloom_size).into();
+            if filters[0].mask_bits == prev {
+                continue;
+            }
+            prev = filters[0].mask_bits;
+            println!(
+                "{}k, # filters: {}, mask_bits: {}, # keys: {}, # bits: {}",
+                k,
+                filters.len(),
+                filters[0].mask_bits,
+                filters[0].filter.keys.len(),
+                filters[0].filter.bits.len(),
+            );
+        }
+    }
+
+    #[test]
     fn test_new_pull_request() {
         let thread_pool = ThreadPoolBuilder::new().build().unwrap();
         let mut crds = Crds::default();
