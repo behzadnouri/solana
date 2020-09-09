@@ -999,6 +999,50 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn test_mask_bits() {
+        let max_bits = (MAX_BLOOM_SIZE * 8) as f64;
+        let max_items = CrdsFilter::max_items(max_bits, FALSE_RATE, KEYS);
+        for k in 0..15 {
+            for offset in [1] {
+                let num_items = max_items * (1u64 << k) as f64;
+                let num_items = num_items + offset as f64;
+                let mask_bits = CrdsFilter::mask_bits(num_items as f64, max_items);
+                println!(
+                    "num_items: {num_items:8}, \
+                          mask_bits: {mask_bits:2}, \
+                          num filters: {:5}",
+                    1usize << mask_bits
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn test_mask_bits_old() {
+        const MIN_NUM_BLOOM_ITEMS: usize = 65_536;
+        let bloom_size = MAX_BLOOM_SIZE;
+        let mut prev = u32::MAX;
+        for k in (0..4096).step_by(1) {
+            let num_values = k * 1000;
+            let num = MIN_NUM_BLOOM_ITEMS.max(num_values);
+            let filters: Vec<_> = CrdsFilterSet::new(num, bloom_size).into();
+            if filters[0].mask_bits == prev {
+                continue;
+            }
+            prev = filters[0].mask_bits;
+            println!(
+                "{}k, # filters: {}, mask_bits: {}, # keys: {}, # bits: {}",
+                k,
+                filters.len(),
+                filters[0].mask_bits,
+                filters[0].filter.keys.len(),
+                filters[0].filter.bits.len(),
+            );
+        }
+    }
+
+    #[test]
     fn test_new_pull_request() {
         let thread_pool = ThreadPoolBuilder::new().build().unwrap();
         let crds = RwLock::<Crds>::default();
