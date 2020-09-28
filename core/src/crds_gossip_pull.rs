@@ -508,20 +508,12 @@ impl CrdsGossipPull {
         now: u64,
         timeouts: &HashMap<Pubkey, u64>,
     ) -> usize {
-        let old = crds.find_old_labels(now, timeouts);
-        let mut purged: VecDeque<_> = old
-            .iter()
-            .filter_map(|label| {
-                let rv = crds
-                    .lookup_versioned(label)
-                    .map(|val| (val.value_hash, val.local_timestamp));
-                crds.remove(label);
-                rv
-            })
-            .collect();
-        let ret = purged.len();
-        self.purged_values.append(&mut purged);
-        ret
+        let size = self.purged_values.len();
+        self.purged_values.extend(
+            crds.drain_old_values(now, timeouts)
+                .map(|(_, v)| (v.value_hash, v.local_timestamp)),
+        );
+        self.purged_values.len() - size
     }
     /// Purge values from the `self.purged_values` queue that are older then purge_timeout
     pub fn purge_purged(&mut self, min_ts: u64) {
