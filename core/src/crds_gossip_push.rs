@@ -36,6 +36,8 @@ pub const CRDS_GOSSIP_PUSH_MSG_TIMEOUT_MS: u64 = 30000;
 pub const CRDS_GOSSIP_PRUNE_MSG_TIMEOUT_MS: u64 = 500;
 pub const CRDS_GOSSIP_PRUNE_STAKE_THRESHOLD_PCT: f64 = 0.15;
 pub const CRDS_GOSSIP_PRUNE_MIN_INGRESS_NODES: usize = 2;
+// Do not push to active-set peers which have not been updated for this long.
+const ACTIVE_SET_PUSH_TIMEOUT_MS: u64 = 60_000;
 
 #[derive(Clone)]
 pub struct CrdsGossipPush {
@@ -212,6 +214,16 @@ impl CrdsGossipPush {
         let mut total_bytes: usize = 0;
         let mut values = vec![];
         let mut push_messages: HashMap<Pubkey, Vec<CrdsValue>> = HashMap::new();
+        // Only push to active set peers which have been updated recently.
+        let active_set_cutoff = now.saturating_sub(ACTIVE_SET_PUSH_TIMEOUT_MS);
+        let active_set: Vec<_> = self
+            .active_set
+            .iter()
+            .filter(|(&pubkey, _)| {
+                let peer = crds.lookup_versioned(&CrdsValueLabel::ContactInfo(pubkey));
+                matches!(peer, Some(peer) if active_set_cutoff < peer.local_timestamp)
+            })
+            .collect();
         trace!("new_push_messages {}", self.push_messages.len());
         for (label, hash) in &self.push_messages {
             let res = crds.lookup_versioned(label);
@@ -241,15 +253,13 @@ impl CrdsGossipPush {
             //use a consistent index for the same origin so
             //the active set learns the MST for that origin
             let start = v.label().pubkey().as_ref()[0] as usize;
-            let max = self.push_fanout.min(self.active_set.len());
+            let max = self.push_fanout.min(active_set.len());
             for i in start..(start + max) {
-                let ix = i % self.active_set.len();
-                if let Some((p, filter)) = self.active_set.get_index(ix) {
-                    if !filter.contains(&v.label().pubkey()) {
-                        trace!("new_push_messages insert {} {:?}", *p, v);
-                        push_messages.entry(*p).or_default().push(v.clone());
-                        self.num_pushes += 1;
-                    }
+                let (p, filter) = active_set[i % active_set.len()];
+                if !filter.contains(&v.label().pubkey()) {
+                    trace!("new_push_messages insert {} {:?}", *p, v);
+                    push_messages.entry(*p).or_default().push(v.clone());
+                    self.num_pushes += 1;
                 }
                 self.push_messages.remove(&v.label());
             }
