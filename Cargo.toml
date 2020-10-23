@@ -76,3 +76,6 @@ members = [
 exclude = [
     "programs/bpf",
 ]
+
+[profile.release]
+debug = true
