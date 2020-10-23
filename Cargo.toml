@@ -691,3 +691,17 @@ opt-level = 3
 [patch.crates-io.tokio]
 git = "https://github.com/anza-xyz/solana-tokio.git"
 rev = "7cf47705faacf7bf0e43e4131a5377b3291fce21"
+
+# https://doc.rust-lang.org/cargo/reference/profiles.html
+[profile.release]
+debug = true
+strip = false
+# rustflags = "-C force-frame-pointers=yes"
+
+[profile.release.package."*"]
+debug = true
+strip = false
+
+[profile.release.build-override]
+debug = true
+strip = false
