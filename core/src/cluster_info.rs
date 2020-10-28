@@ -1822,6 +1822,7 @@ impl ClusterInfo {
         for (from_addr, packet) in packets {
             match packet {
                 Protocol::PullRequest(filter, caller) => {
+                    info!("handle_packets: PullRequest");
                     let start = allocated.get();
                     if let Some(contact_info) = caller.contact_info() {
                         if contact_info.id == self.id() {
@@ -1846,6 +1847,7 @@ impl ClusterInfo {
                     );
                 }
                 Protocol::PullResponse(from, data) => {
+                    info!("handle_packets: PullResponse");
                     let start = allocated.get();
                     let pull_entry = pull_responses.entry(from).or_insert_with(Vec::new);
                     pull_entry.extend(data);
@@ -1855,6 +1857,7 @@ impl ClusterInfo {
                     );
                 }
                 Protocol::PushMessage(from, data) => {
+                    info!("handle_packets: PullPushMessage");
                     let start = allocated.get();
                     let rsp = self.handle_push_message(recycler, &from, data, stakes);
                     if let Some(rsp) = rsp {
@@ -1866,6 +1869,7 @@ impl ClusterInfo {
                     );
                 }
                 Protocol::PruneMessage(from, data) => {
+                    info!("handle_packets: PruneMessage");
                     let start = allocated.get();
                     self.stats.prune_message_count.add_relaxed(1);
                     self.stats
@@ -1893,8 +1897,14 @@ impl ClusterInfo {
                         ("prune_message", (allocated.get() - start) as i64, i64),
                     );
                 }
-                Protocol::PingMessage(ping) => ping_messages.push((ping, from_addr)),
-                Protocol::PongMessage(pong) => pong_messages.push((pong, from_addr)),
+                Protocol::PingMessage(ping) => {
+                    info!("handle_packets: PingMessage");
+                    ping_messages.push((ping, from_addr));
+                }
+                Protocol::PongMessage(pong) => {
+                    info!("handle_packets: PongMessage");
+                    pong_messages.push((pong, from_addr));
+                }
             }
         }
 
@@ -2321,8 +2331,12 @@ impl ClusterInfo {
                 .into_par_iter()
                 .flat_map(|request| request.packets.into_par_iter())
                 .filter_map(|packet| {
-                    let protocol: Protocol =
-                        limited_deserialize(&packet.data[..packet.meta.size]).ok()?;
+                    let protocol: bincode::Result<Protocol> =
+                        limited_deserialize(&packet.data[..packet.meta.size]);
+                    if protocol.is_err() {
+                        error!("limited_deserialize failed");
+                    }
+                    let protocol = protocol.ok()?;
                     protocol.sanitize().ok()?;
                     let protocol = protocol.par_verify()?;
                     Some((packet.meta.addr(), protocol))
