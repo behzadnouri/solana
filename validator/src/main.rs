@@ -163,6 +163,7 @@ fn get_rpc_node(
             if let Some(entrypoint) =
                 cluster_info.lookup_contact_info_by_gossip_addr(entrypoint_gossip)
             {
+                info!("entry point found!");
                 if entrypoint.shred_version == 0 {
                     eprintln!(
                         "Entrypoint shred version is zero.  Restart with --expected-shred-version"
@@ -170,6 +171,10 @@ fn get_rpc_node(
                     exit(1);
                 }
             }
+            info!(
+                "# of crds: {}",
+                cluster_info.gossip.read().unwrap().crds.table.len()
+            );
             info!(
                 "Waiting to adopt entrypoint shred version, contact info for {:?} not found...",
                 entrypoint_gossip

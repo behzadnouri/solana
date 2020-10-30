@@ -1470,6 +1470,7 @@ impl ClusterInfo {
                                     .map(|ci| ci.gossip == entrypoint.gossip)
                                     .unwrap_or(false)
                             });
+                        info!("found entrypoint: {}", found_entrypoint);
                         !found_entrypoint
                     }
                 }
@@ -1478,6 +1479,7 @@ impl ClusterInfo {
             }
         };
 
+        info!("pull_from_entrypoint: {}", pull_from_entrypoint);
         if pull_from_entrypoint {
             let id_and_gossip = {
                 self.entrypoint
@@ -1486,6 +1488,7 @@ impl ClusterInfo {
                     .as_ref()
                     .map(|e| (e.id, e.gossip))
             };
+            info!("entrypoint id & gossip: {:?}", id_and_gossip);
             if let Some((id, gossip)) = id_and_gossip {
                 let r_gossip = self.time_gossip_read_lock("entrypoint", &self.stats.entrypoint2);
                 let self_info = r_gossip
@@ -1935,6 +1938,9 @@ impl ClusterInfo {
     {
         let check_enabled = matches!(feature_set, Some(feature_set) if
             feature_set.is_active(&feature_set::pull_request_ping_pong_check::id()));
+        if check_enabled {
+            error!("ping/pong check is enabled!");
+        }
         let mut cache = HashMap::<(Pubkey, SocketAddr), bool>::new();
         let mut pingf = move || Ping::new_rand(&mut rng, &self.keypair).ok();
         let mut ping_cache = self.ping_cache.write().unwrap();
@@ -1949,6 +1955,9 @@ impl ClusterInfo {
                 self.stats
                     .pull_request_ping_pong_check_failed_count
                     .add_relaxed(1)
+            }
+            if check {
+                info!("ping/pong check passed!");
             }
             check || !check_enabled
         };
@@ -2428,6 +2437,12 @@ impl ClusterInfo {
                 Protocol::PongMessage(pong) => pong_messages.push((from_addr, pong)),
             }
         }
+        info!("pull requests: {}", pull_requests.len());
+        info!("pull responses: {}", pull_responses.len());
+        info!("push messages: {}", push_messages.len());
+        info!("prune messages: {}", prune_messages.len());
+        info!("ping messages: {}", ping_messages.len());
+        info!("pong messages: {}", pong_messages.len());
         self.handle_batch_ping_messages(ping_messages, recycler, response_sender);
         self.handle_batch_prune_messages(prune_messages);
         self.handle_batch_push_messages(push_messages, recycler, &stakes, response_sender);
