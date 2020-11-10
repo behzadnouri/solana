@@ -436,7 +436,7 @@ enum Protocol {
 }
 
 impl Protocol {
-    fn par_verify(self) -> Option<Self> {
+    fn verify(self) -> Option<Self> {
         match self {
             Protocol::PullRequest(_, ref caller) => {
                 if caller.verify() {
@@ -448,7 +448,7 @@ impl Protocol {
             }
             Protocol::PullResponse(from, data) => {
                 let size = data.len();
-                let data: Vec<_> = data.into_par_iter().filter(Signable::verify).collect();
+                let data: Vec<_> = data.into_iter().filter(Signable::verify).collect();
                 if size != data.len() {
                     inc_new_counter_info!(
                         "cluster_info-gossip_pull_response_verify_fail",
@@ -463,7 +463,7 @@ impl Protocol {
             }
             Protocol::PushMessage(from, data) => {
                 let size = data.len();
-                let data: Vec<_> = data.into_par_iter().filter(Signable::verify).collect();
+                let data: Vec<_> = data.into_iter().filter(Signable::verify).collect();
                 if size != data.len() {
                     inc_new_counter_info!(
                         "cluster_info-gossip_push_msg_verify_fail",
@@ -1915,29 +1915,26 @@ impl ClusterInfo {
             requests
                 .into_par_iter()
                 .with_min_len(1024)
-                .filter(|(_, _, caller)| match caller.contact_info() {
-                    None => false,
+                .filter_map(|(from_addr, filter, caller)| match caller.contact_info() {
+                    None => None,
                     Some(caller) if caller.id == self_pubkey => {
                         warn!("PullRequest ignored, I'm talking to myself");
                         inc_new_counter_debug!("cluster_info-window-request-loopback", 1);
-                        false
+                        None
                     }
-                    Some(caller) => {
+                    Some(caller)
                         if self_shred_version != 0
                             && caller.shred_version != 0
-                            && caller.shred_version != self_shred_version
-                        {
-                            self.stats.skip_pull_shred_version.add_relaxed(1);
-                            false
-                        } else {
-                            true
-                        }
+                            && caller.shred_version != self_shred_version =>
+                    {
+                        self.stats.skip_pull_shred_version.add_relaxed(1);
+                        None
                     }
-                })
-                .map(|(from_addr, filter, caller)| PullData {
-                    from_addr,
-                    caller,
-                    filter,
+                    _ => Some(PullData {
+                        from_addr,
+                        caller,
+                        filter,
+                    }),
                 })
                 .collect()
         });
@@ -2499,7 +2496,7 @@ impl ClusterInfo {
                     let protocol: Protocol =
                         limited_deserialize(&packet.data[..packet.meta.size]).ok()?;
                     protocol.sanitize().ok()?;
-                    let protocol = protocol.par_verify()?;
+                    let protocol = protocol.verify()?;
                     Some((packet.meta.addr(), protocol))
                 })
                 .collect()
