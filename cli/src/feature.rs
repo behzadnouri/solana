@@ -277,7 +277,7 @@ fn feature_activation_allowed(rpc_client: &RpcClient, quiet: bool) -> Result<boo
         println!();
     }
 
-    Ok(feature_activation_allowed)
+    Ok(true) // feature_activation_allowed)
 }
 
 fn process_status(
