@@ -75,7 +75,7 @@ pub fn to_packets<T: Serialize>(xs: &[T]) -> Vec<Packets> {
     to_packets_chunked(xs, NUM_PACKETS)
 }
 
-pub fn to_packets_with_destination<T: Serialize>(
+pub fn to_packets_with_destination<T: Serialize + std::fmt::Debug>(
     recycler: PacketsRecycler,
     dests_and_data: &[(SocketAddr, T)],
 ) -> Packets {
@@ -88,7 +88,10 @@ pub fn to_packets_with_destination<T: Serialize>(
     for (dest_and_data, o) in dests_and_data.iter().zip(out.packets.iter_mut()) {
         if !dest_and_data.0.ip().is_unspecified() && dest_and_data.0.port() != 0 {
             if let Err(e) = Packet::populate_packet(o, Some(&dest_and_data.0), &dest_and_data.1) {
-                error!("Couldn't write to packet {:?}. Data skipped.", e);
+                error!(
+                    "Couldn't write to packet {:?} {:?}. Data skipped.",
+                    e, dest_and_data.1
+                );
             }
         } else {
             trace!("Dropping packet, as destination is unknown");
