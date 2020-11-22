@@ -13,6 +13,7 @@
 //!
 //! Bank needs to provide an interface for us to query the stake weight
 use crate::{
+    chunks,
     contact_info::ContactInfo,
     crds_gossip::CrdsGossip,
     crds_gossip_error::CrdsGossipError,
@@ -33,12 +34,11 @@ use rand::{CryptoRng, Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
 use solana_sdk::sanitize::{Sanitize, SanitizeError};
 
-use bincode::{serialize, serialized_size};
+use bincode::serialize;
 use core::cmp;
 use itertools::Itertools;
 use rayon::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
-use serde::ser::Serialize;
 use solana_ledger::staking_utils;
 use solana_measure::measure::Measure;
 use solana_measure::thread_mem_usage;
@@ -1534,56 +1534,6 @@ impl ClusterInfo {
         }
     }
 
-    /// Splits an input feed of serializable data into chunks where the sum of
-    /// serialized size of values within each chunk is no larger than
-    /// max_chunk_size.
-    /// Note: some messages cannot be contained within that size so in the worst case this returns
-    /// N nested Vecs with 1 item each.
-    fn split_gossip_messages<I, T>(
-        max_chunk_size: usize,
-        data_feed: I,
-    ) -> impl Iterator<Item = Vec<T>>
-    where
-        T: Serialize + Debug,
-        I: IntoIterator<Item = T>,
-    {
-        let mut data_feed = data_feed.into_iter().fuse();
-        let mut buffer = vec![];
-        let mut buffer_size = 0; // Serialized size of buffered values.
-        std::iter::from_fn(move || loop {
-            match data_feed.next() {
-                None => {
-                    return if buffer.is_empty() {
-                        None
-                    } else {
-                        Some(std::mem::take(&mut buffer))
-                    };
-                }
-                Some(data) => {
-                    let data_size = match serialized_size(&data) {
-                        Ok(size) => size as usize,
-                        Err(err) => {
-                            error!("serialized_size failed: {}", err);
-                            continue;
-                        }
-                    };
-                    if buffer_size + data_size <= max_chunk_size {
-                        buffer_size += data_size;
-                        buffer.push(data);
-                    } else if data_size <= max_chunk_size {
-                        buffer_size = data_size;
-                        return Some(std::mem::replace(&mut buffer, vec![data]));
-                    } else {
-                        error!(
-                            "dropping data larger than the maximum chunk size {:?}",
-                            data
-                        );
-                    }
-                }
-            }
-        })
-    }
-
     fn new_pull_requests(
         &self,
         thread_pool: &ThreadPool,
@@ -1663,7 +1613,7 @@ impl ClusterInfo {
         let messages: Vec<_> = push_messages
             .into_iter()
             .flat_map(|(peer, msgs)| {
-                Self::split_gossip_messages(PUSH_MESSAGE_MAX_PAYLOAD_SIZE, msgs)
+                chunks::split(msgs, PUSH_MESSAGE_MAX_PAYLOAD_SIZE)
                     .map(move |payload| (peer, Protocol::PushMessage(self_id, payload)))
             })
             .collect();
@@ -3135,12 +3085,13 @@ pub fn stake_weight_peers<S: std::hash::BuildHasher>(
 mod tests {
     use super::*;
     use crate::crds_value::{CrdsValue, CrdsValueLabel, Vote as CrdsVote};
+    use bincode::serialized_size;
     use itertools::izip;
     use solana_perf::test_tx::test_tx;
     use solana_sdk::signature::{Keypair, Signer};
     use solana_vote_program::{vote_instruction, vote_state::Vote};
     use std::collections::HashSet;
-    use std::iter::repeat_with;
+    use std::iter::{repeat_with, FromIterator};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4};
     use std::sync::Arc;
 
@@ -3880,18 +3831,18 @@ mod tests {
         let values: Vec<_> = std::iter::repeat_with(|| CrdsValue::new_rand(&mut rng, None))
             .take(NUM_CRDS_VALUES)
             .collect();
-        let splits: Vec<_> =
-            ClusterInfo::split_gossip_messages(PUSH_MESSAGE_MAX_PAYLOAD_SIZE, values.clone())
-                .collect();
+        let splits: Vec<_> = chunks::split(values.clone(), PUSH_MESSAGE_MAX_PAYLOAD_SIZE).collect();
         let self_pubkey = solana_sdk::pubkey::new_rand();
         assert!(splits.len() * 3 < NUM_CRDS_VALUES);
         // Assert that all messages are included in the splits.
         assert_eq!(NUM_CRDS_VALUES, splits.iter().map(Vec::len).sum::<usize>());
-        splits
-            .iter()
-            .flat_map(|s| s.iter())
-            .zip(values)
-            .for_each(|(a, b)| assert_eq!(*a, b));
+        let mut values = HashMap::<_, _>::from_iter(values.into_iter().map(|v| (v.label(), v)));
+        for chunk in &splits {
+            for value in chunk {
+                assert_eq!(*value, values.remove(&value.label()).unwrap());
+            }
+        }
+        assert!(values.is_empty());
         let socket = SocketAddr::V4(SocketAddrV4::new(
             Ipv4Addr::new(rng.gen(), rng.gen(), rng.gen(), rng.gen()),
             rng.gen(),
@@ -3930,9 +3881,7 @@ mod tests {
             });
             i += 1;
         }
-        let split: Vec<_> =
-            ClusterInfo::split_gossip_messages(PUSH_MESSAGE_MAX_PAYLOAD_SIZE, vec![value])
-                .collect();
+        let split: Vec<_> = chunks::split(vec![value], PUSH_MESSAGE_MAX_PAYLOAD_SIZE).collect();
         assert_eq!(split.len(), 0);
     }
 
@@ -3945,8 +3894,7 @@ mod tests {
         let expected_len = (NUM_VALUES + num_values_per_payload - 1) / num_values_per_payload;
         let msgs = vec![value; NUM_VALUES as usize];
 
-        let split: Vec<_> =
-            ClusterInfo::split_gossip_messages(PUSH_MESSAGE_MAX_PAYLOAD_SIZE, msgs).collect();
+        let split: Vec<_> = chunks::split(msgs, PUSH_MESSAGE_MAX_PAYLOAD_SIZE).collect();
         assert!(split.len() as u64 <= expected_len);
     }
 
