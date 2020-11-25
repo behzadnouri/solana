@@ -25,6 +25,7 @@ use crate::{
 use byteorder::{ByteOrder, LittleEndian};
 use itertools::Itertools;
 use log::*;
+use rand::Rng;
 use solana_measure::measure::Measure;
 use solana_metrics::{datapoint_debug, inc_new_counter_debug, inc_new_counter_info};
 use solana_sdk::{
@@ -3988,7 +3989,11 @@ impl Bank {
     /// current vote accounts for this bank along with the stake
     ///   attributed to each account
     pub fn vote_accounts(&self) -> HashMap<Pubkey, (u64, Account)> {
-        self.stakes.read().unwrap().vote_accounts().clone()
+        let out = self.stakes.read().unwrap().vote_accounts().clone();
+        if rand::thread_rng().gen_ratio(1, 1000) {
+            info!("bank.vote_accounts().len(): {}", out.len());
+        }
+        out
     }
 
     /// Get the EpochStakes for a given epoch
