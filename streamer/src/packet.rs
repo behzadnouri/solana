@@ -1,5 +1,5 @@
 //! The `packet` module defines data structures and methods to pull data from the network.
-use crate::recvmmsg::{recv_mmsg, NUM_RCVMMSGS};
+use crate::recvmmsg::{self, NUM_RCVMMSGS};
 pub use solana_perf::packet::{
     limited_deserialize, to_packets, to_packets_chunked, Packets, PacketsRecycler, NUM_PACKETS,
     PACKETS_BATCH_SIZE, PACKETS_PER_BATCH,
@@ -9,7 +9,11 @@ use solana_metrics::inc_new_counter_debug;
 pub use solana_sdk::packet::{Meta, Packet, PACKET_DATA_SIZE};
 use std::{io::Result, net::UdpSocket, time::Instant};
 
-pub fn recv_from(obj: &mut Packets, socket: &UdpSocket, max_wait_ms: usize) -> Result<usize> {
+pub fn recv_from(
+    obj: &mut Packets,
+    socket: &mut recvmmsg::UdpSocket,
+    max_wait_ms: usize,
+) -> Result<usize> {
     let mut i = 0;
     //DOCUMENTED SIDE-EFFECT
     //Performance out of the IO without poll
@@ -21,11 +25,13 @@ pub fn recv_from(obj: &mut Packets, socket: &UdpSocket, max_wait_ms: usize) -> R
     trace!("receiving on {}", socket.local_addr().unwrap());
     let start = Instant::now();
     loop {
+        // XXX This is taking chunk of time.
+        // tds_1606745230_script_report/36623_solana-receiver.svg
         obj.packets.resize(
             std::cmp::min(i + NUM_RCVMMSGS, PACKETS_PER_BATCH),
             Packet::default(),
         );
-        match recv_mmsg(socket, &mut obj.packets[i..]) {
+        match socket.recv_mmsg(&mut obj.packets[i..]) {
             Err(_) if i > 0 => {
                 if start.elapsed().as_millis() > 1 {
                     break;
@@ -49,6 +55,7 @@ pub fn recv_from(obj: &mut Packets, socket: &UdpSocket, max_wait_ms: usize) -> R
             }
         }
     }
+    // XXX Truncated here!
     obj.packets.truncate(i);
     inc_new_counter_debug!("packets-recv_count", i);
     Ok(i)
@@ -96,7 +103,8 @@ mod tests {
         }
         send_to(&p, &send_socket).unwrap();
 
-        let recvd = recv_from(&mut p, &recv_socket, 1).unwrap();
+        let mut recv_socket = recvmmsg::UdpSocket::from(&recv_socket);
+        let recvd = recv_from(&mut p, &mut recv_socket, 1).unwrap();
 
         assert_eq!(recvd, p.packets.len());
 
@@ -149,8 +157,8 @@ mod tests {
             }
             send_to(&p, &send_socket).unwrap();
         }
-
-        let recvd = recv_from(&mut p, &recv_socket, 100).unwrap();
+        let mut recv_socket = recvmmsg::UdpSocket::from(&recv_socket);
+        let recvd = recv_from(&mut p, &mut recv_socket, 100).unwrap();
 
         // Check we only got PACKETS_PER_BATCH packets
         assert_eq!(recvd, PACKETS_PER_BATCH);

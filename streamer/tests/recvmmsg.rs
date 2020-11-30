@@ -2,7 +2,7 @@
 
 use solana_streamer::packet::Packet;
 use solana_streamer::packet::PACKET_DATA_SIZE;
-use solana_streamer::recvmmsg::*;
+use solana_streamer::recvmmsg;
 use std::net::UdpSocket;
 use std::time::Instant;
 
@@ -16,6 +16,7 @@ pub fn test_recv_mmsg_batch_size() {
     let sent = TEST_BATCH_SIZE;
 
     let mut elapsed_in_max_batch = 0;
+    let mut reader = recvmmsg::UdpSocket::from(&reader);
     (0..1000).for_each(|_| {
         for _ in 0..sent {
             let data = [0; PACKET_DATA_SIZE];
@@ -23,7 +24,7 @@ pub fn test_recv_mmsg_batch_size() {
         }
         let mut packets = vec![Packet::default(); TEST_BATCH_SIZE];
         let now = Instant::now();
-        let recv = recv_mmsg(&reader, &mut packets[..]).unwrap().1;
+        let recv = reader.recv_mmsg(&mut packets[..]).unwrap().1;
         elapsed_in_max_batch += now.elapsed().as_nanos();
         assert_eq!(TEST_BATCH_SIZE, recv);
     });
@@ -37,7 +38,7 @@ pub fn test_recv_mmsg_batch_size() {
         let mut packets = vec![Packet::default(); 4];
         let mut recv = 0;
         let now = Instant::now();
-        while let Ok(num) = recv_mmsg(&reader, &mut packets[..]) {
+        while let Ok(num) = reader.recv_mmsg(&mut packets[..]) {
             recv += num.1;
             if recv >= TEST_BATCH_SIZE {
                 break;

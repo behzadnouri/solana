@@ -2,7 +2,7 @@
 //!
 
 use crate::packet::{self, send_to, Packets, PacketsRecycler, PACKETS_PER_BATCH};
-use crate::recvmmsg::NUM_RCVMMSGS;
+use crate::recvmmsg::{self, NUM_RCVMMSGS};
 use solana_measure::thread_mem_usage;
 use solana_sdk::timing::{duration_as_ms, timestamp};
 use std::net::UdpSocket;
@@ -41,7 +41,9 @@ fn recv_loop(
     let mut call_count = 0;
     let mut now = Instant::now();
     let mut num_max_received = 0; // Number of times maximum packets were received
+    let mut sock = recvmmsg::UdpSocket::from(sock);
     loop {
+        // XXX Already allocated here.
         let mut msgs = Packets::new_with_recycler(recycler.clone(), PACKETS_PER_BATCH, name);
         loop {
             // Check for exit signal, even if socket is busy
@@ -49,7 +51,7 @@ fn recv_loop(
             if exit.load(Ordering::Relaxed) {
                 return Ok(());
             }
-            if let Ok(len) = packet::recv_from(&mut msgs, sock, 1) {
+            if let Ok(len) = packet::recv_from(&mut msgs, &mut sock, 1) {
                 if len == NUM_RCVMMSGS {
                     num_max_received += 1;
                 }

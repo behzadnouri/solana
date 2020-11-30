@@ -149,7 +149,7 @@ pub fn multicast(sock: &UdpSocket, packet: &mut [u8], dests: &[&SocketAddr]) -> 
 #[cfg(test)]
 mod tests {
     use crate::packet::Packet;
-    use crate::recvmmsg::recv_mmsg;
+    use crate::recvmmsg;
     use crate::sendmmsg::{multicast, send_mmsg};
     use solana_sdk::packet::PACKET_DATA_SIZE;
     use std::net::UdpSocket;
@@ -167,7 +167,8 @@ mod tests {
         assert_eq!(sent, Some(32));
 
         let mut packets = vec![Packet::default(); 32];
-        let recv = recv_mmsg(&reader, &mut packets[..]).unwrap().1;
+        let mut reader = recvmmsg::UdpSocket::from(&reader);
+        let recv = reader.recv_mmsg(&mut packets[..]).unwrap().1;
         assert_eq!(32, recv);
     }
 
@@ -192,11 +193,13 @@ mod tests {
         assert_eq!(sent, Some(32));
 
         let mut packets = vec![Packet::default(); 32];
-        let recv = recv_mmsg(&reader, &mut packets[..]).unwrap().1;
+        let mut reader = recvmmsg::UdpSocket::from(&reader);
+        let recv = reader.recv_mmsg(&mut packets[..]).unwrap().1;
         assert_eq!(16, recv);
 
         let mut packets = vec![Packet::default(); 32];
-        let recv = recv_mmsg(&reader2, &mut packets[..]).unwrap().1;
+        let mut reader2 = recvmmsg::UdpSocket::from(&reader2);
+        let recv = reader2.recv_mmsg(&mut packets[..]).unwrap().1;
         assert_eq!(16, recv);
     }
 
@@ -227,19 +230,23 @@ mod tests {
         assert_eq!(sent, Some(4));
 
         let mut packets = vec![Packet::default(); 32];
-        let recv = recv_mmsg(&reader, &mut packets[..]).unwrap().1;
+        let mut reader = recvmmsg::UdpSocket::from(&reader);
+        let recv = reader.recv_mmsg(&mut packets[..]).unwrap().1;
         assert_eq!(1, recv);
 
         let mut packets = vec![Packet::default(); 32];
-        let recv = recv_mmsg(&reader2, &mut packets[..]).unwrap().1;
+        let mut reader2 = recvmmsg::UdpSocket::from(&reader2);
+        let recv = reader2.recv_mmsg(&mut packets[..]).unwrap().1;
         assert_eq!(1, recv);
 
         let mut packets = vec![Packet::default(); 32];
-        let recv = recv_mmsg(&reader3, &mut packets[..]).unwrap().1;
+        let mut reader3 = recvmmsg::UdpSocket::from(&reader3);
+        let recv = reader3.recv_mmsg(&mut packets[..]).unwrap().1;
         assert_eq!(1, recv);
 
         let mut packets = vec![Packet::default(); 32];
-        let recv = recv_mmsg(&reader4, &mut packets[..]).unwrap().1;
+        let mut reader4 = recvmmsg::UdpSocket::from(&reader4);
+        let recv = reader4.recv_mmsg(&mut packets[..]).unwrap().1;
         assert_eq!(1, recv);
     }
 }

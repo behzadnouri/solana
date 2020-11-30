@@ -569,7 +569,8 @@ mod tests {
         // it should send this over the sockets.
         retransmit_sender.send(packets).unwrap();
         let mut packets = Packets::new(vec![]);
-        solana_streamer::packet::recv_from(&mut packets, &me_retransmit, 1).unwrap();
+        let mut me_retransmit = (&me_retransmit).into();
+        solana_streamer::packet::recv_from(&mut packets, &mut me_retransmit, 1).unwrap();
         assert_eq!(packets.packets.len(), 1);
         assert_eq!(packets.packets[0].meta.repair, false);
 
@@ -585,7 +586,7 @@ mod tests {
         let packets = Packets::new(vec![repair, Packet::default()]);
         retransmit_sender.send(packets).unwrap();
         let mut packets = Packets::new(vec![]);
-        solana_streamer::packet::recv_from(&mut packets, &me_retransmit, 1).unwrap();
+        solana_streamer::packet::recv_from(&mut packets, &mut me_retransmit, 1).unwrap();
         assert_eq!(packets.packets.len(), 1);
         assert_eq!(packets.packets[0].meta.repair, false);
     }
