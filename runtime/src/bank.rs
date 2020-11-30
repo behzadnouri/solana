@@ -4798,6 +4798,7 @@ pub(crate) mod tests {
         status_cache::MAX_CACHE_ENTRIES,
     };
     use crossbeam_channel::bounded;
+    use rand::SeedableRng;
     use solana_sdk::{
         account_utils::StateMut,
         clock::{DEFAULT_SLOTS_PER_EPOCH, DEFAULT_TICKS_PER_SLOT},
@@ -6678,6 +6679,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_bank_update_vote_stake_rewards() {
+        let mut rng = rand::rngs::StdRng::from_seed([21u8; 32]);
         solana_logger::setup();
 
         // create a bank that ticks really slowly...
@@ -6713,7 +6715,7 @@ pub(crate) mod tests {
         assert!(bank.rewards.read().unwrap().is_empty());
 
         let ((vote_id, mut vote_account), (stake_id, stake_account)) =
-            crate::stakes::tests::create_staked_node_accounts(1_0000);
+            crate::stakes::tests::create_staked_node_accounts(&mut rng, 1_0000);
 
         // set up accounts
         bank.store_account_and_update_capitalization(&stake_id, &stake_account);
@@ -6799,6 +6801,7 @@ pub(crate) mod tests {
     }
 
     fn do_test_bank_update_rewards_determinism() -> u64 {
+        let mut rng = rand::rngs::StdRng::from_seed([41u8; 32]);
         // create a bank that ticks really slowly...
         let bank = Arc::new(Bank::new(&GenesisConfig {
             accounts: (0..42)
@@ -6834,8 +6837,10 @@ pub(crate) mod tests {
         let vote_id = solana_sdk::pubkey::new_rand();
         let mut vote_account =
             vote_state::create_account(&vote_id, &solana_sdk::pubkey::new_rand(), 50, 100);
-        let (stake_id1, stake_account1) = crate::stakes::tests::create_stake_account(123, &vote_id);
-        let (stake_id2, stake_account2) = crate::stakes::tests::create_stake_account(456, &vote_id);
+        let (stake_id1, stake_account1) =
+            crate::stakes::tests::create_stake_account(&mut rng, 123, &vote_id);
+        let (stake_id2, stake_account2) =
+            crate::stakes::tests::create_stake_account(&mut rng, 456, &vote_id);
 
         // set up accounts
         bank.store_account_and_update_capitalization(&stake_id1, &stake_account1);
@@ -8756,6 +8761,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_add_instruction_processor_for_existing_unrelated_accounts() {
+        let mut rng = rand::rngs::StdRng::from_seed([23u8; 32]);
         let (genesis_config, _mint_keypair) = create_genesis_config(500);
         let mut bank = Bank::new(&genesis_config);
 
@@ -8774,7 +8780,7 @@ pub(crate) mod tests {
         assert_eq!(bank.calculate_capitalization(), bank.capitalization());
 
         let ((vote_id, vote_account), (stake_id, stake_account)) =
-            crate::stakes::tests::create_staked_node_accounts(1_0000);
+            crate::stakes::tests::create_staked_node_accounts(&mut rng, 1_0000);
         bank.capitalization
             .fetch_add(vote_account.lamports + stake_account.lamports, Relaxed);
         bank.store_account(&vote_id, &vote_account);

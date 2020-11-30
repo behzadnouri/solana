@@ -7,6 +7,13 @@ pub fn new_rand() -> Pubkey {
 }
 
 #[cfg(feature = "full")]
+pub fn new_rand_with_rng<R: rand::Rng>(rng: &mut R) -> Pubkey {
+    let mut buf = [0u8; 32];
+    rng.fill(&mut buf);
+    Pubkey::new(&buf)
+}
+
+#[cfg(feature = "full")]
 pub fn write_pubkey_file(outfile: &str, pubkey: Pubkey) -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Write;
 

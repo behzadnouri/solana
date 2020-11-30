@@ -229,62 +229,92 @@ impl Stakes {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use rand::rngs::StdRng;
+    use rand::Rng;
+    use rand::SeedableRng;
     use solana_sdk::{pubkey::Pubkey, rent::Rent};
     use solana_stake_program::stake_state;
     use solana_vote_program::vote_state::{self, VoteState};
 
     //  set up some dummies for a staked node     ((     vote      )  (     stake     ))
-    pub fn create_staked_node_accounts(stake: u64) -> ((Pubkey, Account), (Pubkey, Account)) {
-        let vote_pubkey = solana_sdk::pubkey::new_rand();
-        let vote_account =
-            vote_state::create_account(&vote_pubkey, &solana_sdk::pubkey::new_rand(), 0, 1);
+    pub fn create_staked_node_accounts<R: Rng>(
+        rng: &mut R,
+        stake: u64,
+    ) -> ((Pubkey, Account), (Pubkey, Account)) {
+        let vote_pubkey = solana_sdk::pubkey::new_rand_with_rng(rng);
+        let vote_account = vote_state::create_account(
+            &vote_pubkey,
+            &solana_sdk::pubkey::new_rand_with_rng(rng),
+            0,
+            1,
+        );
         (
             (vote_pubkey, vote_account),
-            create_stake_account(stake, &vote_pubkey),
+            create_stake_account(rng, stake, &vote_pubkey),
         )
     }
 
     //   add stake to a vote_pubkey                               (   stake    )
-    pub fn create_stake_account(stake: u64, vote_pubkey: &Pubkey) -> (Pubkey, Account) {
-        let stake_pubkey = solana_sdk::pubkey::new_rand();
+    pub fn create_stake_account<R: Rng>(
+        rng: &mut R,
+        stake: u64,
+        vote_pubkey: &Pubkey,
+    ) -> (Pubkey, Account) {
+        let stake_pubkey = solana_sdk::pubkey::new_rand_with_rng(rng);
         (
             stake_pubkey,
             stake_state::create_account(
                 &stake_pubkey,
                 &vote_pubkey,
-                &vote_state::create_account(&vote_pubkey, &solana_sdk::pubkey::new_rand(), 0, 1),
+                &vote_state::create_account(
+                    &vote_pubkey,
+                    &solana_sdk::pubkey::new_rand_with_rng(rng),
+                    0,
+                    1,
+                ),
                 &Rent::free(),
                 stake,
             ),
         )
     }
 
-    pub fn create_warming_staked_node_accounts(
+    pub fn create_warming_staked_node_accounts<R: Rng>(
+        rng: &mut R,
         stake: u64,
         epoch: Epoch,
     ) -> ((Pubkey, Account), (Pubkey, Account)) {
-        let vote_pubkey = solana_sdk::pubkey::new_rand();
-        let vote_account =
-            vote_state::create_account(&vote_pubkey, &solana_sdk::pubkey::new_rand(), 0, 1);
+        let vote_pubkey = solana_sdk::pubkey::new_rand_with_rng(rng);
+        let vote_account = vote_state::create_account(
+            &vote_pubkey,
+            &solana_sdk::pubkey::new_rand_with_rng(rng),
+            0,
+            1,
+        );
         (
             (vote_pubkey, vote_account),
-            create_warming_stake_account(stake, epoch, &vote_pubkey),
+            create_warming_stake_account(rng, stake, epoch, &vote_pubkey),
         )
     }
 
     // add stake to a vote_pubkey                               (   stake    )
-    pub fn create_warming_stake_account(
+    pub fn create_warming_stake_account<R: Rng>(
+        rng: &mut R,
         stake: u64,
         epoch: Epoch,
         vote_pubkey: &Pubkey,
     ) -> (Pubkey, Account) {
-        let stake_pubkey = solana_sdk::pubkey::new_rand();
+        let stake_pubkey = solana_sdk::pubkey::new_rand_with_rng(rng);
         (
             stake_pubkey,
             stake_state::create_account_with_activation_epoch(
                 &stake_pubkey,
                 &vote_pubkey,
-                &vote_state::create_account(&vote_pubkey, &solana_sdk::pubkey::new_rand(), 0, 1),
+                &vote_state::create_account(
+                    &vote_pubkey,
+                    &solana_sdk::pubkey::new_rand_with_rng(rng),
+                    0,
+                    1,
+                ),
                 &Rent::free(),
                 stake,
                 epoch,
@@ -294,6 +324,7 @@ pub mod tests {
 
     #[test]
     fn test_stakes_basic() {
+        let mut rng = StdRng::from_seed([5u8; 32]);
         for i in 0..4 {
             let mut stakes = Stakes {
                 epoch: i,
@@ -301,7 +332,7 @@ pub mod tests {
             };
 
             let ((vote_pubkey, vote_account), (stake_pubkey, mut stake_account)) =
-                create_staked_node_accounts(10);
+                create_staked_node_accounts(&mut rng, 10);
 
             stakes.store(&vote_pubkey, &vote_account, true);
             stakes.store(&stake_pubkey, &stake_account, true);
@@ -327,7 +358,8 @@ pub mod tests {
             }
 
             // activate more
-            let (_stake_pubkey, mut stake_account) = create_stake_account(42, &vote_pubkey);
+            let (_stake_pubkey, mut stake_account) =
+                create_stake_account(&mut rng, 42, &vote_pubkey);
             stakes.store(&stake_pubkey, &stake_account, true);
             let stake = StakeState::stake_from(&stake_account).unwrap();
             {
@@ -346,41 +378,54 @@ pub mod tests {
                 assert!(vote_accounts.get(&vote_pubkey).is_some());
                 assert_eq!(vote_accounts.get(&vote_pubkey).unwrap().0, 0);
             }
+
+            println!("# vote account: {}", stakes.vote_accounts.len());
+            println!(
+                "stakes dump: {}",
+                base64::encode(&bincode::serialize(&stakes).unwrap())
+            );
         }
     }
 
     #[test]
     fn test_stakes_highest() {
+        let mut rng = StdRng::from_seed([7u8; 32]);
         let mut stakes = Stakes::default();
 
         assert_eq!(stakes.highest_staked_node(), None);
 
         let ((vote_pubkey, vote_account), (stake_pubkey, stake_account)) =
-            create_staked_node_accounts(10);
+            create_staked_node_accounts(&mut rng, 10);
 
         stakes.store(&vote_pubkey, &vote_account, true);
         stakes.store(&stake_pubkey, &stake_account, true);
 
         let ((vote11_pubkey, vote11_account), (stake11_pubkey, stake11_account)) =
-            create_staked_node_accounts(20);
+            create_staked_node_accounts(&mut rng, 20);
 
         stakes.store(&vote11_pubkey, &vote11_account, true);
         stakes.store(&stake11_pubkey, &stake11_account, true);
 
         let vote11_node_pubkey = VoteState::from(&vote11_account).unwrap().node_pubkey;
 
-        assert_eq!(stakes.highest_staked_node(), Some(vote11_node_pubkey))
+        assert_eq!(stakes.highest_staked_node(), Some(vote11_node_pubkey));
+        println!("# vote account: {}", stakes.vote_accounts.len());
+        println!(
+            "stakes dump: {}",
+            base64::encode(&bincode::serialize(&stakes).unwrap())
+        );
     }
 
     #[test]
     fn test_stakes_vote_account_disappear_reappear() {
+        let mut rng = StdRng::from_seed([9u8; 32]);
         let mut stakes = Stakes {
             epoch: 4,
             ..Stakes::default()
         };
 
         let ((vote_pubkey, mut vote_account), (stake_pubkey, stake_account)) =
-            create_staked_node_accounts(10);
+            create_staked_node_accounts(&mut rng, 10);
 
         stakes.store(&vote_pubkey, &vote_account, true);
         stakes.store(&stake_pubkey, &stake_account, true);
@@ -406,20 +451,26 @@ pub mod tests {
             assert!(vote_accounts.get(&vote_pubkey).is_some());
             assert_eq!(vote_accounts.get(&vote_pubkey).unwrap().0, 10);
         }
+        println!("# vote account: {}", stakes.vote_accounts.len());
+        println!(
+            "stakes dump: {}",
+            base64::encode(&bincode::serialize(&stakes).unwrap())
+        );
     }
 
     #[test]
     fn test_stakes_change_delegate() {
+        let mut rng = StdRng::from_seed([11u8; 32]);
         let mut stakes = Stakes {
             epoch: 4,
             ..Stakes::default()
         };
 
         let ((vote_pubkey, vote_account), (stake_pubkey, stake_account)) =
-            create_staked_node_accounts(10);
+            create_staked_node_accounts(&mut rng, 10);
 
         let ((vote_pubkey2, vote_account2), (_stake_pubkey2, stake_account2)) =
-            create_staked_node_accounts(10);
+            create_staked_node_accounts(&mut rng, 10);
 
         stakes.store(&vote_pubkey, &vote_account, true);
         stakes.store(&vote_pubkey2, &vote_account2, true);
@@ -453,18 +504,24 @@ pub mod tests {
                 stake.stake(stakes.epoch, Some(&stakes.stake_history), true)
             );
         }
+        println!("# vote account: {}", stakes.vote_accounts.len());
+        println!(
+            "stakes dump: {}",
+            base64::encode(&bincode::serialize(&stakes).unwrap())
+        );
     }
     #[test]
     fn test_stakes_multiple_stakers() {
+        let mut rng = StdRng::from_seed([13u8; 32]);
         let mut stakes = Stakes {
             epoch: 4,
             ..Stakes::default()
         };
 
         let ((vote_pubkey, vote_account), (stake_pubkey, stake_account)) =
-            create_staked_node_accounts(10);
+            create_staked_node_accounts(&mut rng, 10);
 
-        let (stake_pubkey2, stake_account2) = create_stake_account(10, &vote_pubkey);
+        let (stake_pubkey2, stake_account2) = create_stake_account(&mut rng, 10, &vote_pubkey);
 
         stakes.store(&vote_pubkey, &vote_account, true);
 
@@ -477,13 +534,19 @@ pub mod tests {
             assert!(vote_accounts.get(&vote_pubkey).is_some());
             assert_eq!(vote_accounts.get(&vote_pubkey).unwrap().0, 20);
         }
+        println!("# vote account: {}", stakes.vote_accounts.len());
+        println!(
+            "stakes dump: {}",
+            base64::encode(&bincode::serialize(&stakes).unwrap())
+        );
     }
     #[test]
     fn test_clone_with_epoch() {
+        let mut rng = StdRng::from_seed([15u8; 32]);
         let mut stakes = Stakes::default();
 
         let ((vote_pubkey, vote_account), (stake_pubkey, stake_account)) =
-            create_staked_node_accounts(10);
+            create_staked_node_accounts(&mut rng, 10);
 
         stakes.store(&vote_pubkey, &vote_account, true);
         stakes.store(&stake_pubkey, &stake_account, true);
@@ -504,17 +567,23 @@ pub mod tests {
                 stake.stake(stakes.epoch, Some(&stakes.stake_history), true)
             );
         }
+        println!("# vote account: {}", stakes.vote_accounts.len());
+        println!(
+            "stakes dump: {}",
+            base64::encode(&bincode::serialize(&stakes).unwrap())
+        );
     }
 
     #[test]
     fn test_stakes_not_delegate() {
+        let mut rng = StdRng::from_seed([17u8; 32]);
         let mut stakes = Stakes {
             epoch: 4,
             ..Stakes::default()
         };
 
         let ((vote_pubkey, vote_account), (stake_pubkey, stake_account)) =
-            create_staked_node_accounts(10);
+            create_staked_node_accounts(&mut rng, 10);
 
         stakes.store(&vote_pubkey, &vote_account, true);
         stakes.store(&stake_pubkey, &stake_account, true);
@@ -536,6 +605,11 @@ pub mod tests {
             assert!(vote_accounts.get(&vote_pubkey).is_some());
             assert_eq!(vote_accounts.get(&vote_pubkey).unwrap().0, 0);
         }
+        println!("# vote account: {}", stakes.vote_accounts.len());
+        println!(
+            "stakes dump: {}",
+            base64::encode(&bincode::serialize(&stakes).unwrap())
+        );
     }
 
     #[test]
@@ -546,6 +620,7 @@ pub mod tests {
 
     #[test]
     fn test_vote_balance_and_staked_normal() {
+        let mut rng = StdRng::from_seed([31u8; 32]);
         let mut stakes = Stakes::default();
         impl Stakes {
             pub fn vote_balance_and_warmed_staked(&self) -> u64 {
@@ -558,7 +633,7 @@ pub mod tests {
 
         let genesis_epoch = 0;
         let ((vote_pubkey, vote_account), (stake_pubkey, stake_account)) =
-            create_warming_staked_node_accounts(10, genesis_epoch);
+            create_warming_staked_node_accounts(&mut rng, 10, genesis_epoch);
         stakes.store(&vote_pubkey, &vote_account, true);
         stakes.store(&stake_pubkey, &stake_account, true);
 
@@ -575,5 +650,10 @@ pub mod tests {
                 *expected_warmed_stake
             );
         }
+        println!("# vote account: {}", stakes.vote_accounts.len());
+        println!(
+            "stakes dump: {}",
+            base64::encode(&bincode::serialize(&stakes).unwrap())
+        );
     }
 }
