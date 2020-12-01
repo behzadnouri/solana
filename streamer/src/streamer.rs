@@ -37,10 +37,10 @@ fn recv_loop(
     recycler: &PacketsRecycler,
     name: &'static str,
 ) -> Result<()> {
-    let mut recv_count = 0;
-    let mut call_count = 0;
+    let mut recv_count = 0usize;
+    let mut call_count = 0i64;
     let mut now = Instant::now();
-    let mut num_max_received = 0; // Number of times maximum packets were received
+    let should_log = name == "gossip_receiver";
     loop {
         let mut msgs = Packets::new_with_recycler(recycler.clone(), PACKETS_PER_BATCH, name);
         loop {
@@ -50,9 +50,6 @@ fn recv_loop(
                 return Ok(());
             }
             if let Ok(len) = packet::recv_from(&mut msgs, sock, 1) {
-                if len == NUM_RCVMMSGS {
-                    num_max_received += 1;
-                }
                 recv_count += len;
                 call_count += 1;
                 if len > 0 {
@@ -61,19 +58,18 @@ fn recv_loop(
                 break;
             }
         }
-        if recv_count > 1024 {
-            datapoint_debug!(
-                name,
-                ("received", recv_count as i64, i64),
-                ("call_count", i64::from(call_count), i64),
-                ("elapsed", now.elapsed().as_millis() as i64, i64),
-                ("max_received", i64::from(num_max_received), i64),
+        if should_log && recv_count > 65536 {
+            let elapsed = now.elapsed().as_millis() as f64;
+            now = Instant::now();
+            info!("recv_count: {}", recv_count as f64 / elapsed);
+            info!("call_count: {}", call_count as f64 / elapsed);
+            info!(
+                "recv_count / call_count: {}",
+                recv_count as f64 / (call_count as f64)
             );
             recv_count = 0;
             call_count = 0;
-            num_max_received = 0;
         }
-        now = Instant::now();
     }
 }
 
