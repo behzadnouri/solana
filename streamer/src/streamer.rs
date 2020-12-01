@@ -41,6 +41,7 @@ fn recv_loop(
     let mut call_count = 0;
     let mut now = Instant::now();
     let mut num_max_received = 0; // Number of times maximum packets were received
+    let mut sock = sock.into();
     loop {
         let mut msgs = Packets::new_with_recycler(recycler.clone(), PACKETS_PER_BATCH, name);
         loop {
@@ -49,7 +50,7 @@ fn recv_loop(
             if exit.load(Ordering::Relaxed) {
                 return Ok(());
             }
-            if let Ok(len) = packet::recv_from(&mut msgs, sock, 1) {
+            if let Ok(len) = packet::recv_from(&mut msgs, &mut sock, 1) {
                 if len == NUM_RCVMMSGS {
                     num_max_received += 1;
                 }

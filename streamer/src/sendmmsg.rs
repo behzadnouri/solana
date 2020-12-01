@@ -167,7 +167,9 @@ mod tests {
         assert_eq!(sent, Some(32));
 
         let mut packets = vec![Packet::default(); 32];
-        let recv = recv_mmsg(&reader, &mut packets[..]).unwrap().1;
+        let recv = recv_mmsg(&mut (&reader).into(), &mut packets[..])
+            .unwrap()
+            .1;
         assert_eq!(32, recv);
     }
 
@@ -192,11 +194,15 @@ mod tests {
         assert_eq!(sent, Some(32));
 
         let mut packets = vec![Packet::default(); 32];
-        let recv = recv_mmsg(&reader, &mut packets[..]).unwrap().1;
+        let recv = recv_mmsg(&mut (&reader).into(), &mut packets[..])
+            .unwrap()
+            .1;
         assert_eq!(16, recv);
 
         let mut packets = vec![Packet::default(); 32];
-        let recv = recv_mmsg(&reader2, &mut packets[..]).unwrap().1;
+        let recv = recv_mmsg(&mut (&reader2).into(), &mut packets[..])
+            .unwrap()
+            .1;
         assert_eq!(16, recv);
     }
 
@@ -227,19 +233,27 @@ mod tests {
         assert_eq!(sent, Some(4));
 
         let mut packets = vec![Packet::default(); 32];
-        let recv = recv_mmsg(&reader, &mut packets[..]).unwrap().1;
+        let recv = recv_mmsg(&mut (&reader).into(), &mut packets[..])
+            .unwrap()
+            .1;
         assert_eq!(1, recv);
 
         let mut packets = vec![Packet::default(); 32];
-        let recv = recv_mmsg(&reader2, &mut packets[..]).unwrap().1;
+        let recv = recv_mmsg(&mut (&reader2).into(), &mut packets[..])
+            .unwrap()
+            .1;
         assert_eq!(1, recv);
 
         let mut packets = vec![Packet::default(); 32];
-        let recv = recv_mmsg(&reader3, &mut packets[..]).unwrap().1;
+        let recv = recv_mmsg(&mut (&reader3).into(), &mut packets[..])
+            .unwrap()
+            .1;
         assert_eq!(1, recv);
 
         let mut packets = vec![Packet::default(); 32];
-        let recv = recv_mmsg(&reader4, &mut packets[..]).unwrap().1;
+        let recv = recv_mmsg(&mut (&reader4).into(), &mut packets[..])
+            .unwrap()
+            .1;
         assert_eq!(1, recv);
     }
 }

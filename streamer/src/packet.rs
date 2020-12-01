@@ -1,5 +1,5 @@
 //! The `packet` module defines data structures and methods to pull data from the network.
-use crate::recvmmsg::{recv_mmsg, NUM_RCVMMSGS};
+use crate::recvmmsg::{self, recv_mmsg, NUM_RCVMMSGS};
 pub use solana_perf::packet::{
     limited_deserialize, to_packets, to_packets_chunked, Packets, PacketsRecycler, NUM_PACKETS,
     PACKETS_BATCH_SIZE, PACKETS_PER_BATCH,
@@ -9,7 +9,11 @@ use solana_metrics::inc_new_counter_debug;
 pub use solana_sdk::packet::{Meta, Packet, PACKET_DATA_SIZE};
 use std::{io::Result, net::UdpSocket, time::Instant};
 
-pub fn recv_from(obj: &mut Packets, socket: &UdpSocket, max_wait_ms: usize) -> Result<usize> {
+pub fn recv_from(
+    obj: &mut Packets,
+    socket: &mut recvmmsg::UdpSocket,
+    max_wait_ms: usize,
+) -> Result<usize> {
     let mut i = 0;
     //DOCUMENTED SIDE-EFFECT
     //Performance out of the IO without poll
@@ -96,7 +100,7 @@ mod tests {
         }
         send_to(&p, &send_socket).unwrap();
 
-        let recvd = recv_from(&mut p, &recv_socket, 1).unwrap();
+        let recvd = recv_from(&mut p, &mut (&recv_socket).into(), 1).unwrap();
 
         assert_eq!(recvd, p.packets.len());
 
@@ -150,7 +154,7 @@ mod tests {
             send_to(&p, &send_socket).unwrap();
         }
 
-        let recvd = recv_from(&mut p, &recv_socket, 100).unwrap();
+        let recvd = recv_from(&mut p, &mut (&recv_socket).into(), 100).unwrap();
 
         // Check we only got PACKETS_PER_BATCH packets
         assert_eq!(recvd, PACKETS_PER_BATCH);
