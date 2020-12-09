@@ -1774,35 +1774,36 @@ impl Bank {
         epoch_start_timestamp: Option<(Slot, UnixTimestamp)>,
     ) -> Option<UnixTimestamp> {
         let mut get_timestamp_estimate_time = Measure::start("get_timestamp_estimate");
-        let recent_timestamps: HashMap<Pubkey, (Slot, UnixTimestamp)> = self
-            .vote_accounts()
-            .into_iter()
-            .filter_map(|(pubkey, (_, account))| {
-                account.vote_state().as_ref().ok().and_then(|state| {
-                    let timestamp_slot = state.last_timestamp.slot;
-                    if (self
-                        .feature_set
-                        .is_active(&feature_set::timestamp_bounding::id())
-                        && self.slot().checked_sub(timestamp_slot)?
-                            <= self.epoch_schedule().slots_per_epoch)
-                        || self.slot().checked_sub(timestamp_slot)?
-                            <= DEPRECATED_TIMESTAMP_SLOT_RANGE as u64
+        let timestamp_bounding_enabled = self
+            .feature_set
+            .is_active(&feature_set::timestamp_bounding::id());
+        let slots_per_epoch = self.epoch_schedule().slots_per_epoch;
+        let recent_timestamps =
+            self.vote_accounts()
+                .into_iter()
+                .filter_map(|(pubkey, (_, account))| {
+                    let vote_state = account.vote_state();
+                    let vote_state = vote_state.as_ref().ok()?;
+                    let slot_delta = self.slot().checked_sub(vote_state.last_timestamp.slot)?;
+                    if (timestamp_bounding_enabled && slot_delta <= slots_per_epoch)
+                        || slot_delta <= DEPRECATED_TIMESTAMP_SLOT_RANGE as u64
                     {
                         Some((
                             pubkey,
-                            (state.last_timestamp.slot, state.last_timestamp.timestamp),
+                            (
+                                vote_state.last_timestamp.slot,
+                                vote_state.last_timestamp.timestamp,
+                            ),
                         ))
                     } else {
                         None
                     }
-                })
-            })
-            .collect();
+                });
         let slot_duration = Duration::from_nanos(self.ns_per_slot as u64);
         let epoch = self.epoch_schedule().get_epoch(self.slot());
         let stakes = self.epoch_vote_accounts(epoch)?;
         let stake_weighted_timestamp = calculate_stake_weighted_timestamp(
-            &recent_timestamps,
+            recent_timestamps,
             stakes,
             self.slot(),
             slot_duration,
