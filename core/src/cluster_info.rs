@@ -253,6 +253,7 @@ struct GossipStats {
     handle_batch_pull_requests_time: Counter,
     handle_batch_pull_responses_time: Counter,
     handle_batch_push_messages_time: Counter,
+    staked_nodes_time: Counter,
     process_gossip_packets_time: Counter,
     process_pull_response: Counter,
     process_pull_response_count: Counter,
@@ -1834,7 +1835,9 @@ impl ClusterInfo {
 
                     let stakes: HashMap<_, _> = match bank_forks {
                         Some(ref bank_forks) => {
-                            staking_utils::staked_nodes(&bank_forks.read().unwrap().working_bank())
+                            let working_bank = bank_forks.read().unwrap().working_bank();
+                            let _st = ScopedTimer::from(&self.stats.staked_nodes_time);
+                            staking_utils::staked_nodes(&working_bank)
                         }
                         None => HashMap::new(),
                     };
@@ -2483,6 +2486,7 @@ impl ClusterInfo {
     }
 
     fn get_stakes_and_epoch_time(
+        &self,
         bank_forks: Option<&Arc<RwLock<BankForks>>>,
     ) -> (HashMap<Pubkey, u64>, u64) {
         let epoch_time_ms;
@@ -2492,6 +2496,7 @@ impl ClusterInfo {
                 let epoch = bank.epoch();
                 let epoch_schedule = bank.epoch_schedule();
                 epoch_time_ms = epoch_schedule.get_slots_in_epoch(epoch) * DEFAULT_MS_PER_SLOT;
+                let _st = ScopedTimer::from(&self.stats.staked_nodes_time);
                 staking_utils::staked_nodes(&bank)
             }
             None => {
@@ -2607,7 +2612,7 @@ impl ClusterInfo {
                     .add_relaxed(excess_count as u64);
             }
         }
-        let (stakes, epoch_time_ms) = Self::get_stakes_and_epoch_time(bank_forks);
+        let (stakes, epoch_time_ms) = self.get_stakes_and_epoch_time(bank_forks);
         // Using root_bank instead of working_bank here so that an enbaled
         // feature does not roll back (if the feature happens to get enabled in
         // a minority fork).
@@ -2695,6 +2700,11 @@ impl ClusterInfo {
                 (
                     "process_gossip_packets_time",
                     self.stats.process_gossip_packets_time.clear(),
+                    i64
+                ),
+                (
+                    "staked_nodes_time",
+                    self.stats.staked_nodes_time.clear(),
                     i64
                 ),
                 (
