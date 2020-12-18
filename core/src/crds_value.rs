@@ -127,7 +127,7 @@ pub(crate) fn new_rand_timestamp<R: Rng>(rng: &mut R) -> u64 {
 impl CrdsData {
     /// New random CrdsData for tests and benchmarks.
     fn new_rand<R: Rng>(rng: &mut R, pubkey: Option<Pubkey>) -> CrdsData {
-        let kind = rng.gen_range(0, 5);
+        let kind = rng.gen_range(0, 6);
         // TODO: Implement other kinds of CrdsData here.
         // TODO: Assign ranges to each arm proportional to their frequency in
         // the mainnet crds table.
@@ -136,7 +136,8 @@ impl CrdsData {
             1 => CrdsData::LowestSlot(rng.gen(), LowestSlot::new_rand(rng, pubkey)),
             2 => CrdsData::SnapshotHashes(SnapshotHash::new_rand(rng, pubkey)),
             3 => CrdsData::AccountsHashes(SnapshotHash::new_rand(rng, pubkey)),
-            _ => CrdsData::Version(Version::new_rand(rng, pubkey)),
+            4 => CrdsData::Version(Version::new_rand(rng, pubkey)),
+            _ => CrdsData::NodeInstance(NodeInstance::new_rand(rng, pubkey)),
         }
     }
 }
@@ -337,6 +338,17 @@ impl NodeInstance {
             from: pubkey,
             wallclock: now,
             timestamp: now,
+            token: rng.gen(),
+        }
+    }
+
+    /// New random NodeInstance for tests and benchmarks.
+    fn new_rand<R: Rng>(rng: &mut R, pubkey: Option<Pubkey>) -> Self {
+        let wallclock = new_rand_timestamp(rng);
+        Self {
+            from: pubkey.unwrap_or_else(pubkey::new_rand),
+            wallclock,
+            timestamp: wallclock - rng.gen_range(0, 1000 * 3600 * 24),
             token: rng.gen(),
         }
     }

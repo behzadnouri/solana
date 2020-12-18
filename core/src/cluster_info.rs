@@ -2049,6 +2049,8 @@ impl ClusterInfo {
             .process_pull_requests(callers.cloned(), timestamp());
         let output_size_limit =
             self.update_data_budget(stakes.len()) / PULL_RESPONSE_MIN_SERIALIZED_SIZE;
+        info!(">>> output_size_limit: {}", output_size_limit);
+        let output_size_limit = output_size_limit * 1000;
         let mut packets = Packets::new_with_recycler(recycler.clone(), 64, "handle_pull_requests");
         let (caller_and_filters, addrs): (Vec<_>, Vec<_>) = {
             let mut rng = rand::thread_rng();
@@ -2069,6 +2071,8 @@ impl ClusterInfo {
                 &self.stats.generate_pull_responses,
             )
             .generate_pull_responses(&caller_and_filters, output_size_limit, now);
+        let output_size = pull_responses.iter().map(Vec::len).sum::<usize>();
+        info!(">>> output_size: {}", output_size);
 
         let pull_responses: Vec<_> = pull_responses
             .into_iter()
@@ -3476,7 +3480,14 @@ mod tests {
             let crds_values = vec![CrdsValue::new_rand(&mut rng, None)];
             let pull_response = Protocol::PullResponse(Pubkey::new_unique(), crds_values);
             let size = serialized_size(&pull_response).unwrap();
-            assert!(PULL_RESPONSE_MIN_SERIALIZED_SIZE as u64 <= size);
+            assert!(
+                PULL_RESPONSE_MIN_SERIALIZED_SIZE as u64 <= size,
+                "crds serialized size: {}",
+                size
+            );
+            if PULL_RESPONSE_MIN_SERIALIZED_SIZE as u64 == size {
+                println!("{:?}", pull_response);
+            }
         }
     }
 
