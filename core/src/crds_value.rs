@@ -370,6 +370,33 @@ impl Sanitize for NodeInstance {
     }
 }
 
+struct Root {
+    from: Pubkey,
+    wallclock: u64,
+    slot: Slot,
+}
+
+impl Sanitize for Root {
+    fn sanitize(&self) -> Result<(), SanitizeError> {
+        sanitize_wallclock(self.wallclock)?;
+        self.from.sanitize()
+    }
+}
+
+struct DuplicateSlotVote {
+    from: Pubkey,
+    wallclock: u64,
+    transaction: Transaction,
+}
+
+impl Sanitize for DuplicateSlotVote {
+    fn sanitize(&self) -> Result<(), SanitizeError> {
+        sanitize_wallclock(self.wallclock)?;
+        self.transaction.sanitize()?;
+        self.from.sanitize()
+    }
+}
+
 /// Type of the replicated value
 /// These are labels for values in a record that is associated with `Pubkey`
 #[derive(PartialEq, Hash, Eq, Clone, Debug)]
