@@ -16,6 +16,7 @@ use solana_sdk::{
     signature::{Keypair, Signable, Signature, Signer},
     transaction::Transaction,
 };
+use solana_vote_program::vote_transaction;
 use std::{
     borrow::{Borrow, Cow},
     collections::{hash_map::Entry, BTreeSet, HashMap, HashSet},
@@ -574,6 +575,24 @@ impl CrdsValue {
     }
 
     pub fn compute_vote_index(tower_index: usize, mut votes: Vec<&CrdsValue>) -> VoteIndex {
+        error!("tower index: {}, num votes: {}", tower_index, votes.len());
+        let mut vote_slots: Vec<Slot> = votes
+            .iter()
+            .filter_map(|vote| {
+                let (_, vote, _) =
+                    vote_transaction::parse_vote_transaction(&vote.vote().unwrap().transaction)?;
+                vote.slots.last().copied()
+            })
+            .collect();
+        vote_slots.sort_unstable();
+        error!("crds vote slots: {:?}", vote_slots);
+        // for vote in &votes {
+        //     if let Some((_, vote, _)) =
+        //         vote_transaction::parse_vote_transaction(&vote.vote().unwrap().transaction)
+        //     {
+        //         error!("crds vote slots: {:?}", vote.slots);
+        //     }
+        // }
         let mut available: HashSet<VoteIndex> = (0..MAX_VOTES).collect();
         votes.iter().filter_map(|v| v.vote_index()).for_each(|ix| {
             available.remove(&ix);
@@ -589,11 +608,13 @@ impl CrdsValue {
 
         // If Tower is full, oldest removed first
         if tower_index + 1 == MAX_VOTES as usize {
+            error!("tower index + 1 == MAX_VOTES");
             return votes[0].vote_index().expect("all values must be votes");
         }
 
         // If Tower is not full, the early votes have expired
         assert!(tower_index < MAX_VOTES as usize);
+        error!("tower index < MAX_VOTES");
 
         votes[tower_index]
             .vote_index()

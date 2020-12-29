@@ -4852,7 +4852,10 @@ fn is_simple_vote_transaction(transaction: &Transaction) -> bool {
         if program_pubkey == solana_vote_program::id() {
             if let Ok(vote_instruction) = limited_deserialize::<VoteInstruction>(&instruction.data)
             {
-                return matches!(vote_instruction, VoteInstruction::Vote(_) | VoteInstruction::VoteSwitch(_, _));
+                return matches!(
+                    vote_instruction,
+                    VoteInstruction::Vote(_) | VoteInstruction::VoteSwitch(_, _)
+                );
             }
         }
     }
