@@ -1104,7 +1104,7 @@ impl ClusterInfo {
     }
 
     pub fn push_vote(&self, tower: &[Slot], vote: Transaction) {
-        debug_assert!(tower.iter().tuple_windows().all(|(a, b)| a < b));
+        assert!(tower.iter().tuple_windows().all(|(a, b)| a < b));
         let now = timestamp();
         // Find a crds vote which is evicted from the tower, and recycle its
         // vote-index. This can be either an old vote which is popped off the
@@ -1147,9 +1147,26 @@ impl ClusterInfo {
                 .map(|(_ /*wallclock*/, ix)| ix)
         };
         let vote_index = vote_index.unwrap_or(num_crds_votes);
+        error!("tower: {:?}", tower);
+        error!("crds vote slots: {:?}", {
+            let mut slots: Vec<Slot> = self
+                .gossip
+                .read()
+                .unwrap()
+                .crds
+                .get_votes_from(&self_pubkey)
+                .map(|vote| match &vote.value.data {
+                    CrdsData::Vote(_, vote) => vote.slot().unwrap(),
+                    _ => panic!("this should not happen!"),
+                })
+                .collect();
+            slots.sort_unstable();
+            slots
+        });
+        error!("vote_index: {}", vote_index);
         assert!((vote_index as usize) < MAX_LOCKOUT_HISTORY);
         let vote = Vote::new(self_pubkey, vote, now);
-        debug_assert_eq!(vote.slot().unwrap(), *tower.last().unwrap());
+        assert_eq!(vote.slot().unwrap(), *tower.last().unwrap());
         let vote = CrdsData::Vote(vote_index, vote);
         let vote = CrdsValue::new_signed(vote, &self.keypair);
         self.gossip

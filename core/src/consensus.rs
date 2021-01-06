@@ -379,6 +379,15 @@ impl Tower {
             slots,
             local_vote_state.votes
         );
+        error!(
+            "local_vote_state.tower: {:?}",
+            local_vote_state
+                .votes
+                .iter()
+                .map(|x| x.slot)
+                .collect::<Vec<_>>()
+        );
+        error!("new vote slots: {:?}", slots);
         (Vote::new(slots, hash), local_vote_state.tower())
     }
 

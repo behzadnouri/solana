@@ -227,6 +227,22 @@ impl Crds {
         self.votes.iter().map(move |i| self.table.index(*i))
     }
 
+    /// Returns all vote crds values from the given pubkey.
+    pub(crate) fn get_votes_from(
+        &self,
+        pubkey: &Pubkey,
+    ) -> impl Iterator<Item = &VersionedCrdsValue> {
+        self.records.get(pubkey).into_iter().flat_map(move |index| {
+            index.into_iter().filter_map(move |i| {
+                let val = self.table.index(*i);
+                match val.value.data {
+                    CrdsData::Vote(_, _) => Some(val),
+                    _ => None,
+                }
+            })
+        })
+    }
+
     pub fn len(&self) -> usize {
         self.table.len()
     }
