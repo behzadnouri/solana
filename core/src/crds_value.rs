@@ -343,6 +343,12 @@ impl NodeInstance {
     where
         R: Rng + CryptoRng,
     {
+        error!("backtrace: {:?}", std::backtrace::Backtrace::capture());
+        error!(
+            "force backtrace: {:?}",
+            std::backtrace::Backtrace::force_capture()
+        );
+        error!("disabled: {:?}", std::backtrace::Backtrace::disabled());
         Self {
             from: pubkey,
             wallclock: now,
