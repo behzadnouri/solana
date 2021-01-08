@@ -2767,7 +2767,95 @@ impl ClusterInfo {
     fn print_reset_stats(&self, last_print: &mut Instant) {
         if last_print.elapsed().as_millis() > 2000 {
             let (table_size, purged_values_size, failed_inserts_size) = {
+                let mut rng = rand::thread_rng();
                 let r_gossip = self.gossip.read().unwrap();
+                let crds = &r_gossip.crds;
+                if crds.len() > 1000 && rng.gen_ratio(1, 10) {
+                    error!("num of crds pubkeys: {}", crds.records.len());
+                    let pubkey: Pubkey = crds
+                        .records
+                        .iter()
+                        .max_by(|a, b| a.1.len().cmp(&b.1.len()))
+                        .unwrap()
+                        .0
+                        .clone();
+                    error!(
+                        "max pubkey: {}, # of records: {}",
+                        pubkey,
+                        crds.records.get(&pubkey).unwrap().len()
+                    );
+                    let mut cnt = HashMap::<String, usize>::new();
+                    for i in crds.records.get(&pubkey).unwrap() {
+                        match crds.table.get_index(*i).unwrap().0 {
+                            CrdsValueLabel::ContactInfo(_) => {
+                                *cnt.entry(String::from("ContactInfo")).or_default() += 1;
+                            }
+                            CrdsValueLabel::Vote(_, _) => {
+                                *cnt.entry(String::from("Vote")).or_default() += 1;
+                            }
+                            CrdsValueLabel::LowestSlot(_) => {
+                                *cnt.entry(String::from("LowestSlot")).or_default() += 1;
+                            }
+                            CrdsValueLabel::SnapshotHashes(_) => {
+                                *cnt.entry(String::from("SnapshotHashes")).or_default() += 1;
+                            }
+                            CrdsValueLabel::EpochSlots(_, _) => {
+                                *cnt.entry(String::from("EpochSlots")).or_default() += 1;
+                            }
+                            CrdsValueLabel::AccountsHashes(_) => {
+                                *cnt.entry(String::from("AccountsHashes")).or_default() += 1;
+                            }
+                            CrdsValueLabel::LegacyVersion(_) => {
+                                *cnt.entry(String::from("LegacyVersion")).or_default() += 1;
+                            }
+                            CrdsValueLabel::Version(_) => {
+                                *cnt.entry(String::from("Version")).or_default() += 1;
+                            }
+                            CrdsValueLabel::NodeInstance(_, _) => {
+                                *cnt.entry(String::from("NodeInstance")).or_default() += 1;
+                            }
+                            CrdsValueLabel::DuplicateShred(_, _) => {
+                                *cnt.entry(String::from("DuplicateShred")).or_default() += 1;
+                            }
+                        }
+                    }
+                    for (k, v) in cnt {
+                        if v > 1 {
+                            error!("# of {}: {}", k, v);
+                        }
+                    }
+                    let mut cnt: Vec<(Pubkey, usize)> = crds
+                        .records
+                        .iter()
+                        .map(|(pubkey, indices)| {
+                            let count = indices
+                                .iter()
+                                .filter(|i| match crds.table.get_index(**i).unwrap().0 {
+                                    CrdsValueLabel::NodeInstance(_, _) => true,
+                                    _ => false,
+                                })
+                                .count();
+                            (*pubkey, count)
+                        })
+                        .collect();
+                    let mut low_cnt = 0;
+                    let mut high_cnt = 0;
+                    for (_, v) in &cnt {
+                        if *v < 5 {
+                            low_cnt += 1;
+                        } else if *v > 256 {
+                            high_cnt += 1;
+                        }
+                    }
+                    error!("low cnt (-5): {}, high cnt (+256): {}", low_cnt, high_cnt);
+                    cnt.sort_unstable_by_key(|(_, s)| *s);
+                    // for (k, v) in cnt.iter().take(8) {
+                    //     error!("pubkey: {}, node instance cnt: {}", k, v);
+                    // }
+                    for (k, v) in cnt.iter().skip(cnt.len() - 16) {
+                        error!("pubkey: {}, node instance cnt: {}", k, v);
+                    }
+                }
                 (
                     r_gossip.crds.len(),
                     r_gossip.pull.purged_values.len(),

@@ -44,13 +44,13 @@ const CRDS_SHARDS_BITS: u32 = 8;
 #[derive(Clone)]
 pub struct Crds {
     /// Stores the map of labels and values
-    table: IndexMap<CrdsValueLabel, VersionedCrdsValue>,
+    pub table: IndexMap<CrdsValueLabel, VersionedCrdsValue>,
     pub num_inserts: usize, // Only used in tests.
     shards: CrdsShards,
     nodes: IndexSet<usize>, // Indices of nodes' ContactInfo.
     votes: IndexSet<usize>, // Indices of Vote crds values.
     // Indices of all crds values associated with a node.
-    records: HashMap<Pubkey, IndexSet<usize>>,
+    pub records: HashMap<Pubkey, IndexSet<usize>>,
 }
 
 #[derive(PartialEq, Debug)]
