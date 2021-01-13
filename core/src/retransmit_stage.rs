@@ -269,6 +269,7 @@ fn retransmit(
     drop(r_lock);
 
     let mut epoch_fetch = Measure::start("retransmit_epoch_fetch");
+    // Why is this based on the working bank can be dramatically different
     let r_bank = bank_forks.read().unwrap().working_bank();
     let bank_epoch = r_bank.get_leader_schedule_epoch(r_bank.slot());
     epoch_fetch.stop();
@@ -295,9 +296,14 @@ fn retransmit(
     {
         drop(r_epoch_stakes_cache);
         let mut w_epoch_stakes_cache = epoch_stakes_cache.write().unwrap();
+        // Get the retransmit peers by observing gossip, add yourself. Your own entry
+        // is removed after shuffle
+        // i feel like this might be weird, b/c nodes' views of gossip may not
+        // be perfectly symmetrical
         let (peers, stakes_and_index) =
             cluster_info.sorted_retransmit_peers_and_stakes(w_epoch_stakes_cache.stakes.clone());
         w_epoch_stakes_cache.peers = peers;
+        // Cache can have really old entries/outdated peers
         w_epoch_stakes_cache.stakes_and_index = stakes_and_index;
         drop(w_epoch_stakes_cache);
         r_epoch_stakes_cache = epoch_stakes_cache.read().unwrap();
@@ -342,6 +348,46 @@ fn retransmit(
                 &r_epoch_stakes_cache.stakes_and_index,
                 packet.meta.seed,
             );
+
+            // so high level turbine tries to break up the validator set in
+            // gossip based on layers where each layer has DATA_PLANE_FANOUT
+            // the number of nodes as the previous layer
+            // https://docs.solana.com/cluster/turbine-block-propagation and
+            // this is where those neighbors/children are computed:
+            let shuffled_peers: Vec<_> = shuffled_stakes_and_index
+                .iter()
+                .map(|(stake, index)| (*stake, r_epoch_stakes_cache.peers[*index].id))
+                .collect();
+            // and the way I'm evaluating how successful this retransmit is is
+            // by looking at the log retransmit: packets_by_slot: {249: 14,
+            // 250: 97, 251: 100, 252: 102, 253: 92, 254: 60} to see how many
+            // shreds for each slot arrived through retransmit Note there can
+            // be multiple of these (usually summing them up within a 2-3
+            // seconds window is sufficient) and comparing it to how many the
+            // leader actually broadcasted for that slot
+            // SELECT "num_shreds", "slot"
+            //   FROM "testnet-dev-carl"."autogen"."broadcast-transmit-shreds-stats"
+            //  WHERE time > now() - 1h
+            //
+            // I think an inconsistency in the tree between validators could skew how validators are organizing their retransmits, particularly concerned about:
+            // 1. Any underlying bug in the weighting/organizing into
+            //    neighborhoods logic
+            // 2. Current logic doesn't consistently account for unstaked
+            //    validators jumping in and out of gossip
+            // if you reduce the fanout you can simulate two layered turbine
+            if false && packet.meta.seed[0] == 0 {
+                info!(
+                    "Debug retransmit,
+                    seed: {:?},
+                    epoch: {},
+                    stakes_and_index: {:#?},
+                    shuffled_peers: {:#?}",
+                    packet.meta.seed,
+                    bank_epoch,
+                    r_epoch_stakes_cache.stakes_and_index,
+                    shuffled_peers
+                );
+            }
             peers_len = cmp::max(peers_len, shuffled_stakes_and_index.len());
             shuffled_stakes_and_index.remove(my_index);
             // split off the indexes, we don't need the stakes anymore
@@ -349,9 +395,17 @@ fn retransmit(
                 .into_iter()
                 .map(|(_, index)| index)
                 .collect();
-
             let (neighbors, children) =
                 compute_retransmit_peers(DATA_PLANE_FANOUT, my_index, indexes);
+            if true || packet.meta.seed[0] == 0 {
+                info!(
+                    "retransmit peers:,
+                    my_index: {},
+                    neighbors: {:?},
+                    children: {:?}",
+                    my_index, neighbors, children,
+                );
+            }
             let neighbors: Vec<_> = neighbors
                 .into_iter()
                 .map(|index| &r_epoch_stakes_cache.peers[index])

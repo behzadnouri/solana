@@ -84,7 +84,7 @@ pub const VALIDATOR_PORT_RANGE: PortRange = (8000, 10_000);
 pub const MINIMUM_VALIDATOR_PORT_RANGE_WIDTH: u16 = 10; // VALIDATOR_PORT_RANGE must be at least this wide
 
 /// The Data plane fanout size, also used as the neighborhood size
-pub const DATA_PLANE_FANOUT: usize = 200;
+pub const DATA_PLANE_FANOUT: usize = 7;  // retransmit fanout.
 /// milliseconds we sleep for between gossip requests
 pub const GOSSIP_SLEEP_MILLIS: u64 = 100;
 /// The maximum size of a bloom filter
@@ -1349,6 +1349,7 @@ impl ClusterInfo {
             || !ContactInfo::is_valid_address(&contact_info.tvu)
     }
 
+    // sort stake lowest to highest, returns "1" for unstaked nodes
     fn sorted_stakes_with_index<S: std::hash::BuildHasher>(
         peers: &[ContactInfo],
         stakes: Option<Arc<HashMap<Pubkey, u64, S>>>,
