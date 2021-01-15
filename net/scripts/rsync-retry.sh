@@ -6,7 +6,7 @@
 for i in $(seq 1 5); do
   (
     set -x
-    rsync "$@"
+    rsync --bwlimit=512 "$@"
   ) && exit 0
   echo Retry "$i"...
 done
