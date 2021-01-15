@@ -228,7 +228,7 @@ startCommon() {
 syncScripts() {
   echo "rsyncing scripts... to $ipAddress"
   declare ipAddress=$1
-  rsync -vPrc -e "ssh ${sshOptions[*]}" \
+  rsync --bwlimit=512 -vPrc -e "ssh ${sshOptions[*]}" \
     --exclude 'net/log*' \
     "$SOLANA_ROOT"/{fetch-perf-libs.sh,fetch-spl.sh,scripts,net,multinode-demo} \
     "$ipAddress":"$SOLANA_HOME"/ > /dev/null
@@ -242,11 +242,11 @@ deployBootstrapValidator() {
   echo "Deploying software to bootstrap validator ($ipAddress)"
   case $deployMethod in
   tar)
-    rsync -vPrc -e "ssh ${sshOptions[*]}" "$SOLANA_ROOT"/solana-release/bin/* "$ipAddress:$CARGO_BIN/"
-    rsync -vPrc -e "ssh ${sshOptions[*]}" "$SOLANA_ROOT"/solana-release/version.yml "$ipAddress:~/"
+    rsync --bwlimit=512 -vPrc -e "ssh ${sshOptions[*]}" "$SOLANA_ROOT"/solana-release/bin/* "$ipAddress:$CARGO_BIN/"
+    rsync --bwlimit=512 -vPrc -e "ssh ${sshOptions[*]}" "$SOLANA_ROOT"/solana-release/version.yml "$ipAddress:~/"
     ;;
   local)
-    rsync -vPrc -e "ssh ${sshOptions[*]}" "$SOLANA_ROOT"/farf/bin/* "$ipAddress:$CARGO_BIN/"
+    rsync --bwlimit=512 -vPrc -e "ssh ${sshOptions[*]}" "$SOLANA_ROOT"/farf/bin/* "$ipAddress:$CARGO_BIN/"
     ssh "${sshOptions[@]}" -n "$ipAddress" "rm -f ~/version.yml; touch ~/version.yml"
     ;;
   skip)
@@ -267,7 +267,7 @@ startBootstrapLeader() {
   (
     set -x
     startCommon "$ipAddress" || exit 1
-    [[ -z "$externalPrimordialAccountsFile" ]] || rsync -vPrc -e "ssh ${sshOptions[*]}" "$externalPrimordialAccountsFile" \
+    [[ -z "$externalPrimordialAccountsFile" ]] || rsync --bwlimit=512 -vPrc -e "ssh ${sshOptions[*]}" "$externalPrimordialAccountsFile" \
       "$ipAddress:$remoteExternalPrimordialAccountsFile"
 
     deployBootstrapValidator "$ipAddress"
@@ -546,7 +546,7 @@ prepareDeploy() {
     echo "Fetching current software version"
     (
       set -x
-      rsync -vPrc -e "ssh ${sshOptions[*]}" "${validatorIpList[0]}":~/version.yml current-version.yml
+      rsync --bwlimit=512 -vPrc -e "ssh ${sshOptions[*]}" "${validatorIpList[0]}":~/version.yml current-version.yml
     )
     cat current-version.yml
     if ! diff -q current-version.yml "$SOLANA_ROOT"/solana-release/version.yml; then
