@@ -138,6 +138,7 @@ impl BroadcastRun for FailEntryVerificationBroadcastRun {
         let (peers, peers_and_stakes) = get_broadcast_peers(cluster_info, stakes.as_deref());
 
         broadcast_shreds(
+            cluster_info.id(),
             sock,
             &shreds,
             &peers_and_stakes,

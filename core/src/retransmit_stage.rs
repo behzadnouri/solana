@@ -32,6 +32,7 @@ use std::{
     cmp,
     collections::hash_set::HashSet,
     collections::{BTreeMap, HashMap},
+    convert::TryInto,
     net::UdpSocket,
     ops::{Deref, DerefMut},
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
@@ -344,6 +345,18 @@ fn retransmit(
                 &r_epoch_stakes_cache.stakes_and_index,
                 packet.meta.seed,
             );
+            let seed = packet.meta.seed[..8].try_into().unwrap();
+            let seed = u64::from_le_bytes(seed);
+            if true && seed % 10007 == 0 {
+                let peers: Vec<_> = shuffled_stakes_and_index
+                    .iter()
+                    .map(|(stake, index)| {
+                        let pubkey = r_epoch_stakes_cache.peers[*index].id;
+                        (pubkey, *stake)
+                    })
+                    .collect();
+                println!("seed: {}, retransmit peers: {:?}", seed, peers);
+            }
             peers_len = cmp::max(peers_len, shuffled_stakes_and_index.len());
             // Until the patch is activated, do the old buggy thing.
             if !enable_turbine_retransmit_peers_patch(shred_slot, root_bank.deref()) {

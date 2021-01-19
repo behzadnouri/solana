@@ -7,7 +7,7 @@ use self::{
 };
 use crate::contact_info::ContactInfo;
 use crate::crds_gossip_pull::CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS;
-use crate::weighted_shuffle::weighted_best;
+use crate::weighted_shuffle::{weighted_best, weighted_shuffle};
 use crate::{
     cluster_info::{ClusterInfo, ClusterInfoError},
     poh_recorder::WorkingBankEntry,
@@ -17,6 +17,7 @@ use crossbeam_channel::{
     Receiver as CrossbeamReceiver, RecvTimeoutError as CrossbeamRecvTimeoutError,
     Sender as CrossbeamSender,
 };
+use rand::Rng;
 use solana_ledger::{blockstore::Blockstore, shred::Shred};
 use solana_measure::measure::Measure;
 use solana_metrics::{inc_new_counter_error, inc_new_counter_info};
@@ -34,6 +35,7 @@ use std::{
     thread::{self, Builder, JoinHandle},
     time::{Duration, Instant},
 };
+use std::convert::TryInto;
 
 mod broadcast_fake_shreds_run;
 pub mod broadcast_metrics;
@@ -363,15 +365,17 @@ pub fn get_broadcast_peers(
     cluster_info: &ClusterInfo,
     stakes: Option<&HashMap<Pubkey, u64>>,
 ) -> (Vec<ContactInfo>, Vec<(u64, usize)>) {
-    use crate::cluster_info;
-    let mut peers = cluster_info.tvu_peers();
-    let peers_and_stakes = cluster_info::stake_weight_peers(&mut peers, stakes);
-    (peers, peers_and_stakes)
+    // use crate::cluster_info;
+    // let mut peers = cluster_info.tvu_peers();
+    // let peers_and_stakes = cluster_info::stake_weight_peers(&mut peers, stakes);
+    // (peers, peers_and_stakes)
+    cluster_info.sorted_retransmit_peers_and_stakes(stakes)
 }
 
 /// broadcast messages from the leader to layer 1 nodes
 /// # Remarks
 pub fn broadcast_shreds(
+    self_pubkey: Pubkey,
     s: &UdpSocket,
     shreds: &Arc<Vec<Shred>>,
     peers_and_stakes: &[(u64, usize)],
@@ -387,10 +391,41 @@ pub fn broadcast_shreds(
     let mut shred_select = Measure::start("shred_select");
     let packets: Vec<_> = shreds
         .iter()
-        .map(|shred| {
-            let broadcast_index = weighted_best(&peers_and_stakes, shred.seed());
-
-            (&shred.payload, &peers[broadcast_index].tvu)
+        .flat_map(|shred| {
+            let xbroadcast_index = weighted_best(&peers_and_stakes, shred.seed());
+            let weights = peers_and_stakes.iter().map(|(stake, _)| *stake).collect();
+            let index = weighted_shuffle(weights, shred.seed());
+            let seed = shred.seed()[..8].try_into().unwrap();
+            let seed = u64::from_le_bytes(seed);
+            if true && seed % 10007 == 0 {
+                let peers: Vec<_> = index
+                    .iter()
+                    .map(|i| {
+                        let (stake, j) = peers_and_stakes[*i];
+                        let pubkey = peers[j].id;
+                        (pubkey, stake)
+                    })
+                    .collect();
+                println!("seed: {}, broadcast  peers: {:?}", seed, peers);
+            }
+            // index.into_iter().take(1).map(move |i| {
+            //     let broadcast_index = peers_and_stakes[i].1;
+            //     if false && rand::thread_rng().gen_ratio(1, 100) {
+            //         error!(
+            //             "broadcast index: {} vs {}",
+            //             xbroadcast_index, broadcast_index
+            //         );
+            //     }
+            //     (&shred.payload, &peers[broadcast_index].tvu)
+            // })
+            index.into_iter().find_map(move |i| {
+                let i = peers_and_stakes[i].1;
+                if peers[i].id != self_pubkey {
+                    Some((&shred.payload, &peers[i].tvu))
+                } else {
+                    None
+                }
+            })
         })
         .collect();
     shred_select.stop();

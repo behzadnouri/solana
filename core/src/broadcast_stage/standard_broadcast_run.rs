@@ -348,6 +348,7 @@ impl StandardBroadcastRun {
         // Broadcast the shreds
         let mut transmit_time = Measure::start("broadcast_shreds");
         broadcast_shreds(
+            cluster_info.id(),
             sock,
             &shreds,
             &r_broadcast_peer_cache.peers_and_stakes,
