@@ -383,12 +383,16 @@ fn retransmit(
             let leader =
                 leader_schedule_cache.slot_leader_at(packet.meta.slot, Some(r_bank.as_ref()));
             let mut retransmit_time = Measure::start("retransmit_to");
+            ClusterInfo::retransmit_to(&children, packet, leader, sock, packet.meta.forward)?;
             if !packet.meta.forward {
                 ClusterInfo::retransmit_to(&neighbors, packet, leader, sock, true)?;
-                ClusterInfo::retransmit_to(&children, packet, leader, sock, false)?;
-            } else {
-                ClusterInfo::retransmit_to(&children, packet, leader, sock, true)?;
             }
+            // if !packet.meta.forward {
+            //     ClusterInfo::retransmit_to(&neighbors, packet, leader, sock, true)?;
+            //     ClusterInfo::retransmit_to(&children, packet, leader, sock, false)?;
+            // } else {
+            //     ClusterInfo::retransmit_to(&children, packet, leader, sock, true)?;
+            // }
             retransmit_time.stop();
             retransmit_total += retransmit_time.as_us();
         }

@@ -245,7 +245,6 @@ struct GossipStats {
     get_accounts_hash: Counter,
     all_tvu_peers: Counter,
     tvu_peers: Counter,
-    retransmit_peers: Counter,
     repair_peers: Counter,
     new_push_requests: Counter,
     new_push_requests2: Counter,
@@ -1329,21 +1328,6 @@ impl ClusterInfo {
             .collect()
     }
 
-    /// all peers that have a valid tvu
-    pub fn retransmit_peers(&self) -> Vec<ContactInfo> {
-        self.time_gossip_read_lock("retransmit_peers", &self.stats.retransmit_peers)
-            .crds
-            .get_nodes_contact_info()
-            .filter(|x| {
-                x.id != self.id()
-                    && x.shred_version == self.my_shred_version()
-                    && ContactInfo::is_valid_address(&x.tvu)
-                    && ContactInfo::is_valid_address(&x.tvu_forwards)
-            })
-            .cloned()
-            .collect()
-    }
-
     /// all tvu peers with valid gossip addrs that likely have the slot being requested
     pub fn repair_peers(&self, slot: Slot) -> Vec<ContactInfo> {
         let mut time = Measure::start("repair_peers");
@@ -1407,9 +1391,9 @@ impl ClusterInfo {
         stakes_and_index: &[(u64, usize)],
         seed: [u8; 32],
     ) -> Vec<(u64, usize)> {
-        let stake_weights = stakes_and_index.iter().map(|(w, _)| *w).collect();
+        let stake_weights: Vec<_> = stakes_and_index.iter().map(|(w, _)| *w).collect();
 
-        let shuffle = weighted_shuffle(stake_weights, seed);
+        let shuffle = weighted_shuffle(&stake_weights, seed);
 
         shuffle.iter().map(|x| stakes_and_index[*x]).collect()
     }
@@ -1419,7 +1403,7 @@ impl ClusterInfo {
         &self,
         stakes: Option<&HashMap<Pubkey, u64>>,
     ) -> (Vec<ContactInfo>, Vec<(u64, usize)>) {
-        let mut peers = self.retransmit_peers();
+        let mut peers = self.tvu_peers();
         // insert "self" into this list for the layer and neighborhood computation
         peers.push(self.my_contact_info());
         let stakes_and_index = ClusterInfo::sorted_stakes_with_index(&peers, stakes);
@@ -1471,10 +1455,19 @@ impl ClusterInfo {
         forwarded: bool,
     ) -> Result<()> {
         trace!("retransmit orders {}", peers.len());
+        // XXX should this exclude leader?
         let dests: Vec<_> = peers
             .iter()
             .filter(|v| v.id != slot_leader_pubkey.unwrap_or_default())
-            .map(|v| if forwarded { &v.tvu_forwards } else { &v.tvu })
+            .filter_map(|v| {
+                if !forwarded {
+                    Some(&v.tvu)
+                } else if ContactInfo::is_valid_address(&v.tvu_forwards) {
+                    Some(&v.tvu_forwards)
+                } else {
+                    None
+                }
+            })
             .collect();
 
         let mut sent = 0;
@@ -2701,7 +2694,6 @@ impl ClusterInfo {
                     self.stats.gossip_packets_dropped_count.clear(),
                     i64
                 ),
-                ("retransmit_peers", self.stats.retransmit_peers.clear(), i64),
                 ("repair_peers", self.stats.repair_peers.clear(), i64),
                 (
                     "new_push_requests",
@@ -3183,7 +3175,8 @@ impl Node {
     }
 }
 
-pub fn stake_weight_peers(
+#[cfg(test)]
+fn stake_weight_peers(
     peers: &mut Vec<ContactInfo>,
     stakes: Option<&HashMap<Pubkey, u64>>,
 ) -> Vec<(u64, usize)> {

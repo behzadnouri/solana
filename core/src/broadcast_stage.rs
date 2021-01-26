@@ -7,9 +7,9 @@ use self::{
 };
 use crate::contact_info::ContactInfo;
 use crate::crds_gossip_pull::CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS;
-use crate::weighted_shuffle::weighted_best;
+use crate::weighted_shuffle::weighted_shuffle;
 use crate::{
-    cluster_info::{ClusterInfo, ClusterInfoError},
+    cluster_info::{compute_retransmit_peers, ClusterInfo, ClusterInfoError, DATA_PLANE_FANOUT},
     poh_recorder::WorkingBankEntry,
     result::{Error, Result},
 };
@@ -23,7 +23,7 @@ use solana_metrics::{inc_new_counter_error, inc_new_counter_info};
 use solana_runtime::bank::Bank;
 use solana_sdk::timing::timestamp;
 use solana_sdk::{clock::Slot, pubkey::Pubkey};
-use solana_streamer::sendmmsg::send_mmsg;
+use solana_streamer::sendmmsg::multicast;
 use std::sync::atomic::AtomicU64;
 use std::{
     collections::HashMap,
@@ -363,15 +363,13 @@ pub fn get_broadcast_peers(
     cluster_info: &ClusterInfo,
     stakes: Option<&HashMap<Pubkey, u64>>,
 ) -> (Vec<ContactInfo>, Vec<(u64, usize)>) {
-    use crate::cluster_info;
-    let mut peers = cluster_info.tvu_peers();
-    let peers_and_stakes = cluster_info::stake_weight_peers(&mut peers, stakes);
-    (peers, peers_and_stakes)
+    cluster_info.sorted_retransmit_peers_and_stakes(stakes)
 }
 
 /// broadcast messages from the leader to layer 1 nodes
 /// # Remarks
 pub fn broadcast_shreds(
+    node_pubkey: Pubkey,
     s: &UdpSocket,
     shreds: &Arc<Vec<Shred>>,
     peers_and_stakes: &[(u64, usize)],
@@ -385,25 +383,40 @@ pub fn broadcast_shreds(
         return Ok(());
     }
     let mut shred_select = Measure::start("shred_select");
+    let stakes: Vec<_> = peers_and_stakes.iter().map(|(stake, _)| *stake).collect();
     let packets: Vec<_> = shreds
         .iter()
         .map(|shred| {
-            let broadcast_index = weighted_best(&peers_and_stakes, shred.seed());
-
-            (&shred.payload, &peers[broadcast_index].tvu)
+            let index: Vec<_> = weighted_shuffle(&stakes, shred.seed())
+                .into_iter()
+                .map(|i| peers_and_stakes[i].1)
+                .collect();
+            let node = index
+                .iter()
+                .position(|i| peers[*i].id == node_pubkey)
+                .unwrap();
+            let (broadcast, forwards) = compute_broadcast_peers(DATA_PLANE_FANOUT, node, &index);
+            let broadcast = broadcast.into_iter().map(|i| &peers[i].tvu);
+            let forwards = forwards.into_iter().filter_map(|i| {
+                let addr = &peers[i].tvu_forwards;
+                if ContactInfo::is_valid_address(&addr) {
+                    Some(addr)
+                } else {
+                    None
+                }
+            });
+            let addrs: Vec<_> = broadcast.chain(forwards).collect();
+            (&shred.payload, addrs)
         })
         .collect();
     shred_select.stop();
     transmit_stats.shred_select += shred_select.as_us();
 
-    let mut sent = 0;
     let mut send_mmsg_time = Measure::start("send_mmsg");
-    while sent < packets.len() {
-        match send_mmsg(s, &packets[sent..]) {
-            Ok(n) => sent += n,
-            Err(e) => {
-                return Err(Error::IO(e));
-            }
+    for (payload, addrs) in packets {
+        let mut sent = 0;
+        while sent < addrs.len() {
+            sent += multicast(s, payload, &addrs[sent..])?;
         }
     }
     send_mmsg_time.stop();
@@ -435,6 +448,34 @@ fn num_live_peers(peers: &[ContactInfo]) -> i64 {
         }
     });
     num_live_peers
+}
+
+fn compute_broadcast_peers(
+    fanout: usize,
+    node: usize,
+    index: &[usize],
+) -> (Vec<usize> /*broadcast*/, Vec<usize> /*forwards*/) {
+    debug_assert!(node < index.len());
+    if index.len() < 2 {
+        return (Vec::new(), Vec::new());
+    }
+    // Find first layer neighbors and broadcast root's children.
+    let (mut neighbors, children) = compute_retransmit_peers(fanout, 0, index);
+    debug_assert_eq!(neighbors[0], index[0]);
+    neighbors.remove(0);
+    // If node is the root, broadcast to its children
+    // and forward to the first layer.
+    if node == 0 {
+        return (children, neighbors);
+    }
+    // Otherwise broadcast to the root and forward to the first layer nodes.
+    // If the node is in the first layer also forward to its children.
+    if let Some(pos) = neighbors.iter().position(|n| *n == index[node]) {
+        neighbors.remove(pos);
+        let (_, children) = compute_retransmit_peers(fanout, node, index);
+        neighbors.extend(children);
+    }
+    (vec![index[0]], neighbors)
 }
 
 #[cfg(test)]
@@ -696,5 +737,37 @@ pub mod test {
         }
 
         Blockstore::destroy(&ledger_path).expect("Expected successful database destruction");
+    }
+
+    #[test]
+    fn test_compute_broadcast_peers() {
+        const FANOUT: usize = 3;
+        let index = vec![
+            14, 15, 28, // 1st layer
+            // 2nd layer
+            29, 4, 5, // 1st neighborhood
+            9, 16, 7, // 2nd neighborhood
+            26, 23, 2, // 3rd neighborhood
+        ];
+        // Root node:
+        assert_eq!(
+            compute_broadcast_peers(FANOUT, 0, &index),
+            (vec![29, 9, 26], vec![15, 28])
+        );
+        // First layer node:
+        assert_eq!(
+            compute_broadcast_peers(FANOUT, 1, &index),
+            (vec![14], vec![28, 4, 16, 23])
+        );
+        // The other first layer node:
+        assert_eq!(
+            compute_broadcast_peers(FANOUT, 2, &index),
+            (vec![14], vec![15, 5, 7, 2])
+        );
+        // 2nd layer node
+        assert_eq!(
+            compute_broadcast_peers(FANOUT, 3, &index),
+            (vec![14], vec![15, 28])
+        );
     }
 }

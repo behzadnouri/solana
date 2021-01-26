@@ -42,6 +42,7 @@ fn broadcast_shreds_bench(bencher: &mut Bencher) {
     bencher.iter(move || {
         let shreds = shreds.clone();
         broadcast_shreds(
+            cluster_info.id(),
             &socket,
             &shreds,
             &peers_and_stakes,
