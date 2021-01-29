@@ -24,6 +24,7 @@ use solana_runtime::bank::Bank;
 use solana_sdk::timing::timestamp;
 use solana_sdk::{clock::Slot, pubkey::Pubkey};
 use solana_streamer::sendmmsg::multicast;
+use std::convert::TryInto;
 use std::sync::atomic::AtomicU64;
 use std::{
     collections::HashMap,
@@ -389,10 +390,21 @@ pub fn broadcast_shreds(
     let packets: Vec<_> = shreds
         .iter()
         .map(|shred| {
-            let index: Vec<_> = weighted_shuffle(&stakes, shred.seed())
-                .into_iter()
-                .map(|i| peers_and_stakes[i].1)
-                .collect();
+            let index = weighted_shuffle(&stakes, shred.seed());
+            let seed = shred.seed()[..8].try_into().unwrap();
+            let seed = u64::from_le_bytes(seed);
+            if true && seed % 10007 == 0 {
+                let peers: Vec<_> = index
+                    .iter()
+                    .map(|i| {
+                        let (stake, j) = peers_and_stakes[*i];
+                        let pubkey = peers[j].id;
+                        (pubkey, stake)
+                    })
+                    .collect();
+                println!("seed: {}, broadcast  peers: {:?}", seed, peers);
+            }
+            let index: Vec<_> = index.into_iter().map(|i| peers_and_stakes[i].1).collect();
             // Broadcast to first node.
             // Forward to the rest of the first layer.
             let (neighbors, _) = compute_retransmit_peers(DATA_PLANE_FANOUT, 0, &index);
