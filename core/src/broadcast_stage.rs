@@ -7,7 +7,7 @@ use self::{
 };
 use crate::contact_info::ContactInfo;
 use crate::crds_gossip_pull::CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS;
-use crate::weighted_shuffle::weighted_best;
+use crate::weighted_shuffle::weighted_shuffle;
 use crate::{
     cluster_info::{ClusterInfo, ClusterInfoError},
     poh_recorder::WorkingBankEntry,
@@ -24,6 +24,7 @@ use solana_runtime::bank::Bank;
 use solana_sdk::timing::timestamp;
 use solana_sdk::{clock::Slot, pubkey::Pubkey};
 use solana_streamer::sendmmsg::send_mmsg;
+use std::convert::TryInto;
 use std::sync::atomic::AtomicU64;
 use std::{
     collections::HashMap,
@@ -385,11 +386,26 @@ pub fn broadcast_shreds(
         return Ok(());
     }
     let mut shred_select = Measure::start("shred_select");
+    let stakes: Vec<_> = peers_and_stakes.iter().map(|(stake, _)| *stake).collect();
     let packets: Vec<_> = shreds
         .iter()
         .map(|shred| {
-            let broadcast_index = weighted_best(&peers_and_stakes, shred.seed());
-
+            let index = weighted_shuffle(stakes.clone(), shred.seed());
+            let seed = shred.seed()[..8].try_into().unwrap();
+            let seed = u64::from_le_bytes(seed);
+            if true && seed % 10007 == 0 {
+                let peers: Vec<_> = index
+                    .iter()
+                    .map(|i| {
+                        let (stake, j) = peers_and_stakes[*i];
+                        let pubkey = peers[j].id;
+                        (pubkey, stake)
+                    })
+                    .take(20)
+                    .collect();
+                println!("seed: {}, broadcast  peers: {:?}", seed, peers);
+            }
+            let (_, broadcast_index) = peers_and_stakes[index[0]];
             (&shred.payload, &peers[broadcast_index].tvu)
         })
         .collect();
