@@ -1,4 +1,7 @@
-use crate::progress_map::{LockoutIntervals, ProgressMap};
+use crate::{
+    progress_map::{LockoutIntervals, ProgressMap},
+    pubkey_references::PubkeyReferences,
+};
 use chrono::prelude::*;
 use solana_ledger::{ancestor_iterator::AncestorIterator, blockstore::Blockstore, blockstore_db};
 use solana_measure::measure::Measure;
@@ -211,6 +214,7 @@ impl Tower {
         bank_slot: Slot,
         vote_accounts: F,
         ancestors: &HashMap<Slot, HashSet<Slot>>,
+        all_pubkeys: &mut PubkeyReferences,
     ) -> ComputedBankState
     where
         F: IntoIterator<Item = (Pubkey, (u64, ArcVoteAccount))>,
@@ -243,6 +247,7 @@ impl Tower {
                 Ok(vote_state) => vote_state.clone(),
             };
             for vote in &vote_state.votes {
+                let key = all_pubkeys.get_or_insert(&key);
                 lockout_intervals
                     .entry(vote.expiration_slot())
                     .or_insert_with(Vec::new)
@@ -1265,6 +1270,7 @@ pub mod test {
         collections::HashMap,
         fs::{remove_file, OpenOptions},
         io::{Read, Seek, SeekFrom, Write},
+        rc::Rc,
         sync::RwLock,
     };
     use tempfile::TempDir;
@@ -1374,6 +1380,7 @@ pub mod test {
                 &VoteTracker::default(),
                 &ClusterSlots::default(),
                 &self.bank_forks,
+                &mut PubkeyReferences::default(),
                 &mut self.heaviest_subtree_fork_choice,
             );
 
@@ -1418,6 +1425,7 @@ pub mod test {
                 &self.bank_forks,
                 &mut self.progress,
                 &ABSRequestSender::default(),
+                &mut PubkeyReferences::default(),
                 None,
                 &mut self.heaviest_subtree_fork_choice,
             )
@@ -1459,7 +1467,7 @@ pub mod test {
                 .lockout_intervals
                 .entry(lockout_interval.1)
                 .or_default()
-                .push((lockout_interval.0, *vote_account_pubkey));
+                .push((lockout_interval.0, Rc::new(*vote_account_pubkey)));
         }
 
         fn can_progress_on_fork(
@@ -1985,7 +1993,13 @@ pub mod test {
             bank_weight,
             pubkey_votes,
             ..
-        } = Tower::collect_vote_lockouts(&Pubkey::default(), 1, accounts.into_iter(), &ancestors);
+        } = Tower::collect_vote_lockouts(
+            &Pubkey::default(),
+            1,
+            accounts.into_iter(),
+            &ancestors,
+            &mut PubkeyReferences::default(),
+        );
         assert_eq!(voted_stakes[&0], 2);
         assert_eq!(total_stake, 2);
         let mut pubkey_votes = Arc::try_unwrap(pubkey_votes).unwrap();
@@ -2037,6 +2051,7 @@ pub mod test {
             MAX_LOCKOUT_HISTORY as u64,
             accounts.into_iter(),
             &ancestors,
+            &mut PubkeyReferences::default(),
         );
         for i in 0..MAX_LOCKOUT_HISTORY {
             assert_eq!(voted_stakes[&(i as u64)], 2);
@@ -2343,6 +2358,7 @@ pub mod test {
             vote_to_evaluate,
             accounts.clone().into_iter(),
             &ancestors,
+            &mut PubkeyReferences::default(),
         );
         assert!(tower.check_vote_stake_threshold(vote_to_evaluate, &voted_stakes, total_stake,));
 
@@ -2359,6 +2375,7 @@ pub mod test {
             vote_to_evaluate,
             accounts.into_iter(),
             &ancestors,
+            &mut PubkeyReferences::default(),
         );
         assert!(!tower.check_vote_stake_threshold(vote_to_evaluate, &voted_stakes, total_stake,));
     }
