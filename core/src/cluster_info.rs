@@ -2595,6 +2595,8 @@ impl ClusterInfo {
         feature_set: Option<&FeatureSet>,
         epoch_time_ms: u64,
         should_check_duplicate_instance: bool,
+        cnt: &mut HashMap<String, usize>,
+        xcnt: &mut HashMap<String, usize>,
     ) -> Result<()> {
         let _st = ScopedTimer::from(&self.stats.process_gossip_packets_time);
         self.stats
@@ -2641,10 +2643,16 @@ impl ClusterInfo {
                 }
                 Protocol::PullResponse(from, data) => {
                     check_duplicate_instance(&data)?;
+                    for value in &data {
+                        record_label(&value.label(), cnt);
+                    }
                     pull_responses.push((from, data));
                 }
                 Protocol::PushMessage(from, data) => {
                     check_duplicate_instance(&data)?;
+                    for value in &data {
+                        record_label(&value.label(), xcnt);
+                    }
                     push_messages.push((from, data));
                 }
                 Protocol::PruneMessage(from, data) => prune_messages.push((from, data)),
@@ -2652,6 +2660,8 @@ impl ClusterInfo {
                 Protocol::PongMessage(pong) => pong_messages.push((from_addr, pong)),
             }
         }
+        dump_label_counts("pull", cnt);
+        dump_label_counts("push", xcnt);
         self.stats
             .packets_received_pull_requests_count
             .add_relaxed(pull_requests.len() as u64);
@@ -2696,6 +2706,8 @@ impl ClusterInfo {
         thread_pool: &ThreadPool,
         last_print: &mut Instant,
         should_check_duplicate_instance: bool,
+        cnt: &mut HashMap<String, usize>,
+        xcnt: &mut HashMap<String, usize>,
     ) -> Result<()> {
         const RECV_TIMEOUT: Duration = Duration::from_secs(1);
         let packets: Vec<_> = requests_receiver.recv_timeout(RECV_TIMEOUT)?.packets.into();
@@ -2732,6 +2744,8 @@ impl ClusterInfo {
             feature_set.as_deref(),
             epoch_time_ms,
             should_check_duplicate_instance,
+            cnt,
+            xcnt
         )?;
 
         self.print_reset_stats(last_print);
@@ -2742,7 +2756,27 @@ impl ClusterInfo {
     fn print_reset_stats(&self, last_print: &mut Instant) {
         if last_print.elapsed().as_millis() > 2000 {
             let (table_size, purged_values_size, failed_inserts_size) = {
+                let mut rng = rand::thread_rng();
                 let r_gossip = self.gossip.read().unwrap();
+                let crds = &r_gossip.crds;
+                if crds.len() > 1000 && rng.gen_ratio(1, 10) {
+                    let num_pubkeys = crds.records.len();
+                    let mut cnt = HashMap::<String, usize>::new();
+                    for label in crds.table.keys() {
+                        record_label(label, &mut cnt);
+                    }
+                    let mut cnt: Vec<_> = cnt.into_iter().collect();
+                    cnt.sort_unstable_by_key(|(k, v)| (*v, k.clone()));
+                    for (k, v) in cnt {
+                        if v < num_pubkeys {
+                            error!("crds num {}: {}%", k, v * 100 / num_pubkeys);
+                        } else {
+                            error!("crds num {}: {}x", k, v / num_pubkeys);
+                        }
+                    }
+                    error!("crds num pubkeys: {}", num_pubkeys);
+                    error!("crds num values: {}x", crds.table.len() / num_pubkeys);
+                }
                 (
                     r_gossip.crds.len(),
                     r_gossip.pull.purged_values.len(),
@@ -3052,6 +3086,8 @@ impl ClusterInfo {
                     .build()
                     .unwrap();
                 let mut last_print = Instant::now();
+                let mut cnt = HashMap::new();
+                let mut xcnt = HashMap::new();
                 while !exit.load(Ordering::Relaxed) {
                     if let Err(err) = self.run_listen(
                         &recycler,
@@ -3061,6 +3097,8 @@ impl ClusterInfo {
                         &thread_pool,
                         &mut last_print,
                         should_check_duplicate_instance,
+                        &mut cnt,
+                        &mut xcnt,
                     ) {
                         match err {
                             Error::RecvTimeoutError(_) => {
@@ -3329,6 +3367,54 @@ pub fn stake_weight_peers(
 ) -> Vec<(u64, usize)> {
     peers.dedup();
     ClusterInfo::sorted_stakes_with_index(peers, stakes)
+}
+
+fn dump_label_counts(tag: &str, cnt: &mut HashMap<String, usize>) {
+    let t: usize = cnt.iter().map(|(_, v)| *v).sum();
+    if t > 100_000 {
+        let mut cnt: Vec<_> = std::mem::take(cnt).into_iter().collect();
+        cnt.sort_unstable_by_key(|(k, v)| (*v, k.clone()));
+        for (k, v) in cnt {
+            if v * 100 > t {
+                error!("packet label {} {}: {}%", tag, k, v * 100 / t);
+            }
+        }
+    }
+}
+
+fn record_label(label: &CrdsValueLabel, cnt: &mut HashMap<String, usize>) {
+    match label {
+        CrdsValueLabel::ContactInfo(_) => {
+            *cnt.entry(String::from("ContactInfo")).or_default() += 1;
+        }
+        CrdsValueLabel::Vote(_, _) => {
+            *cnt.entry(String::from("Vote")).or_default() += 1;
+        }
+        CrdsValueLabel::LowestSlot(_) => {
+            *cnt.entry(String::from("LowestSlot")).or_default() += 1;
+        }
+        CrdsValueLabel::SnapshotHashes(_) => {
+            *cnt.entry(String::from("SnapshotHashes")).or_default() += 1;
+        }
+        CrdsValueLabel::EpochSlots(_, _) => {
+            *cnt.entry(String::from("EpochSlots")).or_default() += 1;
+        }
+        CrdsValueLabel::AccountsHashes(_) => {
+            *cnt.entry(String::from("AccountsHashes")).or_default() += 1;
+        }
+        CrdsValueLabel::LegacyVersion(_) => {
+            *cnt.entry(String::from("LegacyVersion")).or_default() += 1;
+        }
+        CrdsValueLabel::Version(_) => {
+            *cnt.entry(String::from("Version")).or_default() += 1;
+        }
+        CrdsValueLabel::NodeInstance(_, _) => {
+            *cnt.entry(String::from("NodeInstance")).or_default() += 1;
+        }
+        CrdsValueLabel::DuplicateShred(_, _) => {
+            *cnt.entry(String::from("DuplicateShred")).or_default() += 1;
+        }
+    }
 }
 
 #[cfg(test)]

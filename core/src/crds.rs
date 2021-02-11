@@ -47,7 +47,7 @@ const MAX_CRDS_VALUES_PER_PUBKEY: usize = 32;
 #[derive(Clone)]
 pub struct Crds {
     /// Stores the map of labels and values
-    table: IndexMap<CrdsValueLabel, VersionedCrdsValue>,
+    pub(crate) table: IndexMap<CrdsValueLabel, VersionedCrdsValue>,
     pub num_inserts: usize, // Only used in tests.
     shards: CrdsShards,
     nodes: IndexSet<usize>, // Indices of nodes' ContactInfo.
@@ -55,7 +55,7 @@ pub struct Crds {
     // Indices of EpochSlots crds values ordered by insert timestamp.
     epoch_slots: BTreeSet<(u64 /*insert timestamp*/, usize)>,
     // Indices of all crds values associated with a node.
-    records: HashMap<Pubkey, IndexSet<usize>>,
+    pub(crate) records: HashMap<Pubkey, IndexSet<usize>>,
 }
 
 #[derive(PartialEq, Debug)]
