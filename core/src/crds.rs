@@ -36,8 +36,8 @@ use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
 use solana_sdk::timing::timestamp;
 use std::cmp;
-use std::collections::{hash_map, HashMap};
-use std::ops::{Index, IndexMut};
+use std::collections::{hash_map, BTreeSet, HashMap};
+use std::ops::{Bound, Index, IndexMut};
 
 const CRDS_SHARDS_BITS: u32 = 8;
 // Limit number of crds values associated with each unique pubkey. This
@@ -52,6 +52,7 @@ pub struct Crds {
     shards: CrdsShards,
     nodes: IndexSet<usize>, // Indices of nodes' ContactInfo.
     votes: IndexSet<usize>, // Indices of Vote crds values.
+    epoch_slots: BTreeSet<(u64 /*insert timestamp*/, usize)>,
     // Indices of all crds values associated with a node.
     records: HashMap<Pubkey, IndexSet<usize>>,
 }
@@ -113,6 +114,7 @@ impl Default for Crds {
             shards: CrdsShards::new(CRDS_SHARDS_BITS),
             nodes: IndexSet::default(),
             votes: IndexSet::default(),
+            epoch_slots: BTreeSet::default(),
             records: HashMap::default(),
         }
     }
@@ -152,6 +154,10 @@ impl Crds {
                     CrdsData::Vote(_, _) => {
                         self.votes.insert(entry_index);
                     }
+                    CrdsData::EpochSlots(_, _) => {
+                        self.epoch_slots
+                            .insert((new_value.insert_timestamp, entry_index));
+                    }
                     _ => (),
                 };
                 self.records
@@ -163,9 +169,18 @@ impl Crds {
                 Ok(None)
             }
             Entry::Occupied(mut entry) if *entry.get() < new_value => {
-                let index = entry.index();
-                self.shards.remove(index, entry.get());
-                self.shards.insert(index, &new_value);
+                let entry_index = entry.index();
+                self.shards.remove(entry_index, entry.get());
+                self.shards.insert(entry_index, &new_value);
+                match new_value.value.data {
+                    CrdsData::EpochSlots(_, _) => {
+                        self.epoch_slots
+                            .remove(&(entry.get().insert_timestamp, entry_index));
+                        self.epoch_slots
+                            .insert((new_value.insert_timestamp, entry_index));
+                    }
+                    _ => (),
+                }
                 self.num_inserts += 1;
                 // As long as the pubkey does not change, self.records
                 // does not need to be updated.
@@ -228,6 +243,13 @@ impl Crds {
     /// Returns all entries which are Vote.
     pub(crate) fn get_votes(&self) -> impl Iterator<Item = &VersionedCrdsValue> {
         self.votes.iter().map(move |i| self.table.index(*i))
+    }
+
+    pub(crate) fn get_epoch_slots(&self, since: u64) -> impl Iterator<Item = &VersionedCrdsValue> {
+        let range = (Bound::Included((since, 0)), Bound::Unbounded);
+        self.epoch_slots
+            .range(range)
+            .map(move |(_, i)| self.table.index(*i))
     }
 
     /// Returns all records associated with a pubkey.
@@ -354,6 +376,9 @@ impl Crds {
             CrdsData::Vote(_, _) => {
                 self.votes.swap_remove(&index);
             }
+            CrdsData::EpochSlots(_, _) => {
+                self.epoch_slots.remove(&(value.insert_timestamp, index));
+            }
             _ => (),
         }
         // Remove the index from records associated with the value's pubkey.
@@ -384,6 +409,10 @@ impl Crds {
                 CrdsData::Vote(_, _) => {
                     self.votes.swap_remove(&size);
                     self.votes.insert(index);
+                }
+                CrdsData::EpochSlots(_, _) => {
+                    self.epoch_slots.remove(&(value.insert_timestamp, size));
+                    self.epoch_slots.insert((value.insert_timestamp, index));
                 }
                 _ => (),
             };
