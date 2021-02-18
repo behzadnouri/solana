@@ -125,6 +125,7 @@ fn start_gossip_node(
     expected_shred_version: Option<u16>,
     gossip_validators: Option<HashSet<Pubkey>>,
     should_check_duplicate_instance: bool,
+    gossip_pull_interval_millis: Option<u64>,
 ) -> (Arc<ClusterInfo>, Arc<AtomicBool>, GossipService) {
     let mut cluster_info = ClusterInfo::new(
         ClusterInfo::gossip_contact_info(
@@ -145,6 +146,7 @@ fn start_gossip_node(
         gossip_socket,
         gossip_validators,
         should_check_duplicate_instance,
+        gossip_pull_interval_millis,
         &gossip_exit_flag,
     );
     (cluster_info, gossip_exit_flag, gossip_service)
@@ -583,6 +585,7 @@ fn rpc_bootstrap(
     use_progress_bar: bool,
     maximum_local_snapshot_age: Slot,
     should_check_duplicate_instance: bool,
+    gossip_pull_interval_millis: Option<u64>,
 ) {
     if !no_port_check {
         let mut order: Vec<_> = (0..cluster_entrypoints.len()).collect();
@@ -612,6 +615,7 @@ fn rpc_bootstrap(
                 validator_config.expected_shred_version,
                 validator_config.gossip_validators.clone(),
                 should_check_duplicate_instance,
+                gossip_pull_interval_millis,
             ));
         }
 
@@ -1460,6 +1464,13 @@ pub fn main() {
                 .help("Disables duplicate instance check")
                 .hidden(true),
         )
+        .arg(
+            Arg::with_name("gossip_pull_interval_millis")
+                .long("gossip-pull-interval-millis")
+                .takes_value(true)
+                .help("Milliseconds between outbound pull requests.")
+                .hidden(true)
+        )
         .after_help("The default subcommand is run")
         .subcommand(
              SubCommand::with_name("init")
@@ -1978,6 +1989,7 @@ pub fn main() {
     solana_runtime::snapshot_utils::remove_tmp_snapshot_archives(&ledger_path);
 
     let should_check_duplicate_instance = !matches.is_present("no_duplicate_instance_check");
+    let gossip_pull_interval_millis = value_t!(matches, "gossip_pull_interval_millis", u64).ok();
     if !cluster_entrypoints.is_empty() {
         rpc_bootstrap(
             &node,
@@ -1992,6 +2004,7 @@ pub fn main() {
             use_progress_bar,
             maximum_local_snapshot_age,
             should_check_duplicate_instance,
+            gossip_pull_interval_millis,
         );
     }
 
@@ -2008,6 +2021,7 @@ pub fn main() {
         cluster_entrypoints,
         &validator_config,
         should_check_duplicate_instance,
+        gossip_pull_interval_millis,
     );
 
     if let Some(filename) = init_complete_file {

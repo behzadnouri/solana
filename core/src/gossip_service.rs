@@ -34,6 +34,8 @@ impl GossipService {
         gossip_socket: UdpSocket,
         gossip_validators: Option<HashSet<Pubkey>>,
         should_check_duplicate_instance: bool,
+        // Milliseconds between outbound pull requests.
+        gossip_pull_interval_millis: Option<u64>,
         exit: &Arc<AtomicBool>,
     ) -> Self {
         let (request_sender, request_receiver) = channel();
@@ -65,7 +67,8 @@ impl GossipService {
             bank_forks,
             response_sender,
             gossip_validators,
-            exit,
+            gossip_pull_interval_millis,
+            exit.clone(),
         );
         let thread_hdls = vec![t_receiver, t_responder, t_listen, t_gossip];
         Self { thread_hdls }
@@ -117,6 +120,7 @@ pub fn discover(
         my_gossip_addr,
         my_shred_version,
         true, // should_check_duplicate_instance,
+        None, // gossip_pull_interval_millis
     );
 
     let id = spy_ref.id();
@@ -277,6 +281,8 @@ fn make_gossip_node(
     gossip_addr: Option<&SocketAddr>,
     shred_version: u16,
     should_check_duplicate_instance: bool,
+    // Milliseconds between outbound pull requests.
+    gossip_pull_interval_millis: Option<u64>,
 ) -> (GossipService, Option<TcpListener>, Arc<ClusterInfo>) {
     let (node, gossip_socket, ip_echo) = if let Some(gossip_addr) = gossip_addr {
         ClusterInfo::gossip_node(&keypair.pubkey(), gossip_addr, shred_version)
@@ -294,6 +300,7 @@ fn make_gossip_node(
         gossip_socket,
         None,
         should_check_duplicate_instance,
+        gossip_pull_interval_millis,
         &exit,
     );
     (gossip_service, ip_echo, cluster_info)
@@ -320,6 +327,7 @@ mod tests {
             tn.sockets.gossip,
             None,
             true, // should_check_duplicate_instance
+            None, // gossip_pull_interval_millis
             &exit,
         );
         exit.store(true, Ordering::Relaxed);

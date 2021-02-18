@@ -256,6 +256,8 @@ impl Validator {
         cluster_entrypoints: Vec<ContactInfo>,
         config: &ValidatorConfig,
         should_check_duplicate_instance: bool,
+        // Milliseconds between outbound pull requests.
+        gossip_pull_interval_millis: Option<u64>,
     ) -> Self {
         let id = identity_keypair.pubkey();
         assert_eq!(id, node.info.id);
@@ -527,6 +529,7 @@ impl Validator {
             node.sockets.gossip,
             config.gossip_validators.clone(),
             should_check_duplicate_instance,
+            gossip_pull_interval_millis,
             &exit,
         );
         let serve_repair = Arc::new(RwLock::new(ServeRepair::new(cluster_info.clone())));
@@ -1435,6 +1438,7 @@ mod tests {
             vec![leader_node.info],
             &config,
             true, // should_check_duplicate_instance
+            None, // gossip_pull_interval_millis
         );
         validator.close();
         remove_dir_all(validator_ledger_path).unwrap();
@@ -1506,6 +1510,7 @@ mod tests {
                     vec![leader_node.info.clone()],
                     &config,
                     true, // should_check_duplicate_instance
+                    None, // gossip_pull_interval_millis
                 )
             })
             .collect();

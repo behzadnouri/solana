@@ -413,6 +413,7 @@ impl TestValidator {
             vec![],
             &validator_config,
             true, // should_check_duplicate_instance
+            None, // gossip_pull_interval_millis,
         ));
 
         // Needed to avoid panics in `solana-responder-gossip` in tests that create a number of

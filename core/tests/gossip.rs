@@ -32,6 +32,7 @@ fn test_node(exit: &Arc<AtomicBool>) -> (Arc<ClusterInfo>, GossipService, UdpSoc
         test_node.sockets.gossip,
         None,
         true, // should_check_duplicate_instance
+        None, // pull_interval_millis
         exit,
     );
     let _ = cluster_info.my_contact_info();
@@ -55,6 +56,7 @@ fn test_node_with_bank(
         test_node.sockets.gossip,
         None,
         true, // should_check_duplicate_instance
+        None, // pull_interval_millis
         exit,
     );
     let _ = cluster_info.my_contact_info();

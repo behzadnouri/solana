@@ -1838,9 +1838,14 @@ impl ClusterInfo {
         bank_forks: Option<Arc<RwLock<BankForks>>>,
         sender: PacketSender,
         gossip_validators: Option<HashSet<Pubkey>>,
-        exit: &Arc<AtomicBool>,
+        // Milliseconds between outbound pull requests.
+        // Defaults to 2 * GOSSIP_SLEEP_MILLIS if none given.
+        gossip_pull_interval_millis: Option<u64>,
+        exit: Arc<AtomicBool>,
     ) -> JoinHandle<()> {
-        let exit = exit.clone();
+        let gossip_pull_interval_millis = gossip_pull_interval_millis
+            .unwrap_or_default()
+            .max(2 * GOSSIP_SLEEP_MILLIS);
         let thread_pool = ThreadPoolBuilder::new()
             .num_threads(std::cmp::min(get_thread_count(), 8))
             .thread_name(|i| format!("ClusterInfo::gossip-{}", i))
@@ -1849,6 +1854,7 @@ impl ClusterInfo {
         Builder::new()
             .name("solana-gossip".to_string())
             .spawn(move || {
+                let mut last_pull = timestamp();
                 let mut last_push = timestamp();
                 let mut last_contact_info_trace = timestamp();
                 let mut last_contact_info_save = timestamp();
@@ -1862,7 +1868,6 @@ impl ClusterInfo {
                     let value = CrdsValue::new_signed(value, &self.keypair);
                     self.push_message(value);
                 }
-                let mut generate_pull_requests = true;
                 loop {
                     let start = timestamp();
                     thread_mem_usage::datapoint("solana-gossip");
@@ -1891,7 +1896,12 @@ impl ClusterInfo {
                         }
                         None => HashMap::new(),
                     };
-
+                    let now = timestamp();
+                    let generate_pull_requests =
+                        now.saturating_sub(last_pull) > gossip_pull_interval_millis;
+                    if generate_pull_requests {
+                        last_pull = now;
+                    }
                     let _ = self.run_gossip(
                         &thread_pool,
                         gossip_validators.as_ref(),
@@ -1919,7 +1929,6 @@ impl ClusterInfo {
                         let time_left = GOSSIP_SLEEP_MILLIS - elapsed;
                         sleep(Duration::from_millis(time_left));
                     }
-                    generate_pull_requests = !generate_pull_requests;
                 }
             })
             .unwrap()
