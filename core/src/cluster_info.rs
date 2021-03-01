@@ -17,6 +17,7 @@ use crate::{
     crds_gossip::CrdsGossip,
     crds_gossip_error::CrdsGossipError,
     crds_gossip_pull::{CrdsFilter, ProcessPullStats, CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS},
+    crds_gossip_push::CRDS_GOSSIP_PUSH_MSG_TIMEOUT_MS,
     crds_value::{
         self, CrdsData, CrdsValue, CrdsValueLabel, EpochSlotsIndex, LowestSlot, NodeInstance,
         SnapshotHash, Version, Vote, MAX_WALLCLOCK,
@@ -275,6 +276,7 @@ struct GossipStats {
     process_pull_response_timeout: Counter,
     process_pull_response_fail_insert: Counter,
     process_pull_response_fail_timeout: Counter,
+    process_pull_response_obsolete_count: Counter,
     process_pull_response_success: Counter,
     process_pull_requests: Counter,
     generate_pull_responses: Counter,
@@ -2223,6 +2225,15 @@ impl ClusterInfo {
         if responses.is_empty() {
             return;
         }
+        // Count number of old values!
+        let cutoff = timestamp().saturating_sub(2 * CRDS_GOSSIP_PUSH_MSG_TIMEOUT_MS);
+        self.stats.process_pull_response_obsolete_count.add_relaxed(
+            responses
+                .iter()
+                .flat_map(|(_, values)| values)
+                .filter(|v| v.wallclock() < cutoff)
+                .count() as u64,
+        );
         fn extend<K, V>(hash_map: &mut HashMap<K, Vec<V>>, (key, mut value): (K, Vec<V>))
         where
             K: Eq + std::hash::Hash,
@@ -2838,6 +2849,11 @@ impl ClusterInfo {
                 (
                     "pull_response_fail_timeout",
                     self.stats.process_pull_response_fail_timeout.clear(),
+                    i64
+                ),
+                (
+                    "pull_response_obsolete_count",
+                    self.stats.process_pull_response_obsolete_count.clear(),
                     i64
                 ),
                 (
