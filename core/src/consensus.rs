@@ -354,7 +354,7 @@ impl Tower {
         slot: Slot,
         hash: Hash,
         last_voted_slot_in_bank: Option<Slot>,
-    ) -> (Vote, Vec<Slot> /*VoteState.tower*/) {
+    ) -> (Vote, usize) {
         let mut local_vote_state = local_vote_state.clone();
         let vote = Vote::new(vec![slot], hash);
         local_vote_state.process_vote_unchecked(&vote);
@@ -374,7 +374,7 @@ impl Tower {
             slots,
             local_vote_state.votes
         );
-        (Vote::new(slots, hash), local_vote_state.tower())
+        (Vote::new(slots, hash), local_vote_state.votes.len() - 1)
     }
 
     fn last_voted_slot_in_bank(bank: &Bank, vote_account_pubkey: &Pubkey) -> Option<Slot> {
@@ -383,11 +383,7 @@ impl Tower {
         slot
     }
 
-    pub fn new_vote_from_bank(
-        &self,
-        bank: &Bank,
-        vote_account_pubkey: &Pubkey,
-    ) -> (Vote, Vec<Slot> /*VoteState.tower*/) {
+    pub fn new_vote_from_bank(&self, bank: &Bank, vote_account_pubkey: &Pubkey) -> (Vote, usize) {
         let voted_slot = Self::last_voted_slot_in_bank(bank, vote_account_pubkey);
         Self::new_vote(&self.lockouts, bank.slot(), bank.hash(), voted_slot)
     }
@@ -2266,10 +2262,10 @@ pub mod test {
     #[test]
     fn test_new_vote() {
         let local = VoteState::default();
-        let (vote, tower_slots) = Tower::new_vote(&local, 0, Hash::default(), None);
+        let vote = Tower::new_vote(&local, 0, Hash::default(), None);
         assert_eq!(local.votes.len(), 0);
-        assert_eq!(vote.slots, vec![0]);
-        assert_eq!(tower_slots, vec![0]);
+        assert_eq!(vote.0.slots, vec![0]);
+        assert_eq!(vote.1, 0);
     }
 
     #[test]
@@ -2289,9 +2285,9 @@ pub mod test {
         };
         local.process_vote_unchecked(&vote);
         assert_eq!(local.votes.len(), 1);
-        let (vote, tower_slots) = Tower::new_vote(&local, 1, Hash::default(), Some(0));
-        assert_eq!(vote.slots, vec![1]);
-        assert_eq!(tower_slots, vec![0, 1]);
+        let vote = Tower::new_vote(&local, 1, Hash::default(), Some(0));
+        assert_eq!(vote.0.slots, vec![1]);
+        assert_eq!(vote.1, 1);
     }
 
     #[test]
@@ -2304,10 +2300,10 @@ pub mod test {
         };
         local.process_vote_unchecked(&vote);
         assert_eq!(local.votes.len(), 1);
-        let (vote, tower_slots) = Tower::new_vote(&local, 3, Hash::default(), Some(0));
-        assert_eq!(vote.slots, vec![3]);
-        // First vote expired, so should be evicted from tower.
-        assert_eq!(tower_slots, vec![3]);
+        let vote = Tower::new_vote(&local, 3, Hash::default(), Some(0));
+        //first vote expired, so index should be 0
+        assert_eq!(vote.0.slots, vec![3]);
+        assert_eq!(vote.1, 0);
     }
 
     #[test]
