@@ -239,6 +239,14 @@ impl CrdsGossipPull {
         stakes: &HashMap<Pubkey, u64>,
     ) -> Vec<(f32, &'a ContactInfo)> {
         let mut rng = rand::thread_rng();
+        if rng.gen_ratio(1, 50) {
+            info!("pull_options crds.records.len(): {}", crds.records.len());
+            info!("pull_options stakes.len(): {}", stakes.len());
+            info!(
+                "pull_options gossip_validators.len(): {:?}",
+                gossip_validators.map(|x| x.len())
+            );
+        }
         let active_cutoff = now.saturating_sub(PULL_ACTIVE_TIMEOUT_MS);
         crds.get_nodes()
             .filter_map(|value| {

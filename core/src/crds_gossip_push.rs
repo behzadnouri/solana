@@ -309,6 +309,18 @@ impl CrdsGossipPush {
         ratio: usize,
     ) {
         let mut rng = rand::thread_rng();
+        if rng.gen_ratio(1, 50) {
+            info!(
+                "refresh_push_active_set crds.records.len(): {}",
+                crds.records.len()
+            );
+            info!("refresh_push_active_set stakes.len(): {}", stakes.len());
+            info!(
+                "refresh_push_active_set gossip_validators.len(): {:?}",
+                gossip_validators.map(|x| x.len())
+            );
+            info!("refresh_push_active_set network_size: {}", network_size);
+        }
         let need = Self::compute_need(self.num_active, self.active_set.len(), ratio);
         let mut new_items = HashMap::new();
 
@@ -370,6 +382,14 @@ impl CrdsGossipPush {
     ) -> Vec<(f32, &'a ContactInfo)> {
         let now = timestamp();
         let mut rng = rand::thread_rng();
+        if rng.gen_ratio(1, 50) {
+            info!("push_options crds.records.len(): {}", crds.records.len());
+            info!("push_options stakes.len(): {}", stakes.len());
+            info!(
+                "push_options gossip_validators.len(): {:?}",
+                gossip_validators.map(|x| x.len())
+            );
+        }
         let max_weight = u16::MAX as f32 - 1.0;
         let active_cutoff = now.saturating_sub(PUSH_ACTIVE_TIMEOUT_MS);
         crds.get_nodes()
