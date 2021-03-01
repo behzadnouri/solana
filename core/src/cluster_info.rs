@@ -1099,6 +1099,8 @@ impl ClusterInfo {
 
     pub fn push_vote(&self, tower: &[Slot], vote: Transaction) {
         debug_assert!(tower.iter().tuple_windows().all(|(a, b)| a < b));
+        // Only consider the 2 most recent votes:
+        let tower = &tower[tower.len().saturating_sub(2)..];
         let now = timestamp();
         // Find a crds vote which is evicted from the tower, and recycle its
         // vote-index. This can be either an old vote which is popped off the
@@ -1147,10 +1149,10 @@ impl ClusterInfo {
         debug_assert_eq!(vote.slot().unwrap(), *tower.last().unwrap());
         let vote = CrdsData::Vote(vote_index, vote);
         let vote = CrdsValue::new_signed(vote, &self.keypair);
-        self.gossip
+        self.local_message_pending_push_queue
             .write()
             .unwrap()
-            .process_push_message(&self_pubkey, vec![vote], now);
+            .push((vote, now));
     }
 
     pub fn send_vote(&self, vote: &Transaction) -> Result<()> {
