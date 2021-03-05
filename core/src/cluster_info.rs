@@ -603,16 +603,6 @@ impl ClusterInfo {
         self.contact_debug_interval = new;
     }
 
-    pub fn update_contact_info<F>(&self, modify: F)
-    where
-        F: FnOnce(&mut ContactInfo),
-    {
-        let my_id = self.id();
-        modify(&mut self.my_contact_info.write().unwrap());
-        assert_eq!(self.my_contact_info.read().unwrap().id, my_id);
-        self.insert_self()
-    }
-
     fn push_self(
         &self,
         stakes: &HashMap<Pubkey, u64>,
@@ -3717,40 +3707,6 @@ mod tests {
             .crds
             .lookup(&label)
             .is_some());
-    }
-    #[test]
-    #[should_panic]
-    fn test_update_contact_info() {
-        let d = ContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), timestamp());
-        let cluster_info = ClusterInfo::new_with_invalid_keypair(d);
-        let entry_label = CrdsValueLabel::ContactInfo(cluster_info.id());
-        assert!(cluster_info
-            .gossip
-            .read()
-            .unwrap()
-            .crds
-            .lookup(&entry_label)
-            .is_some());
-
-        let now = timestamp();
-        cluster_info.update_contact_info(|ci| ci.wallclock = now);
-        assert_eq!(
-            cluster_info
-                .gossip
-                .read()
-                .unwrap()
-                .crds
-                .lookup(&entry_label)
-                .unwrap()
-                .contact_info()
-                .unwrap()
-                .wallclock,
-            now
-        );
-
-        // Inserting Contactinfo with different pubkey should panic,
-        // and update should fail
-        cluster_info.update_contact_info(|ci| ci.id = solana_sdk::pubkey::new_rand())
     }
 
     fn assert_in_range(x: u16, range: (u16, u16)) {
