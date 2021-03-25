@@ -637,6 +637,7 @@ impl BankingStage {
             .zip(txs.iter())
             .enumerate()
             .filter_map(|(i, ((r, _h), x))| {
+                // XXX Does this make the batch small?
                 if Bank::can_commit(r) {
                     Some((x.clone(), i))
                 } else {
@@ -650,6 +651,7 @@ impl BankingStage {
         debug!("num_to_commit: {} ", num_to_commit);
         // unlock all the accounts with errors which are filtered by the above `filter_map`
         if !processed_transactions.is_empty() {
+            // XXX these are small
             inc_new_counter_info!("banking_stage-record_count", 1);
             inc_new_counter_info!("banking_stage-record_transactions", num_to_commit);
 
@@ -731,8 +733,10 @@ impl BankingStage {
         let freeze_lock = bank.freeze_lock();
 
         let mut record_time = Measure::start("record_time");
+        // XXX Transactions which can be commited here are small.
         let (num_to_commit, retryable_record_txs) =
             Self::record_transactions(bank.slot(), txs, &results, poh);
+        // XXX From these counters cannot say if the batches are large!
         inc_new_counter_info!(
             "banking_stage-record_transactions_num_to_commit",
             *num_to_commit.as_ref().unwrap_or(&0)
@@ -1022,7 +1026,9 @@ impl BankingStage {
         packet_indexes: Vec<usize>,
         transaction_status_sender: Option<TransactionStatusSender>,
         gossip_vote_sender: &ReplayVoteSender,
-    ) -> (usize, usize, Vec<usize>) {
+    ) -> (usize, usize,
+          Vec<usize>, // filtered_unprocessed_packet_indexes
+          ) {
         let (transactions, transaction_to_packet_indexes) = Self::transactions_from_packets(
             msgs,
             &packet_indexes,
@@ -1120,7 +1126,7 @@ impl BankingStage {
     /// Process the incoming packets
     pub fn process_packets(
         my_pubkey: &Pubkey,
-        verified_receiver: &CrossbeamReceiver<Vec<Packets>>,
+        verified_receiver: &CrossbeamReceiver<Vec<Packets>>,  // XXX
         poh: &Arc<Mutex<PohRecorder>>,
         recv_start: &mut Instant,
         recv_timeout: Duration,
@@ -1134,7 +1140,9 @@ impl BankingStage {
         recorder: &TransactionRecorder,
     ) -> Result<(), RecvTimeoutError> {
         let mut recv_time = Measure::start("process_packets_recv");
+        // XXX Maybe this should keep reading from the channel.
         let mms = verified_receiver.recv_timeout(recv_timeout)?;
+        // XXX add some metrics here!
         recv_time.stop();
 
         let mms_len = mms.len();
@@ -1147,6 +1155,10 @@ impl BankingStage {
             id,
         );
         inc_new_counter_debug!("banking_stage-transactions_received", count);
+        info!("transactions received: {}", count);
+        // XXX This is bounded by 128 by either of:
+        // PACKETS_PER_BATCH
+        // MAX_NUM_TRANSACTIONS_PER_BATCH
         let mut proc_start = Measure::start("process_packets_transactions_process");
         let mut new_tx_count = 0;
 

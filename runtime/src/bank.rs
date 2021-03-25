@@ -2888,6 +2888,7 @@ impl Bank {
                 .filter_map(|(index, (_, res))| match res {
                     Err(TransactionError::AccountInUse) => {
                         error_counters.account_in_use += 1;
+                        // XXX This is returning shuffled order!
                         Some(index)
                     }
                     Ok(_) => None,
