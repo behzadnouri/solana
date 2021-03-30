@@ -584,7 +584,6 @@ impl BankingStage {
             };
 
             match Self::process_packets(
-                &my_pubkey,
                 &verified_receiver,
                 &poh_recorder,
                 recv_start,
@@ -1117,9 +1116,8 @@ impl BankingStage {
     #[allow(clippy::too_many_arguments)]
     /// Process the incoming packets
     pub fn process_packets(
-        my_pubkey: &Pubkey,
         verified_receiver: &CrossbeamReceiver<Vec<Packets>>,
-        poh: &Arc<Mutex<PohRecorder>>,
+        poh: &Mutex<PohRecorder>,
         recv_start: &mut Instant,
         recv_timeout: Duration,
         id: u32,
@@ -1128,15 +1126,14 @@ impl BankingStage {
         gossip_vote_sender: &ReplayVoteSender,
         buffered_packets: &mut UnprocessedPackets,
         banking_stage_stats: &BankingStageStats,
-        duplicates: &Arc<Mutex<(LruCache<u64, ()>, PacketHasher)>>,
+        duplicates: &Mutex<(LruCache<u64, ()>, PacketHasher)>,
         recorder: &TransactionRecorder,
     ) -> Result<(), RecvTimeoutError> {
-        let mut recv_time = Measure::start("process_packets_recv");
-        let mms = verified_receiver.recv_timeout(recv_timeout)?;
-        recv_time.stop();
-
-        let mms_len = mms.len();
-        let count: usize = mms.iter().map(|x| x.packets.len()).sum();
+        let mut packets: Vec<Packets> = verified_receiver.recv_timeout(recv_timeout)?;
+        packets.extend(verified_receiver.try_iter().flatten());
+        let packets = packets.into_iter().map(|p| p.packets).flatten();
+        let packets = Packets::new(packets.collect());
+        let count = packets.packets.len();
         debug!(
             "@{:?} process start stalled for: {:?}ms txs: {} id: {}",
             timestamp(),
@@ -1145,87 +1142,46 @@ impl BankingStage {
             id,
         );
         inc_new_counter_debug!("banking_stage-transactions_received", count);
+        info!("transactions received: {}", count);
         let mut proc_start = Measure::start("process_packets_transactions_process");
-        let mut new_tx_count = 0;
-
-        let mut mms_iter = mms.into_iter();
-        let mut dropped_batches_count = 0;
-        let mut newly_buffered_packets_count = 0;
-        while let Some(msgs) = mms_iter.next() {
-            let packet_indexes = Self::generate_packet_indexes(&msgs.packets);
-            let bank_start = poh.lock().unwrap().bank_start();
-            if PohRecorder::get_bank_still_processing_txs(&bank_start).is_none() {
-                Self::push_unprocessed(
-                    buffered_packets,
-                    msgs,
-                    packet_indexes,
-                    &mut dropped_batches_count,
-                    &mut newly_buffered_packets_count,
-                    batch_limit,
-                    duplicates,
-                );
-                continue;
-            }
-            let (bank, bank_creation_time) = bank_start.unwrap();
-
-            let (processed, verified_txs_len, unprocessed_indexes) =
-                Self::process_packets_transactions(
-                    &bank,
-                    &bank_creation_time,
-                    recorder,
-                    &msgs,
-                    packet_indexes,
-                    transaction_status_sender.clone(),
-                    gossip_vote_sender,
-                );
-
-            new_tx_count += processed;
-
-            // Collect any unprocessed transactions in this batch for forwarding
-            Self::push_unprocessed(
-                buffered_packets,
-                msgs,
-                unprocessed_indexes,
-                &mut dropped_batches_count,
-                &mut newly_buffered_packets_count,
-                batch_limit,
-                duplicates,
-            );
-
-            // If there were retryable transactions, add the unexpired ones to the buffered queue
-            if processed < verified_txs_len {
-                let next_leader = poh.lock().unwrap().next_slot_leader();
-                // Walk thru rest of the transactions and filter out the invalid (e.g. too old) ones
-                #[allow(clippy::while_let_on_iterator)]
-                while let Some(msgs) = mms_iter.next() {
-                    let packet_indexes = Self::generate_packet_indexes(&msgs.packets);
-                    let unprocessed_indexes = Self::filter_unprocessed_packets(
-                        &bank,
-                        &msgs,
-                        &packet_indexes,
-                        &my_pubkey,
-                        next_leader,
-                    );
-                    Self::push_unprocessed(
-                        buffered_packets,
-                        msgs,
-                        unprocessed_indexes,
-                        &mut dropped_batches_count,
-                        &mut newly_buffered_packets_count,
-                        batch_limit,
-                        duplicates,
-                    );
+        let packet_indexes = Self::generate_packet_indexes(&packets.packets);
+        let bank_start = poh.lock().unwrap().bank_start();
+        let (new_tx_count, unprocessed_indices) =
+            match PohRecorder::get_bank_still_processing_txs(&bank_start) {
+                None => (0, packet_indexes),
+                Some(_) => {
+                    let (bank, bank_creation_time) = bank_start.unwrap();
+                    let (processed, _verified_txs_len, unprocessed_indices) =
+                        Self::process_packets_transactions(
+                            &bank,
+                            &bank_creation_time,
+                            recorder,
+                            &packets,
+                            packet_indexes,
+                            transaction_status_sender,
+                            gossip_vote_sender,
+                        );
+                    (processed, unprocessed_indices)
                 }
-            }
-        }
-
+            };
+        // Collect any unprocessed transactions in this batch for forwarding.
+        let mut newly_buffered_packets_count = 0;
+        let mut dropped_batches_count = 0;
+        Self::push_unprocessed(
+            buffered_packets,
+            packets,
+            unprocessed_indices,
+            &mut dropped_batches_count,
+            &mut newly_buffered_packets_count,
+            batch_limit,
+            duplicates,
+        );
         proc_start.stop();
 
         inc_new_counter_debug!("banking_stage-time_ms", proc_start.as_ms() as usize);
         debug!(
-            "@{:?} done processing transaction batches: {} time: {:?}ms tx count: {} tx/s: {} total count: {} id: {}",
+            "@{:?} done processing transaction batches: time: {:?}ms tx count: {} tx/s: {} total count: {} id: {}",
             timestamp(),
-            mms_len,
             proc_start.as_ms(),
             new_tx_count,
             (new_tx_count as f32) / (proc_start.as_s()),
@@ -1258,7 +1214,7 @@ impl BankingStage {
         dropped_batches_count: &mut usize,
         newly_buffered_packets_count: &mut usize,
         batch_limit: usize,
-        duplicates: &Arc<Mutex<(LruCache<u64, ()>, PacketHasher)>>,
+        duplicates: &Mutex<(LruCache<u64, ()>, PacketHasher)>,
     ) {
         {
             let mut duplicates = duplicates.lock().unwrap();
