@@ -455,6 +455,15 @@ impl BankingStage {
             would_be_leader,
             would_be_leader_shortly,
         );
+        info!(
+            "buffered packets: {}/{}, decision: {:?}",
+            buffered_packets
+                .iter()
+                .map(|(p, _, _)| p.packets.len())
+                .sum::<usize>(),
+            buffered_packets.len(),
+            decision
+        );
 
         match decision {
             BufferedPacketsDecision::Consume(max_tx_ingestion_ns) => {
@@ -1156,7 +1165,6 @@ impl BankingStage {
             id,
         );
         inc_new_counter_debug!("banking_stage-transactions_received", count);
-        info!("transactions received: {}", count);
         let mut proc_start = Measure::start("process_packets_transactions_process");
         let packet_indexes = Self::generate_packet_indexes(&packets.packets);
         let bank_start = poh.lock().unwrap().bank_start();
@@ -1178,6 +1186,11 @@ impl BankingStage {
                     (processed, unprocessed_indices)
                 }
             };
+        info!(
+            "processed transactions: {}/{}",
+            count - unprocessed_indices.len(),
+            count
+        );
         // Collect any unprocessed transactions in this batch for forwarding.
         let mut newly_buffered_packets_count = 0;
         let mut dropped_batches_count = 0;
@@ -1189,6 +1202,14 @@ impl BankingStage {
             &mut newly_buffered_packets_count,
             batch_limit,
             duplicates,
+        );
+        info!(
+            "buffered packets: {}/{}",
+            buffered_packets
+                .iter()
+                .map(|(p, _, _)| p.packets.len())
+                .sum::<usize>(),
+            buffered_packets.len(),
         );
         proc_start.stop();
 
