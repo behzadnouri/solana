@@ -1149,7 +1149,8 @@ impl BankingStage {
         inc_new_counter_debug!("banking_stage-transactions_received", count);
         let mut proc_start = Measure::start("process_packets_transactions_process");
         let mut new_tx_count = 0;
-
+        let packets = mms.into_iter().flat_map(|p| p.packets).collect();
+        let mms = vec![Packets::new(packets)];
         let mut mms_iter = mms.into_iter();
         let mut dropped_batches_count = 0;
         let mut newly_buffered_packets_count = 0;
