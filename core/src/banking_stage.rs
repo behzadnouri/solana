@@ -1143,6 +1143,9 @@ impl BankingStage {
         // packets.extend(verified_receiver.try_iter().flatten());
         // let packets = packets.into_iter().flat_map(|p| p.packets);
         // let packets = Packets::new(packets.collect());
+        if packets.is_empty() {
+            return Ok(());
+        }
         let packets = Packets::new(packets);
         let count = packets.packets.len();
         debug!(
