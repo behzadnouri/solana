@@ -1129,17 +1129,17 @@ impl BankingStage {
         duplicates: &Mutex<(LruCache<u64, ()>, PacketHasher)>,
         recorder: &TransactionRecorder,
     ) -> Result<(), RecvTimeoutError> {
-        let mut packets: Vec<Packet> = verified_receiver
+        let packets: Vec<Packet> = verified_receiver
             .recv_timeout(recv_timeout)?
             .into_iter()
             .flat_map(|p| p.packets)
             .collect();
-        for recv in verified_receiver.try_iter() {
-            packets.extend(recv.into_iter().flat_map(|p| p.packets));
-            if packets.len() >= 128 {
-                break;
-            }
-        }
+        // for recv in verified_receiver.try_iter() {
+        //     packets.extend(recv.into_iter().flat_map(|p| p.packets));
+        //     if packets.len() >= 128 {
+        //         break;
+        //     }
+        // }
         // packets.extend(verified_receiver.try_iter().flatten());
         // let packets = packets.into_iter().flat_map(|p| p.packets);
         // let packets = Packets::new(packets.collect());
