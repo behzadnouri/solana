@@ -263,6 +263,7 @@ impl BankingStage {
     ) -> std::io::Result<()> {
         let packets = Self::filter_valid_packets_for_forwarding(unprocessed_packets.iter());
         inc_new_counter_info!("banking_stage-forwarded_packets", packets.len());
+        info!("forward: {} packets to {}", packets.len(), tpu_forwards);
         for p in packets {
             socket.send_to(&p.data[..p.meta.size], &tpu_forwards)?;
         }
@@ -390,6 +391,9 @@ impl BankingStage {
         would_be_leader: bool,
         would_be_leader_shortly: bool,
     ) -> BufferedPacketsDecision {
+        let pk1 = format!("{}", my_pubkey);
+        let pk2 = format!("{:?}", leader_pubkey);
+        info!("me: {}, leader: {:?}", &pk1[..16], &pk2[..16]);
         leader_pubkey.map_or(
             // If leader is not known, return the buffered packets as is
             BufferedPacketsDecision::Hold,
@@ -455,6 +459,15 @@ impl BankingStage {
             would_be_leader,
             would_be_leader_shortly,
         );
+        info!(
+            "buffered packets: {}/{}, decision: {:?}",
+            buffered_packets
+                .iter()
+                .map(|(p, _, _)| p.packets.len())
+                .sum::<usize>(),
+            buffered_packets.len(),
+            decision
+        );
 
         match decision {
             BufferedPacketsDecision::Consume(max_tx_ingestion_ns) => {
@@ -514,8 +527,11 @@ impl BankingStage {
                 };
 
                 leader_addr.map_or((), |leader_addr| {
-                    let _ =
+                    let err =
                         Self::forward_buffered_packets(&socket, &leader_addr, &buffered_packets);
+                    if let Err(err) = err {
+                        error!("forward error: {}", err);
+                    }
                     if hold {
                         buffered_packets.retain(|b| b.1.is_empty());
                         for b in buffered_packets.iter_mut() {
@@ -550,6 +566,11 @@ impl BankingStage {
         let mut buffered_packets = VecDeque::with_capacity(batch_limit);
         let banking_stage_stats = BankingStageStats::new(id);
         loop {
+            info!(
+                "#{}) process buffered packets: {}",
+                id,
+                buffered_packets.len(),
+            );
             while !buffered_packets.is_empty() {
                 let decision = Self::process_buffered_packets(
                     &my_pubkey,
@@ -582,6 +603,7 @@ impl BankingStage {
                 Duration::from_millis(100)
             };
 
+            info!("#{}) process packets", id);
             match Self::process_packets(
                 &my_pubkey,
                 &verified_receiver,
@@ -1136,24 +1158,31 @@ impl BankingStage {
 
         let mms_len = mms.len();
         let count: usize = mms.iter().map(|x| x.packets.len()).sum();
-        debug!(
+        info!("#{}) packets received: {}", id, count);
+        info!(
             "@{:?} process start stalled for: {:?}ms txs: {} id: {}",
             timestamp(),
             duration_as_ms(&recv_start.elapsed()),
             count,
             id,
         );
-        inc_new_counter_debug!("banking_stage-transactions_received", count);
+        inc_new_counter_info!("banking_stage-transactions_received", count);
         let mut proc_start = Measure::start("process_packets_transactions_process");
         let mut new_tx_count = 0;
 
+        // XXX Uncommeting these lines breaks the cluster:
+        // let packets = mms.into_iter().flat_map(|p| p.packets).collect();
+        // let mms = vec![Packets::new(packets)];
         let mut mms_iter = mms.into_iter();
         let mut dropped_batches_count = 0;
         let mut newly_buffered_packets_count = 0;
+        // Compute these once for the entire while loop!
+        let bank_start = poh.lock().unwrap().bank_start();
+        let bank_still_processing_txs =
+            PohRecorder::get_bank_still_processing_txs(&bank_start).is_none();
         while let Some(msgs) = mms_iter.next() {
             let packet_indexes = Self::generate_packet_indexes(&msgs.packets);
-            let bank_start = poh.lock().unwrap().bank_start();
-            if PohRecorder::get_bank_still_processing_txs(&bank_start).is_none() {
+            if bank_still_processing_txs {
                 Self::push_unprocessed(
                     buffered_packets,
                     msgs,
@@ -1165,7 +1194,7 @@ impl BankingStage {
                 );
                 continue;
             }
-            let (bank, bank_creation_time) = bank_start.unwrap();
+            let (bank, bank_creation_time) = bank_start.as_ref().unwrap();
 
             let (processed, verified_txs_len, unprocessed_indexes) =
                 Self::process_packets_transactions(
@@ -1177,6 +1206,12 @@ impl BankingStage {
                     transaction_status_sender.clone(),
                     gossip_vote_sender,
                 );
+            info!(
+                "#{}) processed transactions: {}/{}",
+                id,
+                msgs.packets.len() - unprocessed_indexes.len(),
+                msgs.packets.len()
+            );
 
             new_tx_count += processed;
 
@@ -1192,7 +1227,8 @@ impl BankingStage {
             );
 
             // If there were retryable transactions, add the unexpired ones to the buffered queue
-            if processed < verified_txs_len {
+            // Disable this branch.
+            if false && processed < verified_txs_len {
                 let next_leader = poh.lock().unwrap().next_slot_leader();
                 // Walk thru rest of the transactions and filter out the invalid (e.g. too old) ones
                 #[allow(clippy::while_let_on_iterator)]
@@ -1221,7 +1257,7 @@ impl BankingStage {
         proc_start.stop();
 
         inc_new_counter_debug!("banking_stage-time_ms", proc_start.as_ms() as usize);
-        debug!(
+        info!(
             "@{:?} done processing transaction batches: {} time: {:?}ms tx count: {} tx/s: {} total count: {} id: {}",
             timestamp(),
             mms_len,
@@ -1259,6 +1295,11 @@ impl BankingStage {
         batch_limit: usize,
         duplicates: &Arc<Mutex<(LruCache<u64, ()>, PacketHasher)>>,
     ) {
+        info!(
+            "push unprocessed: {}/{}",
+            packet_indexes.len(),
+            packets.packets.len()
+        );
         {
             let mut duplicates = duplicates.lock().unwrap();
             let (cache, hasher) = duplicates.deref_mut();
@@ -1279,6 +1320,11 @@ impl BankingStage {
                 unprocessed_packets.pop_front();
             }
             *newly_buffered_packets_count += packet_indexes.len();
+            info!(
+                "push unprocessed done: {}/{}",
+                packet_indexes.len(),
+                packets.packets.len()
+            );
             unprocessed_packets.push_back((packets, packet_indexes, false));
         }
     }

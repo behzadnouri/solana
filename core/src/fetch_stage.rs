@@ -86,7 +86,7 @@ impl FetchStage {
             .unwrap()
             .would_be_leader(HOLD_TRANSACTIONS_SLOT_OFFSET.saturating_mul(DEFAULT_TICKS_PER_SLOT))
         {
-            inc_new_counter_debug!("fetch_stage-honor_forwards", len);
+            inc_new_counter_info!("fetch_stage-honor_forwards", len);
             for packets in batch {
                 if sendr.send(packets).is_err() {
                     return Err(Error::SendError);
@@ -144,6 +144,7 @@ impl FetchStage {
                 if let Err(e) =
                     Self::handle_forwarded_packets(&forward_receiver, &sender, &poh_recorder)
                 {
+                    error!("fetch-stage-fwd: {}", e);
                     match e {
                         Error::RecvTimeoutError(RecvTimeoutError::Disconnected) => break,
                         Error::RecvTimeoutError(RecvTimeoutError::Timeout) => (),

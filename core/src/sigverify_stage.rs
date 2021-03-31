@@ -75,6 +75,7 @@ impl SigVerifyStage {
                 RECV_BATCH_MAX_CPU
             },
         )?;
+        let num_batch_packets = batch.iter().map(|p| p.packets.len());
 
         let mut verify_batch_time = Measure::start("sigverify_batch_time");
         let batch_len = batch.len();
@@ -87,6 +88,7 @@ impl SigVerifyStage {
 
         let verified_batch = verifier.verify_batch(batch);
 
+        // XXX Why is this breaking the batch?
         for v in verified_batch {
             sendr.send(vec![v])?;
         }
@@ -103,7 +105,7 @@ impl SigVerifyStage {
             (len as f32 / verify_batch_time.as_s())
         );
 
-        datapoint_debug!(
+        datapoint_info!(
             "sigverify_stage-total_verify_time",
             ("num_batches", batch_len, i64),
             ("num_packets", len, i64),

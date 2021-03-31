@@ -39,11 +39,13 @@ fn recv_loop(
     coalesce_ms: u64,
 ) -> Result<()> {
     let mut recv_count = 0;
+    let mut sent_count = 0;
     let mut call_count = 0;
     let mut sent_count = 0;
     let mut now = Instant::now();
     let mut num_max_received = 0; // Number of times maximum packets were received
     loop {
+        // XXX Why it shouldn't send?
         let (mut msgs, should_send) =
             Packets::new_with_recycler(recycler.clone(), PACKETS_PER_BATCH)
                 .map(|allocated| (allocated, true))
@@ -68,9 +70,10 @@ fn recv_loop(
             }
         }
         if recv_count > 1024 {
-            datapoint_debug!(
+            datapoint_info!(
                 name,
                 ("received", recv_count as i64, i64),
+                ("sent", sent_count as i64, i64),
                 ("call_count", i64::from(call_count), i64),
                 ("elapsed", now.elapsed().as_millis() as i64, i64),
                 ("max_received", i64::from(num_max_received), i64),
@@ -83,6 +86,7 @@ fn recv_loop(
             call_count = 0;
             sent_count = 0;
             num_max_received = 0;
+            sent_count = 0;
         }
         now = Instant::now();
     }
