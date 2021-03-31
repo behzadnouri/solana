@@ -263,6 +263,7 @@ impl BankingStage {
     ) -> std::io::Result<()> {
         let packets = Self::filter_valid_packets_for_forwarding(unprocessed_packets.iter());
         inc_new_counter_info!("banking_stage-forwarded_packets", packets.len());
+        info!("forward: {} packets to {}", packets.len(), tpu_forwards);
         for p in packets {
             socket.send_to(&p.data[..p.meta.size], &tpu_forwards)?;
         }
@@ -390,6 +391,9 @@ impl BankingStage {
         would_be_leader: bool,
         would_be_leader_shortly: bool,
     ) -> BufferedPacketsDecision {
+        let pk1 = format!("{}", my_pubkey);
+        let pk2 = format!("{:?}", leader_pubkey);
+        info!("me: {}, leader: {:?}", &pk1[..16], &pk2[..16]);
         leader_pubkey.map_or(
             // If leader is not known, return the buffered packets as is
             BufferedPacketsDecision::Hold,
@@ -455,6 +459,15 @@ impl BankingStage {
             would_be_leader,
             would_be_leader_shortly,
         );
+        info!(
+            "buffered packets: {}/{}, decision: {:?}",
+            buffered_packets
+                .iter()
+                .map(|(p, _, _)| p.packets.len())
+                .sum::<usize>(),
+            buffered_packets.len(),
+            decision
+        );
 
         match decision {
             BufferedPacketsDecision::Consume(max_tx_ingestion_ns) => {
@@ -514,8 +527,11 @@ impl BankingStage {
                 };
 
                 leader_addr.map_or((), |leader_addr| {
-                    let _ =
+                    let err =
                         Self::forward_buffered_packets(&socket, &leader_addr, &buffered_packets);
+                    if let Err(err) = err {
+                        error!("forward error: {}", err);
+                    }
                     if hold {
                         buffered_packets.retain(|b| b.1.is_empty());
                         for b in buffered_packets.iter_mut() {
@@ -1147,6 +1163,8 @@ impl BankingStage {
         let mut proc_start = Measure::start("process_packets_transactions_process");
         let mut new_tx_count = 0;
 
+        let packets = mms.into_iter().flat_map(|p| p.packets).collect();
+        let mms = vec![Packets::new(packets)];
         let mut mms_iter = mms.into_iter();
         let mut dropped_batches_count = 0;
         let mut newly_buffered_packets_count = 0;
@@ -1177,6 +1195,11 @@ impl BankingStage {
                     transaction_status_sender.clone(),
                     gossip_vote_sender,
                 );
+            info!(
+                "processed transactions: {}/{}",
+                msgs.packets.len() - unprocessed_indexes.len(),
+                msgs.packets.len()
+            );
 
             new_tx_count += processed;
 
