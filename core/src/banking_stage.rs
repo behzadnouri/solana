@@ -1222,7 +1222,7 @@ impl BankingStage {
             );
 
             // If there were retryable transactions, add the unexpired ones to the buffered queue
-            if processed < verified_txs_len {
+            if false && processed < verified_txs_len {
                 let next_leader = poh.lock().unwrap().next_slot_leader();
                 // Walk thru rest of the transactions and filter out the invalid (e.g. too old) ones
                 #[allow(clippy::while_let_on_iterator)]
