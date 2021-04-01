@@ -1163,14 +1163,18 @@ impl BankingStage {
         let mut proc_start = Measure::start("process_packets_transactions_process");
         let mut new_tx_count = 0;
 
-        let packets = mms.into_iter().flat_map(|p| p.packets).collect();
-        let mms = vec![Packets::new(packets)];
+        // XXX coalesce packets
+        // let packets = mms.into_iter().flat_map(|p| p.packets).collect();
+        // let mms = vec![Packets::new(packets)];
         let mut mms_iter = mms.into_iter();
         let mut dropped_batches_count = 0;
         let mut newly_buffered_packets_count = 0;
+        let bank_start = poh.lock().unwrap().bank_start();
         while let Some(msgs) = mms_iter.next() {
             let packet_indexes = Self::generate_packet_indexes(&msgs.packets);
-            let bank_start = poh.lock().unwrap().bank_start();
+            // XXX maybe this is changing between packets!
+            // This is just the working bank which fails!
+            // let bank_start = poh.lock().unwrap().bank_start();
             if PohRecorder::get_bank_still_processing_txs(&bank_start).is_none() {
                 Self::push_unprocessed(
                     buffered_packets,
@@ -1183,7 +1187,7 @@ impl BankingStage {
                 );
                 continue;
             }
-            let (bank, bank_creation_time) = bank_start.unwrap();
+            let (bank, bank_creation_time) = bank_start.as_ref().unwrap();
 
             let (processed, verified_txs_len, unprocessed_indexes) =
                 Self::process_packets_transactions(
