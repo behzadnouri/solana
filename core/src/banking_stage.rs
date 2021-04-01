@@ -1170,12 +1170,15 @@ impl BankingStage {
         let mut dropped_batches_count = 0;
         let mut newly_buffered_packets_count = 0;
         let bank_start = poh.lock().unwrap().bank_start();
+        let bank_still_processing_txs =
+            PohRecorder::get_bank_still_processing_txs(&bank_start).is_none();
         while let Some(msgs) = mms_iter.next() {
             let packet_indexes = Self::generate_packet_indexes(&msgs.packets);
             // XXX maybe this is changing between packets!
             // This is just the working bank which fails!
             // let bank_start = poh.lock().unwrap().bank_start();
-            if PohRecorder::get_bank_still_processing_txs(&bank_start).is_none() {
+            // if PohRecorder::get_bank_still_processing_txs(&bank_start).is_none() {
+            if bank_still_processing_txs {
                 Self::push_unprocessed(
                     buffered_packets,
                     msgs,
