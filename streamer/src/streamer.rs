@@ -40,6 +40,7 @@ fn recv_loop(
 ) -> Result<()> {
     let mut recv_count = 0;
     let mut call_count = 0;
+    let mut sent_count = 0;
     let mut now = Instant::now();
     let mut num_max_received = 0; // Number of times maximum packets were received
     loop {
@@ -61,6 +62,7 @@ fn recv_loop(
                 call_count += 1;
                 if len > 0 && should_send {
                     channel.send(msgs)?;
+                    sent_count += len;
                 }
                 break;
             }
@@ -73,8 +75,13 @@ fn recv_loop(
                 ("elapsed", now.elapsed().as_millis() as i64, i64),
                 ("max_received", i64::from(num_max_received), i64),
             );
+            let drop_count = recv_count - sent_count;
+            if drop_count != 0 {
+                datapoint_error!(name, ("packets_dropped_count", drop_count as i64, i64));
+            }
             recv_count = 0;
             call_count = 0;
+            sent_count = 0;
             num_max_received = 0;
         }
         now = Instant::now();
