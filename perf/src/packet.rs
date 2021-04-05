@@ -141,4 +141,32 @@ mod tests {
             let _first_packets = Packets::new_with_recycler(recycler.clone(), i + 1);
         }
     }
+
+    #[test]
+    fn test_consume_packets() {
+        const RECYCLER_LIMIT: usize = 1024;
+        let recycler = PacketsRecycler::new_with_limit("", RECYCLER_LIMIT as u32);
+        {
+            // Exhaust the recycler limit.
+            let packets =
+                std::iter::repeat_with(|| Packets::new_with_recycler(recycler.clone(), 1).unwrap())
+                    .take(RECYCLER_LIMIT);
+            // Consume all packets above.
+            let _ = Packets::new(packets.flat_map(|p| p.packets).collect());
+        }
+        // Nothing is associated with the recycler any more.
+        // So this call should succeed.
+        Packets::new_with_recycler(recycler.clone(), 1).unwrap();
+    }
+
+    #[test]
+    fn test_clone_packets() {
+        const RECYCLER_LIMIT: usize = 8;
+        let recycler = PacketsRecycler::new_with_limit("", RECYCLER_LIMIT as u32);
+        let packets = Packets::new_with_recycler(recycler.clone(), 1).unwrap();
+        for _ in 0..RECYCLER_LIMIT {
+            let _ = packets.clone();
+        }
+        Packets::new_with_recycler(recycler.clone(), 1);
+    }
 }
