@@ -1131,7 +1131,10 @@ impl BankingStage {
     ) -> Result<(), RecvTimeoutError> {
         let mut packets = verified_receiver.recv_timeout(recv_timeout)?;
         packets.extend(verified_receiver.try_iter().flatten());
-        let packets = packets.into_iter().flat_map(|p| p.packets).collect();
+        let packets = packets
+            .into_iter()
+            .flat_map(|p| Vec::from(p.packets))
+            .collect();
         let packets = Packets::new(packets);
         let count = packets.packets.len();
         debug!(
