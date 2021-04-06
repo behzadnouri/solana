@@ -455,15 +455,6 @@ impl BankingStage {
             would_be_leader,
             would_be_leader_shortly,
         );
-        info!(
-            "buffered packets: {}/{}, decision: {:?}",
-            buffered_packets
-                .iter()
-                .map(|(p, _, _)| p.packets.len())
-                .sum::<usize>(),
-            buffered_packets.len(),
-            decision
-        );
 
         match decision {
             BufferedPacketsDecision::Consume(max_tx_ingestion_ns) => {
@@ -1138,23 +1129,9 @@ impl BankingStage {
         duplicates: &Mutex<(LruCache<u64, ()>, PacketHasher)>,
         recorder: &TransactionRecorder,
     ) -> Result<(), RecvTimeoutError> {
-        let packets: Vec<Packet> = verified_receiver
-            .recv_timeout(recv_timeout)?
-            .into_iter()
-            .flat_map(|p| p.packets)
-            .collect();
-        // for recv in verified_receiver.try_iter() {
-        //     packets.extend(recv.into_iter().flat_map(|p| p.packets));
-        //     if packets.len() >= 128 {
-        //         break;
-        //     }
-        // }
-        // packets.extend(verified_receiver.try_iter().flatten());
-        // let packets = packets.into_iter().flat_map(|p| p.packets);
-        // let packets = Packets::new(packets.collect());
-        if packets.is_empty() {
-            return Ok(());
-        }
+        let mut packets = verified_receiver.recv_timeout(recv_timeout)?;
+        packets.extend(verified_receiver.try_iter().flatten());
+        let packets = packets.into_iter().flat_map(|p| p.packets).collect();
         let packets = Packets::new(packets);
         let count = packets.packets.len();
         debug!(
@@ -1166,11 +1143,11 @@ impl BankingStage {
         );
         inc_new_counter_debug!("banking_stage-transactions_received", count);
         let mut proc_start = Measure::start("process_packets_transactions_process");
-        let packet_indexes = Self::generate_packet_indexes(&packets.packets);
+        let packet_indices = Self::generate_packet_indexes(&packets.packets);
         let bank_start = poh.lock().unwrap().bank_start();
         let (new_tx_count, unprocessed_indices) =
             match PohRecorder::get_bank_still_processing_txs(&bank_start) {
-                None => (0, packet_indexes),
+                None => (0, packet_indices),
                 Some(_) => {
                     let (bank, bank_creation_time) = bank_start.unwrap();
                     let (processed, _verified_txs_len, unprocessed_indices) =
@@ -1179,18 +1156,13 @@ impl BankingStage {
                             &bank_creation_time,
                             recorder,
                             &packets,
-                            packet_indexes,
+                            packet_indices,
                             transaction_status_sender,
                             gossip_vote_sender,
                         );
                     (processed, unprocessed_indices)
                 }
             };
-        info!(
-            "processed transactions: {}/{}",
-            count - unprocessed_indices.len(),
-            count
-        );
         // Collect any unprocessed transactions in this batch for forwarding.
         let mut newly_buffered_packets_count = 0;
         let mut dropped_batches_count = 0;
@@ -1202,14 +1174,6 @@ impl BankingStage {
             &mut newly_buffered_packets_count,
             batch_limit,
             duplicates,
-        );
-        info!(
-            "buffered packets: {}/{}",
-            buffered_packets
-                .iter()
-                .map(|(p, _, _)| p.packets.len())
-                .sum::<usize>(),
-            buffered_packets.len(),
         );
         proc_start.stop();
 
