@@ -136,6 +136,13 @@ impl<T: Default + Reset> RecyclerX<T> {
             if self.size_factor.load(Ordering::Acquire) > SIZE_FACTOR_AFTER_SHRINK
                 && gc.len() > RECYCLER_SHRINK_SIZE
             {
+                info!(
+                    "{}) shrink: {}, size_factor: {}, size: {}",
+                    self.id,
+                    gc.len() - RECYCLER_SHRINK_SIZE,
+                    self.size_factor.load(Ordering::Acquire) / RECYCLER_SHRINK_WINDOW,
+                    gc.len()
+                );
                 for mut x in gc.drain(RECYCLER_SHRINK_SIZE..) {
                     x.set_recycler(Weak::default());
                 }
