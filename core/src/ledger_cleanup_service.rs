@@ -303,6 +303,7 @@ mod tests {
         let blockstore_path = get_tmp_ledger_path!();
         let blockstore = Blockstore::open(&blockstore_path).unwrap();
         let (shreds, _) = make_many_slot_entries(0, 50, 5);
+        let num_shreds_per_slot = shreds.len() / 50;
         blockstore.insert_shreds(shreds, None, false).unwrap();
         let blockstore = Arc::new(blockstore);
         let (sender, receiver) = channel();
@@ -314,7 +315,7 @@ mod tests {
         LedgerCleanupService::cleanup_ledger(
             &receiver,
             &blockstore,
-            5,
+            5 * num_shreds_per_slot as u64,
             &mut last_purge_slot,
             10,
             &highest_compaction_slot,

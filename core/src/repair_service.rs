@@ -746,7 +746,9 @@ mod test {
             let mut missing_indexes_per_slot = vec![];
             for i in (0..num_shreds).rev() {
                 let index = i % num_shreds_per_slot;
-                if index % nth == 0 {
+                // TODO: Comment why it should also include last shred in each
+                // slot?
+                if index % nth == 0 || index == num_shreds_per_slot - 1 {
                     shreds_to_write.insert(0, shreds.remove(i as usize));
                 } else if i < num_shreds_per_slot {
                     missing_indexes_per_slot.insert(0, index);

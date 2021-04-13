@@ -3570,6 +3570,7 @@ pub fn make_slot_entries(
     parent_slot: Slot,
     num_entries: u64,
 ) -> (Vec<Shred>, Vec<Entry>) {
+    // TODO: maybe add is_last_in_slot here!
     let entries = create_ticks(num_entries, 0, Hash::default());
     let shreds = entries_to_test_shreds(entries.clone(), slot, parent_slot, true, 0);
     (shreds, entries)
@@ -5008,12 +5009,13 @@ pub mod tests {
                     }
                 };
 
-                let (mut shred, entry) = make_slot_entries(slot, parent_slot, 1);
+                let (shred, entry) = make_slot_entries(slot, parent_slot, 1);
                 num_shreds_per_slot = shred.len() as u64;
-                shred
-                    .iter_mut()
-                    .enumerate()
-                    .for_each(|(_, shred)| shred.set_index(0));
+                // TODO: What was the intention of the code below?
+                // shred
+                //     .iter_mut()
+                //     .enumerate()
+                //     .for_each(|(_, shred)| shred.set_index(0));
                 shreds.extend(shred);
                 entries.extend(entry);
             }
@@ -5036,15 +5038,14 @@ pub mod tests {
                 );
 
                 let meta = blockstore.meta(i).unwrap().unwrap();
-                assert_eq!(meta.received, 1);
-                assert_eq!(meta.last_index, 0);
+                assert_eq!(meta.received, num_shreds_per_slot);
+                assert_eq!(meta.last_index, num_shreds_per_slot - 1);
                 if i != 0 {
                     assert_eq!(meta.parent_slot, i - 1);
-                    assert_eq!(meta.consumed, 1);
                 } else {
                     assert_eq!(meta.parent_slot, 0);
-                    assert_eq!(meta.consumed, num_shreds_per_slot);
                 }
+                assert_eq!(meta.consumed, num_shreds_per_slot);
             }
         }
         Blockstore::destroy(&blockstore_path).expect("Expected successful database destruction");
@@ -5580,7 +5581,10 @@ pub mod tests {
         assert_eq!(slot_meta.last_index, num_shreds - 1);
         assert!(slot_meta.is_full());
 
-        let (shreds, _) = make_slot_entries(0, 0, 22);
+        let (shreds, _) = make_slot_entries(0, 0, 1024);
+        // TODO: has_duplicate_shreds_in_slot will return false if both inserts
+        // have the same number of shreds?!
+        assert!(shreds.len() > num_shreds as usize);
         blockstore.insert_shreds(shreds, None, false).unwrap();
         let slot_meta = blockstore.meta(0).unwrap().unwrap();
 
@@ -7722,8 +7726,15 @@ pub mod tests {
             Shredder::new(slot, 0, 1.0, leader_keypair, 0, 0).expect("Failed in creating shredder");
         let (shreds, _, _) = shredder.entries_to_shreds(&entries1, true, 0);
         let (duplicate_shreds, _, _) = shredder.entries_to_shreds(&entries2, true, 0);
-        let shred = shreds[0].clone();
-        let duplicate_shred = duplicate_shreds[0].clone();
+        // Find a shred index where the two payloads are not equal.
+        let (shred_index, _) = shreds
+            .iter()
+            .zip(&duplicate_shreds)
+            .enumerate()
+            .find(|(_, (s1, s2))| s1 != s2)
+            .unwrap();
+        let shred = shreds[shred_index].clone();
+        let duplicate_shred = duplicate_shreds[shred_index].clone();
         let non_duplicate_shred = shred.clone();
 
         let blockstore_path = get_tmp_ledger_path!();
@@ -7740,7 +7751,7 @@ pub mod tests {
             assert_eq!(
                 blockstore.is_shred_duplicate(
                     slot,
-                    0,
+                    shred_index as u32,
                     &duplicate_shred.payload,
                     duplicate_shred.is_data()
                 ),
@@ -7749,7 +7760,7 @@ pub mod tests {
             assert!(blockstore
                 .is_shred_duplicate(
                     slot,
-                    0,
+                    shred_index as u32,
                     &non_duplicate_shred.payload,
                     duplicate_shred.is_data()
                 )
@@ -7786,14 +7797,16 @@ pub mod tests {
                 .into_iter()
                 .flat_map(|x| x.0)
                 .collect();
+            let num_shreds_per_slot = shreds.len() / slots.len();
             blockstore.insert_shreds(shreds, None, false).unwrap();
-            // Should only be one shred in slot 9
+            for index in 0..num_shreds_per_slot {
+                assert!(blockstore
+                    .get_data_shred(unconfirmed_slot, index as u64)
+                    .unwrap()
+                    .is_some());
+            }
             assert!(blockstore
-                .get_data_shred(unconfirmed_slot, 0)
-                .unwrap()
-                .is_some());
-            assert!(blockstore
-                .get_data_shred(unconfirmed_slot, 1)
+                .get_data_shred(unconfirmed_slot, num_shreds_per_slot as u64)
                 .unwrap()
                 .is_none());
             blockstore.set_dead_slot(unconfirmed_slot).unwrap();
@@ -7987,18 +8000,20 @@ pub mod tests {
     #[test]
     fn test_remove_shred_data_complete_flag() {
         let (mut shreds, entries) = make_slot_entries(0, 0, 1);
-
+        let num_shreds = shreds.len();
         let ledger_path = get_tmp_ledger_path!();
         let ledger = Blockstore::open(&ledger_path).unwrap();
 
         // Remove the data complete flag from the last shred
-        shreds[0].unset_data_complete();
+        shreds.last_mut().unwrap().unset_data_complete();
 
         ledger.insert_shreds(shreds, None, false).unwrap();
 
         // Check that the `data_complete` flag was unset in the stored shred, but the
         // `last_in_slot` flag is set.
-        let stored_shred = &ledger.get_data_shreds_for_slot(0, 0).unwrap()[0];
+        let stored_shreds = ledger.get_data_shreds_for_slot(0, 0).unwrap();
+        assert_eq!(stored_shreds.len(), num_shreds);
+        let stored_shred = stored_shreds.last().unwrap();
         assert!(!stored_shred.data_complete());
         assert!(stored_shred.last_in_slot());
         assert_eq!(entries, ledger.get_any_valid_slot_entries(0, 0));

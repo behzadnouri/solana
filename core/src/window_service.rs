@@ -578,7 +578,7 @@ mod test {
         entry::{create_ticks, Entry},
         genesis_utils::create_genesis_config_with_leader,
         get_tmp_ledger_path,
-        shred::{DataShredHeader, Shredder},
+        shred::{DataShredHeader, Shredder, MAX_DATA_SHREDS_PER_FEC_BLOCK},
     };
     use solana_sdk::{
         epoch_schedule::MINIMUM_SLOTS_PER_EPOCH,
@@ -699,7 +699,7 @@ mod test {
         blockstore
             .insert_shreds(shreds.clone(), None, false)
             .unwrap();
-        let mut duplicate_shred = shreds[1].clone();
+        let mut duplicate_shred = shreds[MAX_DATA_SHREDS_PER_FEC_BLOCK as usize].clone();
         duplicate_shred.set_slot(shreds[0].slot());
         let duplicate_shred_slot = duplicate_shred.slot();
         sender.send(duplicate_shred).unwrap();

@@ -908,9 +908,13 @@ mod tests {
             let (mut shreds, _) = make_many_slot_entries(1, 2, 1);
 
             // Make shred for slot 1 too large
-            assert_eq!(shreds[0].slot(), 1);
-            assert_eq!(shreds[0].index(), 0);
-            shreds[0].payload.push(10);
+            // TODO: Why this does not work with shred_index = 0?
+            let shred_index = shreds.len() / 2 - 1;
+            assert_eq!(shreds[shred_index].slot(), 1);
+            assert_eq!(shreds[shred_index].index(), shred_index as u32);
+            shreds[shred_index].payload.push(10);
+            // Need to provide the right size for Shredder::deshred.
+            shreds[shred_index].data_header.size += 1;
             blockstore
                 .insert_shreds(shreds, None, false)
                 .expect("Expect successful ledger write");
@@ -919,7 +923,7 @@ mod tests {
             assert!(repair_response::repair_response_packet(
                 &blockstore,
                 1,
-                0,
+                shred_index as u64,
                 &socketaddr_any!(),
                 nonce,
             )
@@ -946,7 +950,7 @@ mod tests {
             let expected = vec![repair_response::repair_response_packet(
                 &blockstore,
                 2,
-                0,
+                shred_index as u64,
                 &socketaddr_any!(),
                 nonce,
             )
