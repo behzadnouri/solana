@@ -2564,6 +2564,15 @@ impl ClusterInfo {
                 .map(|v| v.value.label())
                 .collect()
         };
+        // Expand lifespan of crds values associated with the owners.
+        {
+            let owners: HashSet<_> = updated_labels.iter().map(CrdsValueLabel::pubkey).collect();
+            let mut gossip = self.gossip.write().unwrap();
+            let now = timestamp();
+            for owner in owners {
+                gossip.crds.update_record_timestamp(&owner, now);
+            }
+        }
         // Generate prune messages.
         let prunes = self
             .time_gossip_write_lock("prune_received_cache", &self.stats.prune_received_cache)
