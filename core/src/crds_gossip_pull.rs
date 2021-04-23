@@ -377,7 +377,7 @@ impl CrdsGossipPull {
         mut failed_inserts: Vec<Hash>,
         now: u64,
         stats: &mut ProcessPullStats,
-    ) -> Vec<(CrdsValueLabel, Hash, u64)> {
+    ) -> Vec<(CrdsValueLabel, /*wallclock:*/ u64)> {
         let mut success = vec![];
         let mut owners = HashSet::new();
         for r in responses_expired_timeout {
@@ -396,7 +396,7 @@ impl CrdsGossipPull {
                     stats.success += 1;
                     self.num_pulls += 1;
                     owners.insert(label.pubkey());
-                    success.push((label, hash, wc));
+                    success.push((label, wc));
                     if let Some(val) = old {
                         self.purged_values.push_back((val.value_hash, now))
                     }

@@ -23,7 +23,7 @@ use itertools::Itertools;
 use lru::LruCache;
 use rand::{seq::SliceRandom, Rng};
 use solana_runtime::bloom::{AtomicBloom, Bloom};
-use solana_sdk::{hash::Hash, packet::PACKET_DATA_SIZE, pubkey::Pubkey, timing::timestamp};
+use solana_sdk::{packet::PACKET_DATA_SIZE, pubkey::Pubkey, timing::timestamp};
 use std::{
     cmp,
     collections::{HashMap, HashSet},
@@ -47,7 +47,7 @@ pub struct CrdsGossipPush {
     /// active set of validators for push
     active_set: IndexMap<Pubkey, AtomicBloom<Pubkey>>,
     /// push message queue
-    push_messages: HashMap<CrdsValueLabel, Hash>,
+    push_messages: HashSet<CrdsValueLabel>,
     /// Cache that tracks which validators a message was received from
     /// bool indicates it has been pruned.
     /// This cache represents a lagging view of which validators
@@ -69,7 +69,7 @@ impl Default for CrdsGossipPush {
             // Allow upto 64 Crds Values per PUSH
             max_bytes: PACKET_DATA_SIZE * 64,
             active_set: IndexMap::new(),
-            push_messages: HashMap::new(),
+            push_messages: HashSet::default(),
             received_cache: HashMap::new(),
             last_pushed_to: LruCache::new(CRDS_UNIQUE_PUBKEY_CAPACITY),
             num_active: CRDS_GOSSIP_NUM_ACTIVE,
@@ -181,7 +181,6 @@ impl CrdsGossipPush {
         let label = value.label();
         let origin = label.pubkey();
         let new_value = crds.new_versioned(now, value);
-        let value_hash = new_value.value_hash;
         let received_set = self
             .received_cache
             .entry(origin)
@@ -193,18 +192,22 @@ impl CrdsGossipPush {
             self.num_old += 1;
             return Err(CrdsGossipError::PushMessageOldVersion);
         }
-        self.push_messages.insert(label, value_hash);
+        self.push_messages.insert(label);
         Ok(old.unwrap())
     }
 
     /// push pull responses
-    pub fn push_pull_responses(&mut self, values: Vec<(CrdsValueLabel, Hash, u64)>, now: u64) {
-        for (label, value_hash, wc) in values {
-            if now > wc.checked_add(self.msg_timeout).unwrap_or(0) {
-                continue;
-            }
-            self.push_messages.insert(label, value_hash);
-        }
+    pub fn push_pull_responses<I>(&mut self, values: I, now: u64)
+    where
+        I: IntoIterator<Item = (CrdsValueLabel, /*wallclock:*/ u64)>,
+    {
+        let cutoff = now.saturating_sub(self.msg_timeout);
+        self.push_messages.extend(
+            values
+                .into_iter()
+                .filter(|(_, wallclock)| cutoff <= *wallclock)
+                .map(|(label, _)| label),
+        );
     }
 
     /// New push message to broadcast to peers.
@@ -223,15 +226,6 @@ impl CrdsGossipPush {
         let mut total_bytes: usize = 0;
         let mut labels = vec![];
         let mut push_messages: HashMap<Pubkey, Vec<CrdsValue>> = HashMap::new();
-        let cutoff = now.saturating_sub(self.msg_timeout);
-        let lookup = |label, &hash| -> Option<&CrdsValue> {
-            let value = crds.lookup_versioned(label)?;
-            if value.value_hash != hash || value.value.wallclock() < cutoff {
-                None
-            } else {
-                Some(&value.value)
-            }
-        };
         let mut push_value = |origin: Pubkey, value: &CrdsValue| {
             //use a consistent index for the same origin so
             //the active set learns the MST for that origin
@@ -246,20 +240,25 @@ impl CrdsGossipPush {
                 }
             }
         };
-        for (label, hash) in &self.push_messages {
-            match lookup(label, hash) {
-                None => labels.push(label.clone()),
-                Some(value) if value.wallclock() > now => continue,
-                Some(value) => {
-                    total_bytes += serialized_size(value).unwrap() as usize;
-                    if total_bytes > self.max_bytes {
-                        break;
-                    }
-                    num_values += 1;
+        let cutoff = now.saturating_sub(self.msg_timeout);
+        for label in &self.push_messages {
+            let value = match crds.get(label) {
+                Some(v) if v.value.wallclock() >= cutoff => &v.value,
+                _ => {
                     labels.push(label.clone());
-                    push_value(label.pubkey(), value);
+                    continue;
                 }
+            };
+            if value.wallclock() > now {
+                continue;
             }
+            total_bytes += serialized_size(value).unwrap() as usize;
+            if total_bytes > self.max_bytes {
+                break;
+            }
+            num_values += 1;
+            labels.push(label.clone());
+            push_value(label.pubkey(), value);
         }
         self.num_pushes += num_pushes;
         trace!("new_push_messages {} {}", num_values, self.active_set.len());
@@ -402,10 +401,9 @@ impl CrdsGossipPush {
 
     /// purge old pending push messages
     pub fn purge_old_pending_push_messages(&mut self, crds: &Crds, min_time: u64) {
-        self.push_messages.retain(|k, hash| {
-            matches!(crds.lookup_versioned(k), Some(versioned) if
-                         versioned.value.wallclock() >= min_time
-                         && versioned.value_hash == *hash)
+        self.push_messages.retain(|k| {
+            matches!(crds.get(k), Some(versioned) if
+                     versioned.value.wallclock() >= min_time)
         });
     }
 
