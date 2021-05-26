@@ -353,6 +353,7 @@ impl CrdsGossipPull {
     //  .2 => hash value of outdated values which will fail to insert.
     pub fn filter_pull_responses(
         &self,
+        from: Pubkey,
         crds: &Crds,
         timeouts: &HashMap<Pubkey, u64>,
         responses: Vec<CrdsValue>,
@@ -365,14 +366,27 @@ impl CrdsGossipPull {
             .get(&Pubkey::default())
             .copied()
             .unwrap_or(self.msg_timeout);
+        let from = format!("{}", from)[..5].to_string();
         let upsert = |response: CrdsValue| {
+            let kind = response.kind();
+            let age = now.saturating_sub(response.wallclock());
             let owner = response.label().pubkey();
+            let pk = format!("{}", owner)[..5].to_string();
             // Check if the crds value is older than the msg_timeout
             let timeout = timeouts.get(&owner).copied().unwrap_or(default_timeout);
             // Before discarding this value, check if a ContactInfo for the
             // owner exists in the table. If it doesn't, that implies that this
             // value can be discarded
             if !crds.upserts(&response) {
+                info!(
+                    "failed upsert: {}, {}s ({}s), {}, {}, {}",
+                    from,
+                    age / 1000,
+                    timeout / 1000,
+                    kind,
+                    pk,
+                    from == pk,
+                );
                 Some(response)
             } else if now <= response.wallclock().saturating_add(timeout) {
                 active_values.push(response);
@@ -383,6 +397,15 @@ impl CrdsGossipPull {
                 expired_values.push(response);
                 None
             } else {
+                info!(
+                    "failed timeout: {}, {}s > {}s, {}, {}, {}",
+                    from,
+                    age / 1000,
+                    timeout / 1000,
+                    kind,
+                    pk,
+                    from == pk,
+                );
                 stats.timeout_count += 1;
                 stats.failed_timeout += 1;
                 Some(response)

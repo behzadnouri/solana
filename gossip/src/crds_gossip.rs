@@ -266,6 +266,7 @@ impl CrdsGossip {
 
     pub fn filter_pull_responses(
         &self,
+        from: Pubkey,
         timeouts: &HashMap<Pubkey, u64>,
         response: Vec<CrdsValue>,
         now: u64,
@@ -275,8 +276,14 @@ impl CrdsGossip {
         Vec<CrdsValue>, // responses with expired timestamps.
         Vec<Hash>,      // hash of outdated values.
     ) {
-        self.pull
-            .filter_pull_responses(&self.crds, timeouts, response, now, process_pull_stats)
+        self.pull.filter_pull_responses(
+            from,
+            &self.crds,
+            timeouts,
+            response,
+            now,
+            process_pull_stats,
+        )
     }
 
     /// process a pull response

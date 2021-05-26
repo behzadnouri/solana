@@ -535,6 +535,21 @@ impl CrdsValue {
         }
     }
 
+    pub(crate) fn kind(&self) -> &'static str {
+        match self.data {
+            CrdsData::ContactInfo(_) => "ContactInfo",
+            CrdsData::Vote(_, _) => "Vote",
+            CrdsData::LowestSlot(_, _) => "LowestSlot",
+            CrdsData::SnapshotHashes(_) => "SnapshotHashes",
+            CrdsData::AccountsHashes(_) => "AccountsHashes",
+            CrdsData::EpochSlots(_, _) => "EpochSlots",
+            CrdsData::LegacyVersion(_) => "LegacyVersion",
+            CrdsData::Version(_) => "Version",
+            CrdsData::NodeInstance(_) => "NodeInstance",
+            CrdsData::DuplicateShred(_, _) => "DuplicateShred",
+        }
+    }
+
     /// Totally unsecure unverifiable wallclock of the node that generated this message
     /// Latest wallclock is always picked.
     /// This is used to time out push messages.

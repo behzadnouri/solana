@@ -2211,7 +2211,7 @@ impl ClusterInfo {
         let mut pull_stats = ProcessPullStats::default();
         let (filtered_pulls, filtered_pulls_expired_timeout, failed_inserts) = self
             .time_gossip_read_lock("filter_pull_resp", &self.stats.filter_pull_response)
-            .filter_pull_responses(timeouts, crds_values, timestamp(), &mut pull_stats);
+            .filter_pull_responses(*from, timeouts, crds_values, timestamp(), &mut pull_stats);
 
         if !filtered_pulls.is_empty()
             || !filtered_pulls_expired_timeout.is_empty()
