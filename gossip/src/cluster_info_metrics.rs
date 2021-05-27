@@ -1,7 +1,8 @@
 use {
-    crate::crds_gossip::CrdsGossip,
+    crate::{crds::Cursor, crds_gossip::CrdsGossip, crds_value::CrdsData},
+    itertools::Itertools,
     solana_measure::measure::Measure,
-    solana_sdk::pubkey::Pubkey,
+    solana_sdk::{clock::Slot, pubkey::Pubkey},
     std::{
         collections::HashMap,
         sync::{
@@ -125,16 +126,67 @@ pub(crate) fn submit_gossip_stats(
     gossip: &RwLock<CrdsGossip>,
     stakes: &HashMap<Pubkey, u64>,
 ) {
-    let (table_size, num_nodes, purged_values_size, failed_inserts_size) = {
+    let (table_size, num_nodes, purged_values_size, failed_inserts_size, votes) = {
         let gossip = gossip.read().unwrap();
+        let votes: Vec<(Pubkey, Slot)> = gossip
+            .crds
+            .get_votes(&mut Cursor::default())
+            .filter_map(|entry| {
+                let vote = match &entry.value.data {
+                    CrdsData::Vote(_, vote) => vote,
+                    _ => panic!("this should not happen!"),
+                };
+                Some((entry.value.pubkey(), vote.slot()?))
+            })
+            .collect();
         (
             gossip.crds.len(),
             gossip.crds.num_nodes(),
             gossip.crds.num_purged(),
             gossip.pull.failed_inserts.len(),
+            votes,
         )
     };
     let num_nodes_staked = stakes.values().filter(|stake| **stake > 0).count();
+    let total_stake: u64 = stakes.values().sum();
+    if total_stake > 0 {
+        let votes = votes
+            .into_iter()
+            .filter_map(|(pubkey, slot)| Some((slot, *stakes.get(&pubkey)?)))
+            .into_grouping_map()
+            .aggregate(|acc, _slot, stake| match acc {
+                None => Some((1, stake)),
+                Some((k, s)) => Some((k + 1, s + stake)),
+            });
+        // Latest slot with 1/10 of stake voted.
+        let latest_slot = votes
+            .iter()
+            .filter(|(_, (_, stake))| stake * 10 > total_stake)
+            .map(|(slot, _)| *slot)
+            .max();
+        // Latest slot with 1/3 of stake voted.
+        let voting_slot = votes
+            .iter()
+            .filter(|(_, (_, stake))| stake * 3 > total_stake)
+            .map(|(slot, _)| *slot)
+            .max();
+        // Latest slot with 2/3 of stake voted.
+        if let Some((slot, (num_nodes, stake))) = votes
+            .into_iter()
+            .filter(|(_, (_, stake))| stake * 3 > 2 * total_stake)
+            .max()
+        {
+            let stake = stake * 100 / total_stake;
+            datapoint_info!(
+                "cluster_info_stats_votes",
+                ("majority_slot", slot as i64, i64),
+                ("voting_slot", voting_slot.unwrap() as i64, i64),
+                ("latest_slot", latest_slot.unwrap() as i64, i64),
+                ("num_nodes", num_nodes as i64, i64),
+                ("stake", stake as i64, i64),
+            );
+        }
+    }
     datapoint_info!(
         "cluster_info_stats",
         ("entrypoint", stats.entrypoint.clear(), i64),
@@ -154,6 +206,7 @@ pub(crate) fn submit_gossip_stats(
         ("failed_inserts_size", failed_inserts_size as i64, i64),
         ("num_nodes", num_nodes as i64, i64),
         ("num_nodes_staked", num_nodes_staked as i64, i64),
+        ("total_stake", total_stake as i64, i64),
     );
     datapoint_info!(
         "cluster_info_stats2",
