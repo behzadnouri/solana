@@ -18,7 +18,7 @@ use {
         signature::{Keypair, Signable, Signature, Signer},
         transaction::Transaction,
     },
-    solana_vote_program::vote_transaction::parse_vote_transaction,
+    solana_vote_program::{vote_state, vote_transaction::parse_vote_transaction},
     std::{
         borrow::{Borrow, Cow},
         cmp::Ordering,
@@ -264,7 +264,7 @@ pub struct Vote {
     transaction: Transaction,
     pub(crate) wallclock: u64,
     #[serde(skip_serializing)]
-    slot: Option<Slot>,
+    vote: Option<vote_state::Vote>,
 }
 
 impl Sanitize for Vote {
@@ -277,13 +277,13 @@ impl Sanitize for Vote {
 
 impl Vote {
     pub fn new(from: Pubkey, transaction: Transaction, wallclock: u64) -> Self {
-        let slot = parse_vote_transaction(&transaction)
-            .and_then(|(_, vote, _)| vote.slots.last().copied());
+        // TODO Should this validate pubkey?!
+        let vote = parse_vote_transaction(&transaction).map(|(_, vote, _)| vote);
         Self {
             from,
             transaction,
             wallclock,
-            slot,
+            vote,
         }
     }
 
@@ -293,7 +293,7 @@ impl Vote {
             from: pubkey.unwrap_or_else(pubkey::new_rand),
             transaction: Transaction::default(),
             wallclock: new_rand_timestamp(rng),
-            slot: None,
+            vote: None,
         }
     }
 
@@ -302,7 +302,11 @@ impl Vote {
     }
 
     pub(crate) fn slot(&self) -> Option<Slot> {
-        self.slot
+        self.vote.as_ref()?.slots.last().copied()
+    }
+
+    pub(crate) fn hash(&self) -> Option<Hash> {
+        Some(self.vote.as_ref()?.hash)
     }
 }
 
@@ -324,7 +328,7 @@ impl<'de> Deserialize<'de> for Vote {
                 from: vote.from,
                 transaction: vote.transaction,
                 wallclock: vote.wallclock,
-                slot: None,
+                vote: None,
             },
         };
         Ok(vote)
@@ -806,15 +810,15 @@ mod test {
             tx,
             rng.gen(), // wallclock
         );
-        assert_eq!(vote.slot, Some(7));
+        assert_eq!(vote.slot(), Some(7));
         let bytes = bincode::serialize(&vote).unwrap();
         let other = bincode::deserialize(&bytes[..]).unwrap();
         assert_eq!(vote, other);
-        assert_eq!(other.slot, Some(7));
+        assert_eq!(other.slot(), Some(7));
         let bytes = bincode::options().serialize(&vote).unwrap();
         let other = bincode::options().deserialize(&bytes[..]).unwrap();
         assert_eq!(vote, other);
-        assert_eq!(other.slot, Some(7));
+        assert_eq!(other.slot(), Some(7));
     }
 
     #[test]
