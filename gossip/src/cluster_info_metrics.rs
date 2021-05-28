@@ -2,7 +2,7 @@ use {
     crate::{crds::Cursor, crds_gossip::CrdsGossip, crds_value::CrdsData},
     itertools::Itertools,
     solana_measure::measure::Measure,
-    solana_sdk::{clock::Slot, pubkey::Pubkey},
+    solana_sdk::{clock::Slot, hash::Hash, pubkey::Pubkey},
     std::{
         collections::HashMap,
         sync::{
@@ -128,7 +128,7 @@ pub(crate) fn submit_gossip_stats(
 ) {
     let (table_size, num_nodes, purged_values_size, failed_inserts_size, votes) = {
         let gossip = gossip.read().unwrap();
-        let votes: Vec<(Pubkey, Slot)> = gossip
+        let votes: Vec<(Pubkey, Slot, Hash)> = gossip
             .crds
             .get_votes(&mut Cursor::default())
             .filter_map(|entry| {
@@ -136,7 +136,7 @@ pub(crate) fn submit_gossip_stats(
                     CrdsData::Vote(_, vote) => vote,
                     _ => panic!("this should not happen!"),
                 };
-                Some((entry.value.pubkey(), vote.slot()?))
+                Some((entry.value.pubkey(), vote.slot()?, vote.hash()?))
             })
             .collect();
         (
@@ -152,9 +152,9 @@ pub(crate) fn submit_gossip_stats(
     if total_stake > 0 {
         let votes = votes
             .into_iter()
-            .filter_map(|(pubkey, slot)| Some((slot, *stakes.get(&pubkey)?)))
+            .filter_map(|(pubkey, slot, hash)| Some(((slot, hash), *stakes.get(&pubkey)?)))
             .into_grouping_map()
-            .aggregate(|acc, _slot, stake| match acc {
+            .aggregate(|acc, (_slot, _hash), stake| match acc {
                 None => Some((1, stake)),
                 Some((k, s)) => Some((k + 1, s + stake)),
             });
@@ -162,16 +162,16 @@ pub(crate) fn submit_gossip_stats(
         let latest_slot = votes
             .iter()
             .filter(|(_, (_, stake))| stake * 10 > total_stake)
-            .map(|(slot, _)| *slot)
+            .map(|((slot, _), _)| *slot)
             .max();
         // Latest slot with 1/3 of stake voted.
         let voting_slot = votes
             .iter()
             .filter(|(_, (_, stake))| stake * 3 > total_stake)
-            .map(|(slot, _)| *slot)
+            .map(|((slot, _), _)| *slot)
             .max();
         // Latest slot with 2/3 of stake voted.
-        if let Some((slot, (num_nodes, stake))) = votes
+        if let Some(((slot, _hash), (num_nodes, stake))) = votes
             .into_iter()
             .filter(|(_, (_, stake))| stake * 3 > 2 * total_stake)
             .max()
