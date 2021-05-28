@@ -126,9 +126,15 @@ pub(crate) fn submit_gossip_stats(
     gossip: &RwLock<CrdsGossip>,
     stakes: &HashMap<Pubkey, u64>,
 ) {
+    struct Vote {
+        pubkey: Pubkey,
+        wallclock: u64,
+        slot: Slot,
+        hash: Hash,
+    }
     let (table_size, num_nodes, purged_values_size, failed_inserts_size, votes) = {
         let gossip = gossip.read().unwrap();
-        let votes: Vec<(Pubkey, Slot, Hash)> = gossip
+        let votes: Vec<Vote> = gossip
             .crds
             .get_votes(&mut Cursor::default())
             .filter_map(|entry| {
@@ -136,7 +142,12 @@ pub(crate) fn submit_gossip_stats(
                     CrdsData::Vote(_, vote) => vote,
                     _ => panic!("this should not happen!"),
                 };
-                Some((entry.value.pubkey(), vote.slot()?, vote.hash()?))
+                Some(Vote {
+                    pubkey: entry.value.pubkey(),
+                    wallclock: entry.value.wallclock(),
+                    slot: vote.slot()?,
+                    hash: vote.hash()?,
+                })
             })
             .collect();
         (
@@ -152,36 +163,43 @@ pub(crate) fn submit_gossip_stats(
     if total_stake > 0 {
         let votes = votes
             .into_iter()
-            .filter_map(|(pubkey, slot, hash)| Some(((slot, hash), *stakes.get(&pubkey)?)))
+            .filter_map(|vote| {
+                let key = (vote.slot, vote.hash);
+                let val = (vote.wallclock, *stakes.get(&vote.pubkey)?);
+                Some((key, val))
+            })
             .into_grouping_map()
-            .aggregate(|acc, (_slot, _hash), stake| match acc {
-                None => Some((1, stake)),
-                Some((k, s)) => Some((k + 1, s + stake)),
+            .aggregate(|acc, (_slot, _hash), (wallclock, stake)| match acc {
+                None => Some((1, wallclock, stake)),
+                Some((k, w, s)) => Some((k + 1, w.max(wallclock), s + stake)),
             });
         // Latest slot with 1/10 of stake voted.
         let latest_slot = votes
             .iter()
-            .filter(|(_, (_, stake))| stake * 10 > total_stake)
-            .map(|((slot, _), _)| *slot)
+            .filter(|(_, (_, _, stake))| stake * 10 > total_stake)
+            .map(|((slot, _), (_, wallclock, _))| (*slot, *wallclock))
             .max();
         // Latest slot with 1/3 of stake voted.
         let voting_slot = votes
             .iter()
-            .filter(|(_, (_, stake))| stake * 3 > total_stake)
-            .map(|((slot, _), _)| *slot)
+            .filter(|(_, (_, _, stake))| stake * 3 > total_stake)
+            .map(|((slot, _), (_, wallclock, _))| (*slot, *wallclock))
             .max();
         // Latest slot with 2/3 of stake voted.
-        if let Some(((slot, _hash), (num_nodes, stake))) = votes
+        if let Some(((slot, _hash), (num_nodes, wallclock, stake))) = votes
             .into_iter()
-            .filter(|(_, (_, stake))| stake * 3 > 2 * total_stake)
+            .filter(|(_, (_, _, stake))| stake * 3 > 2 * total_stake)
             .max()
         {
             let stake = stake * 100 / total_stake;
             datapoint_info!(
                 "cluster_info_stats_votes",
                 ("majority_slot", slot as i64, i64),
-                ("voting_slot", voting_slot.unwrap() as i64, i64),
-                ("latest_slot", latest_slot.unwrap() as i64, i64),
+                ("majority_wallclock", wallclock as i64, i64),
+                ("voting_slot", voting_slot.unwrap().0 as i64, i64),
+                ("voting_wallclock", voting_slot.unwrap().1 as i64, i64),
+                ("latest_slot", latest_slot.unwrap().0 as i64, i64),
+                ("latest_wallclock", latest_slot.unwrap().1 as i64, i64),
                 ("num_nodes", num_nodes as i64, i64),
                 ("stake", stake as i64, i64),
             );
