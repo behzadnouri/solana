@@ -170,38 +170,76 @@ pub(crate) fn submit_gossip_stats(
             })
             .into_grouping_map()
             .aggregate(|acc, (_slot, _hash), (wallclock, stake)| match acc {
-                None => Some((1, wallclock, stake)),
-                Some((k, w, s)) => Some((k + 1, w.max(wallclock), s + stake)),
+                None => Some((1, vec![wallclock], stake)),
+                Some((k, mut w, s)) => {
+                    w.push(wallclock);
+                    Some((k + 1, w, s + stake))
+                }
             });
         // Latest slot with 1/10 of stake voted.
         let latest_slot = votes
             .iter()
             .filter(|(_, (_, _, stake))| stake * 10 > total_stake)
-            .map(|((slot, _), (_, wallclock, _))| (*slot, *wallclock))
+            .map(|((slot, _), (_, wallclock, _))| (*slot, wallclock))
             .max();
         // Latest slot with 1/3 of stake voted.
         let voting_slot = votes
             .iter()
             .filter(|(_, (_, _, stake))| stake * 3 > total_stake)
-            .map(|((slot, _), (_, wallclock, _))| (*slot, *wallclock))
+            .map(|((slot, _), (_, wallclock, _))| (*slot, wallclock))
             .max();
         // Latest slot with 2/3 of stake voted.
         if let Some(((slot, _hash), (num_nodes, wallclock, stake))) = votes
-            .into_iter()
+            .iter()
             .filter(|(_, (_, _, stake))| stake * 3 > 2 * total_stake)
             .max()
         {
+            let wallclock_gap: Vec<_> = {
+                let mut wallclock = wallclock.clone();
+                wallclock.sort_unstable();
+                let size = wallclock.len();
+                vec![1, 2, 4, 8, 16, 32, 64, 128]
+                    .into_iter()
+                    .map(|k| {
+                        if 2 * k < size {
+                            wallclock[size - k - 1] - wallclock[k]
+                        } else {
+                            0
+                        }
+                    })
+                    .collect()
+            };
             let stake = stake * 100 / total_stake;
             datapoint_info!(
                 "cluster_info_stats_votes",
-                ("majority_slot", slot as i64, i64),
-                ("majority_wallclock", wallclock as i64, i64),
+                ("majority_slot", *slot as i64, i64),
+                (
+                    "majority_wallclock",
+                    *wallclock.iter().max().unwrap() as i64,
+                    i64
+                ),
                 ("voting_slot", voting_slot.unwrap().0 as i64, i64),
-                ("voting_wallclock", voting_slot.unwrap().1 as i64, i64),
+                (
+                    "voting_wallclock",
+                    *voting_slot.unwrap().1.iter().max().unwrap() as i64,
+                    i64
+                ),
                 ("latest_slot", latest_slot.unwrap().0 as i64, i64),
-                ("latest_wallclock", latest_slot.unwrap().1 as i64, i64),
-                ("num_nodes", num_nodes as i64, i64),
+                (
+                    "latest_wallclock",
+                    *latest_slot.unwrap().1.iter().max().unwrap() as i64,
+                    i64
+                ),
+                ("num_nodes", *num_nodes as i64, i64),
                 ("stake", stake as i64, i64),
+                ("wallclock_gap_0", wallclock_gap[0] as i64, i64),
+                ("wallclock_gap_1", wallclock_gap[1] as i64, i64),
+                ("wallclock_gap_2", wallclock_gap[2] as i64, i64),
+                ("wallclock_gap_3", wallclock_gap[3] as i64, i64),
+                ("wallclock_gap_4", wallclock_gap[4] as i64, i64),
+                ("wallclock_gap_5", wallclock_gap[5] as i64, i64),
+                ("wallclock_gap_6", wallclock_gap[6] as i64, i64),
+                ("wallclock_gap_7", wallclock_gap[7] as i64, i64),
             );
         }
     }
