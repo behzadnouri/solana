@@ -1,5 +1,6 @@
 use crate::serve_repair::RepairType;
 use itertools::Itertools;
+use rand::Rng;
 use solana_gossip::{
     cluster_info::ClusterInfo, contact_info::ContactInfo, crds::Cursor, epoch_slots::EpochSlots,
 };
@@ -30,6 +31,87 @@ impl ClusterSlots {
     }
 
     pub fn update(&self, root: Slot, cluster_info: &ClusterInfo, bank_forks: &RwLock<BankForks>) {
+        if rand::thread_rng().gen_ratio(1, 100) {
+            let cluster_slots = self.cluster_slots.read().unwrap();
+            info!("cluster slots root: {}", root);
+            info!("cluster slots size: {}", cluster_slots.len());
+            {
+                let mut cluster_slots: Vec<(Slot, usize)> = cluster_slots
+                    .iter()
+                    .map(|(slot, keys)| (*slot, keys.read().unwrap().len()))
+                    .collect();
+                cluster_slots.sort_unstable_by_key(|(slot, size)| (*size, *slot));
+                cluster_slots.reverse();
+                let size = cluster_slots.len();
+                info!("cluster slots head: {:?}", &cluster_slots[..size.min(10)]);
+                info!(
+                    "cluster slots tail: {:?}",
+                    &cluster_slots[size.saturating_sub(10)..]
+                );
+            }
+            let stakes = self.validator_stakes.read().unwrap();
+            let mut cluster_slots: Vec<(Slot, usize)> = cluster_slots
+                .iter()
+                .filter_map(|(slot, keys)| {
+                    let size = keys
+                        .read()
+                        .unwrap()
+                        .keys()
+                        .filter(|k| stakes.contains_key(k))
+                        .count();
+                    if size == 0 {
+                        None
+                    } else {
+                        Some((*slot, size))
+                    }
+                })
+                .collect();
+            cluster_slots.sort_unstable_by_key(|(slot, size)| (*size, *slot));
+            cluster_slots.reverse();
+            let size = cluster_slots.len();
+            info!("staked cluster slots size: {}", size);
+            info!(
+                "staked cluster slots head: {:?}",
+                &cluster_slots[..size.min(10)]
+            );
+            info!(
+                "staked cluster slots tail: {:?}",
+                &cluster_slots[size.saturating_sub(10)..]
+            );
+            let mut counts = HashMap::<usize, usize>::new();
+            for (_slot, size) in cluster_slots.iter() {
+                *counts.entry(*size).or_default() += 1;
+            }
+            let mut counts: Vec<_> = counts.into_iter().collect();
+            counts.sort_unstable_by_key(|(size, count)| (*count, *size));
+            counts.reverse();
+            info!(
+                "staked cluster slots counts: {:?}",
+                &counts[..counts.len().min(50)]
+            );
+            cluster_slots.sort_unstable();
+            let mut gaps: Vec<_> = cluster_slots
+                .iter()
+                .tuple_windows()
+                .map(|((parent, _), (slot, size))| (*parent, slot - parent, size))
+                .collect();
+            gaps.sort_unstable_by_key(|(slot, jump, _size)| (*jump, *slot));
+            gaps.reverse();
+            info!(
+                "staked cluster slots gaps: {:?}",
+                &gaps[..gaps.len().min(20)]
+            );
+            info!(
+                "staked cluster slots: {:?}",
+                cluster_slots
+                    .iter()
+                    .step_by(10)
+                    .tuple_windows()
+                    .map(|((parent, _), (slot, size))| (slot - parent, size))
+                    .take(100)
+                    .collect::<Vec<_>>()
+            );
+        }
         self.update_peers(bank_forks);
         let epoch_slots = {
             let mut cursor = self.cursor.lock().unwrap();

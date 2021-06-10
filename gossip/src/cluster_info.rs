@@ -1171,9 +1171,16 @@ impl ClusterInfo {
     }
 
     pub fn get_epoch_slots(&self, cursor: &mut Cursor) -> Vec<EpochSlots> {
+        let shred_version = self.my_shred_version();
         let gossip = self.gossip.read().unwrap();
         let entries = gossip.crds.get_epoch_slots(cursor);
         entries
+            .filter(
+                |entry| match gossip.crds.get_contact_info(entry.value.pubkey()) {
+                    Some(node) => node.shred_version == shred_version,
+                    None => false,
+                },
+            )
             .map(|entry| match &entry.value.data {
                 CrdsData::EpochSlots(_, slots) => slots.clone(),
                 _ => panic!("this should not happen!"),
