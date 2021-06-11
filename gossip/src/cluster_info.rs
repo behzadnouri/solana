@@ -467,6 +467,14 @@ impl ClusterInfo {
     }
 
     pub fn new(contact_info: ContactInfo, keypair: Arc<Keypair>) -> Self {
+        error!(
+            "ClusterInfo::new, shred_version: {}",
+            contact_info.shred_version
+        );
+        error!(
+            "ClusterInfo::new: {}",
+            std::backtrace::Backtrace::force_capture()
+        );
         let id = contact_info.id;
         let me = Self {
             gossip: RwLock::new(CrdsGossip::default()),
@@ -1746,7 +1754,7 @@ impl ClusterInfo {
         };
         let num_purged = self
             .time_gossip_write_lock("purge", &self.stats.purge)
-            .purge(thread_pool, timestamp(), &timeouts);
+            .purge(thread_pool, timestamp(), &timeouts, self.my_shred_version());
         inc_new_counter_info!("cluster_info-purge-count", num_purged);
     }
 
@@ -2520,6 +2528,14 @@ impl ClusterInfo {
         should_check_duplicate_instance: bool,
     ) -> Result<(), GossipError> {
         let _st = ScopedTimer::from(&self.stats.process_gossip_packets_time);
+        // Discard values of different shred version.
+        let self_shred_version = self.my_shred_version();
+        if self_shred_version != 0 {
+            let gossip = self.gossip.read().unwrap();
+            if gossip.crds.len() > 760_000 {
+                debug_shred_version(self_shred_version, &packets, gossip);
+            }
+        }
         // Check if there is a duplicate instance of
         // this node with more recent timestamp.
         let check_duplicate_instance = |values: &[CrdsValue]| {
@@ -2692,7 +2708,13 @@ impl ClusterInfo {
             should_check_duplicate_instance,
         )?;
         if last_print.elapsed() > SUBMIT_GOSSIP_STATS_INTERVAL {
-            submit_gossip_stats(&self.stats, &self.gossip, &stakes);
+            submit_gossip_stats(
+                &self.stats,
+                &self.gossip,
+                &stakes,
+                self.my_shred_version(),
+                thread_pool,
+            );
             *last_print = Instant::now();
         }
         Ok(())
@@ -2815,6 +2837,85 @@ impl ClusterInfo {
         let contact_info = Self::gossip_contact_info(id, socketaddr_any!(), shred_version);
 
         (contact_info, gossip_socket, None)
+    }
+}
+
+fn debug_shred_version(
+    self_shred_version: u16,
+    packets: &VecDeque<(/*from:*/ SocketAddr, Protocol)>,
+    gossip: RwLockReadGuard<CrdsGossip>,
+) {
+    let self_shred_version = Some(self_shred_version);
+    let get_shred_version = |pubkey| -> Option<u16> {
+        gossip
+            .crds
+            .get_contact_info(pubkey)
+            .map(|node| node.shred_version)
+    };
+    let format_pubkey = |pubkey: &Pubkey| -> String { format!("{}", pubkey)[..8].to_string() };
+    let now = timestamp() as i64;
+    let age = |value: &CrdsValue| (now - value.wallclock() as i64) / 1000;
+    for (_from, protocol) in packets {
+        match protocol {
+            Protocol::PullRequest(_filter, caller) => {
+                let caller = caller.contact_info().unwrap();
+                let caller_shred_version = get_shred_version(caller.id);
+                if caller_shred_version.is_some() && caller_shred_version != self_shred_version {
+                    error!(
+                        "pull-request shred version: {:?}, {}",
+                        caller_shred_version,
+                        format_pubkey(&caller.id)
+                    );
+                }
+            }
+            Protocol::PullResponse(from, values) => {
+                let from_shred_version = get_shred_version(*from);
+                if from_shred_version.is_some() && from_shred_version != self_shred_version {
+                    error!(
+                        "pull-response from shred version: {:?}, {}",
+                        from_shred_version,
+                        format_pubkey(&from)
+                    );
+                }
+                for value in values.iter().filter(|v| v.contact_info().is_none()) {
+                    let value_shred_version = get_shred_version(value.pubkey());
+                    if value_shred_version.is_some() && value_shred_version != self_shred_version {
+                        error!(
+                            "pull-response value shred version: {:?}, {}, from: {:?}, {}, age: {}s",
+                            value_shred_version,
+                            format_pubkey(&value.pubkey()),
+                            from_shred_version,
+                            format_pubkey(&from),
+                            age(value),
+                        );
+                    }
+                }
+            }
+            Protocol::PushMessage(from, values) => {
+                let from_shred_version = get_shred_version(*from);
+                if from_shred_version.is_some() && from_shred_version != self_shred_version {
+                    error!(
+                        "push-message from shred version: {:?}, {}",
+                        from_shred_version,
+                        format_pubkey(&from)
+                    );
+                }
+                for value in values.iter().filter(|v| v.contact_info().is_none()) {
+                    let value_shred_version = get_shred_version(value.pubkey());
+                    if value_shred_version.is_some() && value_shred_version != self_shred_version {
+                        error!(
+                            "push-message value shred version: {:?}, {}, from: {:?}, {}, age: {}s",
+                            value_shred_version,
+                            format_pubkey(&value.pubkey()),
+                            from_shred_version,
+                            format_pubkey(&from),
+                            age(value),
+                        );
+                    }
+                }
+            }
+            _ => (),
+        }
     }
 }
 

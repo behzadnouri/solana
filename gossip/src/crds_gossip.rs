@@ -313,6 +313,7 @@ impl CrdsGossip {
         thread_pool: &ThreadPool,
         now: u64,
         timeouts: &HashMap<Pubkey, u64>,
+        shred_version: u16,
     ) -> usize {
         let mut rv = 0;
         if now > 5 * self.push.msg_timeout {
@@ -325,7 +326,7 @@ impl CrdsGossip {
             assert!(timeouts.contains_key(&Pubkey::default()));
             rv = self
                 .pull
-                .purge_active(thread_pool, &mut self.crds, now, &timeouts);
+                .purge_active(thread_pool, &mut self.crds, now, &timeouts, shred_version);
         }
         self.crds
             .trim_purged(now.saturating_sub(5 * self.pull.crds_timeout));

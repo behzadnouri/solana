@@ -562,8 +562,9 @@ impl CrdsGossipPull {
         crds: &mut Crds,
         now: u64,
         timeouts: &HashMap<Pubkey, u64>,
+        shred_version: u16,
     ) -> usize {
-        let labels = crds.find_old_labels(thread_pool, now, timeouts);
+        let labels = crds.find_old_labels(thread_pool, now, timeouts, shred_version);
         for label in &labels {
             crds.remove(label, now);
         }

@@ -169,6 +169,21 @@ impl Crds {
         let label = value.label();
         let pubkey = value.pubkey();
         let value = VersionedCrdsValue::new(value, self.cursor, now);
+        // 18122
+        if self.table.len() > 760_000 {
+            let shred_version = self.get_contact_info(pubkey).map(|node| node.shred_version);
+            if shred_version.is_some()
+                && shred_version != Some(18122)
+                && value.value.contact_info().is_none()
+            {
+                error!(
+                    "shred version: {}, {:?}, {}",
+                    shred_version.unwrap(),
+                    &value.value,
+                    std::backtrace::Backtrace::force_capture()
+                );
+            }
+        }
         match self.table.entry(label) {
             Entry::Vacant(entry) => {
                 let entry_index = entry.index();
@@ -195,7 +210,17 @@ impl Crds {
                 let entry_index = entry.index();
                 self.shards.remove(entry_index, entry.get());
                 self.shards.insert(entry_index, &value);
-                match value.value.data {
+                match &value.value.data {
+                    CrdsData::ContactInfo(node) => {
+                        let shred_version = value.value.contact_info().unwrap().shred_version;
+                        if node.shred_version != shred_version {
+                            let pk = format!("{}", pubkey)[..8].to_string();
+                            error!(
+                                "change shred version: {} -> {}, {}",
+                                node.shred_version, shred_version, pk
+                            );
+                        }
+                    }
                     CrdsData::Vote(_, _) => {
                         self.votes.remove(&entry.get().ordinal);
                         self.votes.insert(value.ordinal, entry_index);
@@ -383,6 +408,7 @@ impl Crds {
         thread_pool: &ThreadPool,
         now: u64,
         timeouts: &HashMap<Pubkey, u64>,
+        _shred_version: u16,
     ) -> Vec<CrdsValueLabel> {
         let default_timeout = *timeouts
             .get(&Pubkey::default())
@@ -400,6 +426,18 @@ impl Crds {
                 }
             }
             // Otherwise check each value's timestamp individually.
+            // let (local_timestamp, origin_shred_version) = {
+            //     let origin = CrdsValueLabel::ContactInfo(*pubkey);
+            //     match self.table.get(&origin) {
+            //         Some(origin) => (
+            //             origin.local_timestamp,
+            //             origin.value.contact_info().unwrap().shred_version,
+            //         ),
+            //         None => (0, 0),
+            //     }
+            // };
+            // let shred_version_mismatch =
+            //     false && shred_version != 0 && shred_version != origin_shred_version;
             index
                 .into_iter()
                 .filter_map(|ix| {

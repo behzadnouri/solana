@@ -1,5 +1,7 @@
 use {
-    crate::crds_gossip::CrdsGossip,
+    crate::{crds_gossip::CrdsGossip, crds_value::CrdsData},
+    rand::Rng,
+    rayon::{prelude::*, ThreadPool},
     solana_measure::measure::Measure,
     solana_sdk::pubkey::Pubkey,
     std::{
@@ -125,9 +127,40 @@ pub(crate) fn submit_gossip_stats(
     stats: &GossipStats,
     gossip: &RwLock<CrdsGossip>,
     stakes: &HashMap<Pubkey, u64>,
+    shred_version: u16,
+    thread_pool: &ThreadPool,
 ) {
     let (table_size, num_nodes, purged_values_size, failed_inserts_size) = {
         let gossip = gossip.read().unwrap();
+        if shred_version != 0 && rand::thread_rng().gen_ratio(1, 64) {
+            let shred_version_mismatch = thread_pool.install(|| {
+                gossip
+                    .crds
+                    .par_values()
+                    .filter(|entry| !matches!(entry.value.data, CrdsData::ContactInfo(_)))
+                    .map(|entry| {
+                        let other_shred_version =
+                            match gossip.crds.get_contact_info(entry.value.pubkey()) {
+                                None => {
+                                    return (1, 0, 0, 0);
+                                }
+                                Some(node) => node.shred_version,
+                            };
+                        if other_shred_version == 0 {
+                            (0, 1, 0, 0)
+                        } else if other_shred_version != shred_version {
+                            (0, 0, 1, 0)
+                        } else {
+                            (0, 0, 0, 1)
+                        }
+                    })
+                    .reduce(
+                        || (0, 0, 0, 0),
+                        |a, b| (a.0 + b.0, a.1 + b.1, a.2 + b.2, a.3 + b.3),
+                    )
+            });
+            info!("shred version: {:?}", shred_version_mismatch);
+        }
         (
             gossip.crds.len(),
             gossip.crds.num_nodes(),
