@@ -467,6 +467,8 @@ impl ClusterInfo {
     }
 
     pub fn new(contact_info: ContactInfo, keypair: Arc<Keypair>) -> Self {
+        error!("ClusterInfo::new, shred_version: {}", contact_info.shred_version);
+        error!("ClusterInfo::new: {}",std::backtrace::Backtrace::force_capture());
         let id = contact_info.id;
         let me = Self {
             gossip: RwLock::new(CrdsGossip::default()),
