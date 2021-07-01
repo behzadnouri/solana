@@ -8,7 +8,7 @@ use {
         weighted_shuffle::{weighted_best, weighted_shuffle},
     },
     solana_sdk::pubkey::Pubkey,
-    std::{any::TypeId, cmp::Reverse, collections::HashMap, marker::PhantomData},
+    std::{any::TypeId, cmp::Reverse, collections::HashMap, convert::TryInto, marker::PhantomData},
 };
 
 enum NodeId {
@@ -87,10 +87,19 @@ impl ClusterNodes<BroadcastStage> {
             None
         } else {
             let index = weighted_best(&self.index, shred_seed);
-            match &self.nodes[index].node {
+            let root_node = match &self.nodes[index].node {
                 NodeId::ContactInfo(node) => Some(node),
                 NodeId::Pubkey(_) => panic!("this should not happen!"),
+            };
+            {
+                let seed = shred_seed[..8].try_into().unwrap();
+                let seed = u64::from_le_bytes(seed);
+                let root_node = root_node.unwrap().id;
+                if seed % 10007 == 0 {
+                    println!("seed: {},   broadcast peer: {:?}", seed, root_node);
+                }
             }
+            root_node
         }
     }
 }
@@ -132,6 +141,14 @@ impl ClusterNodes<RetransmitStage> {
             .iter()
             .position(|i| self.nodes[*i].pubkey() == self.pubkey)
             .unwrap();
+        {
+            let seed = shred_seed[..8].try_into().unwrap();
+            let seed = u64::from_le_bytes(seed);
+            if seed % 10007 == 0 {
+                let root_node = self.nodes[index[0]].pubkey();
+                println!("seed: {}, retransmit peers: {:?}", seed, root_node);
+            }
+        }
         let (neighbors, children) = compute_retransmit_peers(fanout, self_index, &index);
         // Assert that the node itself is included in the set of neighbors, at
         // the right offset.
