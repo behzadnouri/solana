@@ -7,7 +7,7 @@ use {
         crds_gossip_pull::CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS,
         weighted_shuffle::{weighted_best, weighted_shuffle},
     },
-    solana_sdk::pubkey::Pubkey,
+    solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey},
     std::{any::TypeId, cmp::Reverse, collections::HashMap, marker::PhantomData},
 };
 
@@ -156,6 +156,58 @@ fn new_cluster_nodes<T: 'static>(
     let self_pubkey = cluster_info.id();
     let nodes = get_nodes(cluster_info, stakes);
     let broadcast = TypeId::of::<T>() == TypeId::of::<BroadcastStage>();
+    // logs!
+    let unknown_staked_nodes = nodes
+        .iter()
+        .filter(|node| matches!(node.node, NodeId::Pubkey(_)))
+        .count();
+    let unknown_staked_nodes_stake: u64 = nodes
+        .iter()
+        .filter(|node| matches!(node.node, NodeId::Pubkey(_)))
+        .map(|node| node.stake)
+        .sum();
+    let zero_staked_nodes = nodes.iter().filter(|node| node.stake == 0).count();
+    let staked_nodes_with_zero_stake = stakes.values().filter(|stake| **stake == 0).count();
+    let total_stake: u64 = stakes.values().sum();
+    let low_staked_nodes = stakes
+        .values()
+        .filter(|stake| **stake < LAMPORTS_PER_SOL)
+        .count();
+    let sorted_stakes: Vec<_> = stakes
+        .values()
+        .copied()
+        .map(|stake| stake / LAMPORTS_PER_SOL)
+        .filter(|stake| *stake != 0)
+        .sorted()
+        .collect();
+    info!(
+        "unknown staked nodes: {}, stake: {}SOL, {}%",
+        unknown_staked_nodes,
+        unknown_staked_nodes_stake / LAMPORTS_PER_SOL,
+        unknown_staked_nodes_stake * 100 / total_stake
+    );
+    info!(
+        "zero/low staked nodes: {}, {}",
+        zero_staked_nodes, low_staked_nodes
+    );
+    info!(
+        "staked nodes with zero stake: {}",
+        staked_nodes_with_zero_stake
+    );
+    info!(
+        "total stake: {}, {}SOL",
+        stakes.len(),
+        total_stake / LAMPORTS_PER_SOL
+    );
+    info!(
+        "low  stakes SOL: {:?}",
+        &sorted_stakes[..sorted_stakes.len().min(5)]
+    );
+    info!(
+        "high stakes SOL: {:?}",
+        &sorted_stakes[sorted_stakes.len().saturating_sub(5)..]
+    );
+
     // For backward compatibility:
     //   * nodes which do not have contact-info are excluded.
     //   * stakes are floored at 1.
