@@ -26,7 +26,7 @@ use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
     fs::{self, File},
-    io::BufReader,
+    io::{BufReader, BufWriter, Write},
     ops::{
         Bound::{Included, Unbounded},
         Deref,
@@ -1204,9 +1204,11 @@ impl Tower {
         let new_filename = &self.tmp_path;
         {
             // overwrite anything if exists
-            let mut file = File::create(&new_filename)?;
+            let file = File::create(&new_filename)?;
+            let mut file = BufWriter::new(file);
             let saved_tower = SavedTower::new(self, node_keypair)?;
             bincode::serialize_into(&mut file, &saved_tower)?;
+            file.flush()?;
             // file.sync_all() hurts performance; pipeline sync-ing and submitting votes to the cluster!
         }
         trace!("persisted votes: {:?}", self.voted_slots());
@@ -1288,6 +1290,7 @@ impl TowerError {
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, AbiExample)]
 pub struct SavedTower {
     signature: Signature,
+    #[serde(with = "serde_bytes")]
     data: Vec<u8>,
 }
 
