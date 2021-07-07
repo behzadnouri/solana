@@ -211,6 +211,12 @@ where
     Ok(())
 }
 
+#[derive(Default)]
+struct RecvWindowStats {
+    num_packets: usize,
+    elapsed_time: u64,
+}
+
 fn recv_window<F>(
     blockstore: &Arc<Blockstore>,
     leader_schedule_cache: &Arc<LeaderScheduleCache>,
@@ -221,12 +227,14 @@ fn recv_window<F>(
     retransmit: &PacketSender,
     shred_filter: F,
     thread_pool: &ThreadPool,
+    stats: &mut RecvWindowStats,
 ) -> Result<()>
 where
     F: Fn(&Shred, u64) -> bool + Sync,
 {
     let timer = Duration::from_millis(200);
     let mut packets = verified_receiver.recv_timeout(timer)?;
+    let tic = Instant::now();
     let mut total_packets: usize = packets.iter().map(|p| p.packets.len()).sum();
 
     while let Ok(mut more_packets) = verified_receiver.try_recv() {
@@ -298,6 +306,9 @@ where
             .unzip()
     });
 
+    let elapsed_time = tic.elapsed().as_micros();
+    stats.elapsed_time += elapsed_time as u64;
+    stats.num_packets += total_packets;
     trace!("{:?} shreds from packets", shreds.len());
 
     trace!("{} num total shreds received: {}", my_pubkey, total_packets);
@@ -551,7 +562,8 @@ impl WindowService {
                 let handle_error = || {
                     inc_new_counter_error!("solana-window-error", 1, 1);
                 };
-
+                let mut stats = RecvWindowStats::default();
+                let mut submit_metrics = Instant::now();
                 loop {
                     if exit.load(Ordering::Relaxed) {
                         break;
@@ -582,12 +594,25 @@ impl WindowService {
                             )
                         },
                         &thread_pool,
+                        &mut stats,
                     ) {
                         if Self::should_exit_on_error(e, &mut handle_timeout, &handle_error) {
                             break;
                         }
                     } else {
                         now = Instant::now();
+                    }
+                    if submit_metrics.elapsed() > Duration::from_secs(2) && stats.num_packets > 0 {
+                        let elapsed_time = stats.elapsed_time;
+                        let ratio = elapsed_time / stats.num_packets as u64;
+                        datapoint_info!(
+                            "window_service_recv_window",
+                            ("num_packets", stats.num_packets as i64, i64),
+                            ("elapsed_time", elapsed_time, i64),
+                            ("elapsed_time_per_packet", ratio as i64, i64),
+                        );
+                        stats = RecvWindowStats::default();
+                        submit_metrics = Instant::now();
                     }
                 }
             })
