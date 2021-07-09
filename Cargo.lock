@@ -4800,6 +4800,7 @@ dependencies = [
  "matches",
  "num-traits",
  "num_cpus",
+ "parking_lot 0.11.1",
  "rand 0.7.3",
  "rand_chacha 0.2.2",
  "rayon",

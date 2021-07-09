@@ -322,10 +322,10 @@ pub fn cluster_info_scale() {
                     .iter()
                     .filter(|v| v.message.account_keys == tx.message.account_keys)
                     .count();
-                num_old += node.0.gossip.read().unwrap().push.num_old;
-                num_push_total += node.0.gossip.read().unwrap().push.num_total;
-                num_pushes += node.0.gossip.read().unwrap().push.num_pushes;
-                num_pulls += node.0.gossip.read().unwrap().pull.num_pulls;
+                num_old += node.0.gossip.read().push.num_old;
+                num_push_total += node.0.gossip.read().push.num_total;
+                num_pushes += node.0.gossip.read().push.num_pushes;
+                num_pulls += node.0.gossip.read().pull.num_pulls;
                 if has_tx == 0 {
                     not_done += 1;
                 }
@@ -348,10 +348,10 @@ pub fn cluster_info_scale() {
         );
         sleep(Duration::from_millis(200));
         for node in nodes.iter() {
-            node.0.gossip.write().unwrap().push.num_old = 0;
-            node.0.gossip.write().unwrap().push.num_total = 0;
-            node.0.gossip.write().unwrap().push.num_pushes = 0;
-            node.0.gossip.write().unwrap().pull.num_pulls = 0;
+            node.0.gossip.write().push.num_old = 0;
+            node.0.gossip.write().push.num_total = 0;
+            node.0.gossip.write().push.num_pushes = 0;
+            node.0.gossip.write().pull.num_pulls = 0;
         }
     }
 

@@ -746,7 +746,6 @@ mod tests {
         cluster_info
             .gossip
             .write()
-            .unwrap()
             .crds
             .insert(
                 CrdsValue::new_unsigned(CrdsData::AccountsHashes(SnapshotHash::new(
@@ -766,7 +765,6 @@ mod tests {
         cluster_info
             .gossip
             .write()
-            .unwrap()
             .crds
             .insert(
                 CrdsValue::new_unsigned(CrdsData::AccountsHashes(SnapshotHash::new(
@@ -782,7 +780,6 @@ mod tests {
         cluster_info
             .gossip
             .write()
-            .unwrap()
             .crds
             .insert(
                 CrdsValue::new_unsigned(CrdsData::AccountsHashes(SnapshotHash::new(

@@ -5,10 +5,7 @@ use {
     std::{
         collections::HashMap,
         ops::{Deref, DerefMut},
-        sync::{
-            atomic::{AtomicU64, Ordering},
-            RwLock,
-        },
+        sync::atomic::{AtomicU64, Ordering},
         time::Instant,
     },
 };
@@ -160,11 +157,11 @@ pub(crate) struct GossipStats {
 
 pub(crate) fn submit_gossip_stats(
     stats: &GossipStats,
-    gossip: &RwLock<CrdsGossip>,
+    gossip: &parking_lot::RwLock<CrdsGossip>,
     stakes: &HashMap<Pubkey, u64>,
 ) {
     let (table_size, num_nodes, purged_values_size, failed_inserts_size) = {
-        let gossip = gossip.read().unwrap();
+        let gossip = gossip.read();
         (
             gossip.crds.len(),
             gossip.crds.num_nodes(),
