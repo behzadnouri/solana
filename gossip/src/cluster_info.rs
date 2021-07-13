@@ -18,13 +18,13 @@ use {
             submit_gossip_stats, Counter, GossipStats, ScopedTimer, TimedGuard,
         },
         contact_info::ContactInfo,
-        crds::{Crds, Cursor},
+        crds::{Crds, Cursor, VersionedCrdsValue},
         crds_gossip::CrdsGossip,
         crds_gossip_error::CrdsGossipError,
         crds_gossip_pull::{CrdsFilter, ProcessPullStats, CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS},
         crds_value::{
-            self, CrdsData, CrdsValue, CrdsValueLabel, EpochSlotsIndex, LowestSlot, NodeInstance,
-            SnapshotHash, Version, Vote, MAX_WALLCLOCK,
+            self, CrdsData, CrdsValue, CrdsValueLabel, EpochSlotsIndex, LegacyVersion, LowestSlot,
+            NodeInstance, SnapshotHash, Version, Vote, MAX_WALLCLOCK,
         },
         data_budget::DataBudget,
         epoch_slots::EpochSlots,
@@ -70,6 +70,7 @@ use {
     std::{
         borrow::Cow,
         collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+        convert::TryFrom,
         fmt::Debug,
         fs::{self, File},
         io::BufReader,
@@ -627,7 +628,8 @@ impl ClusterInfo {
         F: FnOnce(&ContactInfo) -> Y,
     {
         let gossip_crds = self.gossip.crds.read().unwrap();
-        gossip_crds.get_contact_info(*id).map(map)
+        // gossip_crds.get_contact_info(*id).map(map)
+        gossip_crds.get(*id).map(map)
     }
 
     pub fn lookup_contact_info_by_gossip_addr(
@@ -649,11 +651,9 @@ impl ClusterInfo {
 
     fn lookup_epoch_slots(&self, ix: EpochSlotsIndex) -> EpochSlots {
         let self_pubkey = self.id();
-        let label = CrdsValueLabel::EpochSlots(ix, self_pubkey);
         let gossip_crds = self.gossip.crds.read().unwrap();
         gossip_crds
-            .get(&label)
-            .and_then(|v| v.value.epoch_slots())
+            .get::<&EpochSlots>((ix, self_pubkey))
             .cloned()
             .unwrap_or_else(|| EpochSlots::new(self_pubkey, timestamp()))
     }
@@ -815,7 +815,7 @@ impl ClusterInfo {
         let last = {
             let gossip_crds = self.gossip.crds.read().unwrap();
             gossip_crds
-                .get_lowest_slot(self_pubkey)
+                .get::<&LowestSlot>(self_pubkey)
                 .map(|x| x.lowest)
                 .unwrap_or_default()
         };
@@ -841,8 +841,8 @@ impl ClusterInfo {
                 self.time_gossip_read_lock("lookup_epoch_slots", &self.stats.epoch_slots_lookup);
             (0..crds_value::MAX_EPOCH_SLOTS)
                 .filter_map(|ix| {
-                    let label = CrdsValueLabel::EpochSlots(ix, self_pubkey);
-                    let epoch_slots = gossip_crds.get(&label)?.value.epoch_slots()?;
+                    // let label = CrdsValueLabel::EpochSlots(ix, self_pubkey);
+                    let epoch_slots: &EpochSlots = gossip_crds.get((ix, self_pubkey))?;
                     let first_slot = epoch_slots.first_slot()?;
                     Some((epoch_slots.wallclock, first_slot, ix))
                 })
@@ -984,7 +984,7 @@ impl ClusterInfo {
             (0..MAX_LOCKOUT_HISTORY as u8)
                 .filter_map(|ix| {
                     let vote = CrdsValueLabel::Vote(ix, self_pubkey);
-                    let vote = gossip_crds.get(&vote)?;
+                    let vote: &VersionedCrdsValue = gossip_crds.get(&vote)?;
                     num_crds_votes += 1;
                     match &vote.value.data {
                         CrdsData::Vote(_, vote) if should_evict_vote(vote) => {
@@ -1008,7 +1008,7 @@ impl ClusterInfo {
                 self.time_gossip_read_lock("gossip_read_push_vote", &self.stats.push_vote_read);
             (0..MAX_LOCKOUT_HISTORY as u8).find(|ix| {
                 let vote = CrdsValueLabel::Vote(*ix, self_pubkey);
-                if let Some(vote) = gossip_crds.get(&vote) {
+                if let Some(vote) = gossip_crds.get::<&VersionedCrdsValue>(&vote) {
                     match &vote.value.data {
                         CrdsData::Vote(_, prev_vote) => match prev_vote.slot() {
                             Some(prev_vote_slot) => prev_vote_slot == vote_slot,
@@ -1082,8 +1082,9 @@ impl ClusterInfo {
     where
         F: FnOnce(&Vec<(Slot, Hash)>) -> Y,
     {
+        // XXX This can have an impl
         self.time_gossip_read_lock("get_accounts_hash", &self.stats.get_accounts_hash)
-            .get(&CrdsValueLabel::AccountsHashes(*pubkey))
+            .get::<&VersionedCrdsValue>(&CrdsValueLabel::AccountsHashes(*pubkey))
             .map(|x| &x.value.accounts_hash().unwrap().hashes)
             .map(map)
     }
@@ -1094,7 +1095,7 @@ impl ClusterInfo {
     {
         let gossip_crds = self.gossip.crds.read().unwrap();
         gossip_crds
-            .get(&CrdsValueLabel::SnapshotHashes(*pubkey))
+            .get::<&VersionedCrdsValue>(&CrdsValueLabel::SnapshotHashes(*pubkey))
             .map(|x| &x.value.snapshot_hash().unwrap().hashes)
             .map(map)
     }
@@ -1119,12 +1120,13 @@ impl ClusterInfo {
 
     pub fn get_node_version(&self, pubkey: &Pubkey) -> Option<solana_version::Version> {
         let gossip_crds = self.gossip.crds.read().unwrap();
-        let version = gossip_crds.get(&CrdsValueLabel::Version(*pubkey));
-        if let Some(version) = version.and_then(|v| v.value.version()) {
+        let version = gossip_crds.get::<&VersionedCrdsValue>(&CrdsValueLabel::Version(*pubkey));
+        if let Some(version) = version.and_then(|v| <&Version>::try_from(&v.value.data).ok()) {
             return Some(version.version.clone());
         }
-        let version = gossip_crds.get(&CrdsValueLabel::LegacyVersion(*pubkey))?;
-        let version = version.value.legacy_version()?;
+        let version =
+            gossip_crds.get::<&VersionedCrdsValue>(&CrdsValueLabel::LegacyVersion(*pubkey))?;
+        let version = <&LegacyVersion>::try_from(&version.value.data).ok()?;
         Some(version.version.clone().into())
     }
 
@@ -1197,7 +1199,7 @@ impl ClusterInfo {
                 .into_iter()
                 .filter(|node| {
                     ContactInfo::is_valid_address(&node.serve_repair)
-                        && match gossip_crds.get_lowest_slot(node.id) {
+                        && match gossip_crds.get::<&LowestSlot>(node.id) {
                             None => true, // fallback to legacy behavior
                             Some(lowest_slot) => lowest_slot.lowest <= slot,
                         }
@@ -1452,7 +1454,7 @@ impl ClusterInfo {
             push_messages
                 .into_iter()
                 .filter_map(|(pubkey, messages)| {
-                    let peer = gossip_crds.get_contact_info(pubkey)?;
+                    let peer: &ContactInfo = gossip_crds.get(pubkey)?;
                     Some((peer.gossip, messages))
                 })
                 .collect()
@@ -2203,7 +2205,8 @@ impl ClusterInfo {
                     .into_par_iter()
                     .with_min_len(256)
                     .filter_map(|(from, prunes)| {
-                        let peer = gossip_crds.get_contact_info(from)?;
+                        // let peer = gossip_crds.get_contact_info(from)?;
+                        let peer: &ContactInfo = gossip_crds.get(from)?;
                         let mut prune_data = PruneData {
                             pubkey: self_pubkey,
                             prunes,
@@ -3300,7 +3303,7 @@ mod tests {
         let label = CrdsValueLabel::ContactInfo(d.id);
         cluster_info.insert_info(d);
         let gossip_crds = cluster_info.gossip.crds.read().unwrap();
-        assert!(gossip_crds.get(&label).is_some());
+        assert!(gossip_crds.get::<&VersionedCrdsValue>(&label).is_some());
     }
 
     fn assert_in_range(x: u16, range: (u16, u16)) {
@@ -3565,7 +3568,7 @@ mod tests {
             let gossip_crds = cluster_info.gossip.crds.read().unwrap();
             let mut vote_slots = HashSet::new();
             for label in labels {
-                match &gossip_crds.get(&label).unwrap().value.data {
+                match &gossip_crds.get::<&CrdsValue>(&label).unwrap().data {
                     CrdsData::Vote(_, vote) => {
                         assert!(vote_slots.insert(vote.slot().unwrap()));
                     }

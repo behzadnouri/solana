@@ -552,7 +552,10 @@ mod test {
             push.process_push_message(&crds, &Pubkey::default(), vec![value.clone()], 0),
             [Ok(label.pubkey())],
         );
-        assert_eq!(crds.read().unwrap().get(&label).unwrap().value, value);
+        assert_eq!(
+            crds.read().unwrap().get::<&CrdsValue>(&label).unwrap(),
+            &value
+        );
 
         // push it again
         assert_eq!(
@@ -947,7 +950,10 @@ mod test {
             push.process_push_message(&crds, &Pubkey::default(), vec![value.clone()], 0),
             [Ok(label.pubkey())]
         );
-        assert_eq!(crds.write().unwrap().get(&label).unwrap().value, value);
+        assert_eq!(
+            crds.write().unwrap().get::<&CrdsValue>(&label).unwrap(),
+            &value
+        );
 
         // push it again
         assert_eq!(

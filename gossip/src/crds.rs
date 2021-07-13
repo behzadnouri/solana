@@ -28,7 +28,10 @@ use {
     crate::{
         contact_info::ContactInfo,
         crds_shards::CrdsShards,
-        crds_value::{CrdsData, CrdsValue, CrdsValueLabel, LowestSlot},
+        crds_value::{
+            CrdsData, CrdsValue, CrdsValueLabel, EpochSlotsIndex, LowestSlot, Vote, VoteIndex,
+        },
+        epoch_slots::EpochSlots,
     },
     bincode::serialize,
     indexmap::{
@@ -44,6 +47,7 @@ use {
     std::{
         cmp::Ordering,
         collections::{hash_map, BTreeMap, HashMap, VecDeque},
+        convert::TryFrom,
         ops::{Bound, Index, IndexMut},
     },
 };
@@ -241,23 +245,38 @@ impl Crds {
         }
     }
 
-    pub fn get(&self, label: &CrdsValueLabel) -> Option<&VersionedCrdsValue> {
-        self.table.get(label)
+    pub fn get<'a, 'b, V>(&'a self, key: V::Key) -> Option<V>
+    where
+        V: CrdsEntry<'a, 'b>,
+    {
+        V::get(key, &self)
     }
 
-    pub fn get_contact_info(&self, pubkey: Pubkey) -> Option<&ContactInfo> {
-        let label = CrdsValueLabel::ContactInfo(pubkey);
-        self.table.get(&label)?.value.contact_info()
-    }
+    // pub fn get_data<'a, T>(&'a self, label: &CrdsValueLabel) -> Option<T>
+    // where
+    //     T: TryFrom<&'a CrdsData>,
+    // {
+    //     let entry = self.table.get(label)?;
+    //     T::try_from(&entry.value.data).ok()
+    // }
+
+    // pub fn get(&self, label: &CrdsValueLabel) -> Option<&VersionedCrdsValue> {
+    //     self.table.get(label)
+    // }
+
+    // pub fn get_contact_info(&self, pubkey: Pubkey) -> Option<&ContactInfo> {
+    //     let label = CrdsValueLabel::ContactInfo(pubkey);
+    //     self.table.get(&label)?.value.contact_info()
+    // }
 
     pub(crate) fn get_shred_version(&self, pubkey: &Pubkey) -> Option<u16> {
         self.shred_versions.get(pubkey).copied()
     }
 
-    pub fn get_lowest_slot(&self, pubkey: Pubkey) -> Option<&LowestSlot> {
-        let lable = CrdsValueLabel::LowestSlot(pubkey);
-        self.table.get(&lable)?.value.lowest_slot()
-    }
+    // pub fn get_lowest_slot(&self, pubkey: Pubkey) -> Option<&LowestSlot> {
+    //     let lable = CrdsValueLabel::LowestSlot(pubkey);
+    //     self.table.get(&lable)?.value.lowest_slot()
+    // }
 
     /// Returns all entries which are ContactInfo.
     pub fn get_nodes(&self) -> impl Iterator<Item = &VersionedCrdsValue> {
@@ -558,6 +577,101 @@ impl Crds {
         Ok(keys.len())
     }
 }
+
+// Index, TryFrom, ...
+// XXX just need a TryFrom<&VersionedCrdsValue>, and TryFrom<&CrdsValue>
+// and a trait to map Key to CrdsValueLabel!
+trait Get<T> {
+    type Key;
+    fn label(key: Self::Key) -> CrdsValueLabel;
+    fn get(value: &VersionedCrdsValue) -> Option<&Self>;
+}
+
+// trait Get2<T>: std::convert::TryFrom<&VersionedCrdsValue> {
+trait Get2<T> {
+    type Key;
+    fn key(key: Self::Key) -> CrdsValueLabel;
+}
+
+// impl Get for LowestSlot {
+//     type Key = pubkey;
+//     fn label(key: Self::Key) -> CrdsValueLabel {
+//         CrdsValueLabel::LowestSlot(key);
+//     }
+
+// pub fn get1<'a, K,V>(&'a self, key: K) -> Option<&V>
+//     where V: CrdsEntry<K>
+// {
+//     V::get(&self.table, key)
+// }
+
+pub trait CrdsEntry<'a, 'b> {
+    type Key;
+    fn get(key: Self::Key, crds: &'a Crds) -> Option<Self>
+    where
+        Self: Sized;
+}
+
+impl<'a, 'b> CrdsEntry<'a, 'b> for &'a VersionedCrdsValue {
+    type Key = &'b CrdsValueLabel;
+    fn get(key: Self::Key, crds: &'a Crds) -> Option<Self> {
+        crds.table.get(key)
+    }
+}
+
+impl<'a, 'b> CrdsEntry<'a, 'b> for &'a CrdsValue {
+    type Key = &'b CrdsValueLabel;
+    fn get(key: Self::Key, crds: &'a Crds) -> Option<Self> {
+        Some(&crds.table.get(key)?.value)
+    }
+}
+
+// impl<'a, 'b> CrdsEntry<'a, 'b> for &'a ContactInfo {
+//     type Key = Pubkey;
+//     fn get(pubkey: Self::Key, crds: &'a Crds) -> Option<Self> {
+//        let key = CrdsValueLabel::ContactInfo(pubkey);
+//        let entry = crds.table.get(&key)?;
+//        <Self>::try_from(&entry.value.data).ok()
+//     }
+// }
+
+// impl<'a> CrdsEntry<'a, Pubkey> for &'a ContactInfo {
+//     fn get(pubkey: Pubkey, crds: &'a Crds) -> Option<Self> {
+//         let key = CrdsValueLabel::ContactInfo(pubkey);
+//         let entry = crds.table.get(&key)?;
+//         <Self>::try_from(&entry.value.data).ok()
+//     }
+// }
+
+macro_rules! impl_crds_entry (
+    ($name:ident, $key: ty) => (
+        impl<'a, 'b> CrdsEntry<'a, 'b> for &'a $name {
+            type Key = $key;
+            fn get(key: $key, crds: &'a Crds) -> Option<Self> {
+                let key = CrdsValueLabel::$name(key);
+                let entry = crds.table.get(&key)?;
+                <Self>::try_from(&entry.value.data).ok()
+            }
+        }
+    );
+    ($name:ident, $ix: ty, $key: ty) => (
+        impl<'a, 'b> CrdsEntry<'a, 'b> for &'a $name {
+            type Key = ($ix, $key);
+            fn get((ix, key): ($ix, $key), crds:& 'a Crds) -> Option<Self> {
+                let key = CrdsValueLabel::$name(ix, key);
+                let entry = crds.table.get(&key)?;
+                <Self>::try_from(&entry.value.data).ok()
+            }
+        }
+    );
+);
+
+impl_crds_entry!(ContactInfo, Pubkey);
+impl_crds_entry!(LowestSlot, Pubkey);
+impl_crds_entry!(Vote, VoteIndex, Pubkey);
+impl_crds_entry!(EpochSlots, EpochSlotsIndex, Pubkey);
+// impl_crds_entry!(LegacyVersion, Pubkey);
+// impl_crds_entry!(Version, Pubkey);
 
 #[cfg(test)]
 mod tests {
@@ -1075,7 +1189,7 @@ mod tests {
         // Remove contact-info. Shred version should stay there since there
         // are still values associated with the pubkey.
         crds.remove(&CrdsValueLabel::ContactInfo(pubkey), timestamp());
-        assert_eq!(crds.get_contact_info(pubkey), None);
+        assert_eq!(crds.get::<&ContactInfo>(pubkey), None);
         assert_eq!(crds.get_shred_version(&pubkey), Some(8));
         // Remove the remaining entry with the same pubkey.
         crds.remove(&CrdsValueLabel::SnapshotHashes(pubkey), timestamp());

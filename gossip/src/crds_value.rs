@@ -23,6 +23,7 @@ use {
         borrow::{Borrow, Cow},
         cmp::Ordering,
         collections::{hash_map::Entry, BTreeSet, HashMap},
+        convert::TryFrom,
         fmt,
     },
 };
@@ -578,32 +579,20 @@ impl CrdsValue {
         }
     }
     pub fn contact_info(&self) -> Option<&ContactInfo> {
-        match &self.data {
-            CrdsData::ContactInfo(contact_info) => Some(contact_info),
-            _ => None,
-        }
+        <&ContactInfo>::try_from(&self.data).ok()
     }
 
-    #[cfg(test)]
-    fn vote(&self) -> Option<&Vote> {
-        match &self.data {
-            CrdsData::Vote(_, vote) => Some(vote),
-            _ => None,
-        }
-    }
+    // #[cfg(test)]
+    // fn vote(&self) -> Option<&Vote> {
+    //     <&Vote>::try_from(&self.data).ok()
+    // }
 
-    pub fn lowest_slot(&self) -> Option<&LowestSlot> {
-        match &self.data {
-            CrdsData::LowestSlot(_, slots) => Some(slots),
-            _ => None,
-        }
-    }
+    // pub fn lowest_slot(&self) -> Option<&LowestSlot> {
+    //     <&LowestSlot>::try_from(&self.data).ok()
+    // }
 
     pub fn snapshot_hash(&self) -> Option<&SnapshotHash> {
-        match &self.data {
-            CrdsData::SnapshotHashes(slots) => Some(slots),
-            _ => None,
-        }
+        <&SnapshotHash>::try_from(&self.data).ok()
     }
 
     pub fn accounts_hash(&self) -> Option<&SnapshotHash> {
@@ -613,26 +602,17 @@ impl CrdsValue {
         }
     }
 
-    pub fn epoch_slots(&self) -> Option<&EpochSlots> {
-        match &self.data {
-            CrdsData::EpochSlots(_, slots) => Some(slots),
-            _ => None,
-        }
-    }
+    // pub fn epoch_slots(&self) -> Option<&EpochSlots> {
+    //     <&EpochSlots>::try_from(&self.data).ok()
+    // }
 
-    pub fn legacy_version(&self) -> Option<&LegacyVersion> {
-        match &self.data {
-            CrdsData::LegacyVersion(legacy_version) => Some(legacy_version),
-            _ => None,
-        }
-    }
+    // pub fn legacy_version(&self) -> Option<&LegacyVersion> {
+    //     <&LegacyVersion>::try_from(&self.data).ok()
+    // }
 
-    pub fn version(&self) -> Option<&Version> {
-        match &self.data {
-            CrdsData::Version(version) => Some(version),
-            _ => None,
-        }
-    }
+    // pub fn version(&self) -> Option<&Version> {
+    //     <&Version>::try_from(&self.data).ok()
+    // }
 
     /// Returns the size (in bytes) of a CrdsValue
     pub fn size(&self) -> u64 {
@@ -681,6 +661,53 @@ pub(crate) fn sanitize_wallclock(wallclock: u64) -> Result<(), SanitizeError> {
     }
 }
 
+// impl<'a> TryFrom<&'a CrdsData> for &'a ContactInfo {
+//     type Error = &'static str;
+//     fn try_from(data: &'a CrdsData) -> Result<Self, Self::Error> {
+//         match data {
+//             CrdsData::ContactInfo(node) => Ok(node),
+//             _ => Err("not ContactInfo"),
+//         }
+//     }
+// }
+//
+// impl<'a, T: TryFrom<&'a CrdsData>> TryFrom<&'a CrdsValue> for T {
+//     type Error = <T as TryFrom<&'a CrdsData>>::Error;
+//     fn try_from(value: &'a CrdsValue) -> Result<Self, Self::Error> {
+//         Self::try_from(&value.data)
+//     }
+// }
+
+macro_rules! impl_try_from (
+    ($name:ident, $pat: pat, $expr: expr) => (
+        impl<'a> TryFrom<&'a CrdsData> for &'a $name {
+            type Error = &'static str;
+            fn try_from(data: &'a CrdsData) -> Result<Self, Self::Error> {
+                match data {
+                    $pat => Ok($expr),
+                    _ => Err("type mismatch"),
+                }
+            }
+        }
+        // impl<'a> TryFrom<&'a CrdsValue> for &'a $name {
+        //     type Error = &'static str;
+        //     fn try_from(value: &'a CrdsValue) -> Result<Self, Self::Error> {
+        //         Self::try_from(&value.data)
+        //     }
+        // }
+    );
+);
+
+impl_try_from!(ContactInfo, CrdsData::ContactInfo(node), node);
+impl_try_from!(Vote, CrdsData::Vote(_, vote), vote);
+impl_try_from!(LowestSlot, CrdsData::LowestSlot(_, slot), slot);
+impl_try_from!(SnapshotHash, CrdsData::SnapshotHashes(hash), hash);
+impl_try_from!(EpochSlots, CrdsData::EpochSlots(_, slots), slots);
+impl_try_from!(LegacyVersion, CrdsData::LegacyVersion(version), version);
+impl_try_from!(Version, CrdsData::Version(version), version);
+impl_try_from!(NodeInstance, CrdsData::NodeInstance(node), node);
+impl_try_from!(DuplicateShred, CrdsData::DuplicateShred(_, shred), shred);
+
 #[cfg(test)]
 mod test {
     use {
@@ -710,7 +737,7 @@ mod test {
             Vote::new(Pubkey::default(), test_tx(), 0),
         ));
         assert_eq!(v.wallclock(), 0);
-        let key = v.vote().unwrap().from;
+        let key = <&Vote>::try_from(&v.data).unwrap().from;
         assert_eq!(v.label(), CrdsValueLabel::Vote(0, key));
 
         let v = CrdsValue::new_unsigned(CrdsData::LowestSlot(
@@ -718,7 +745,7 @@ mod test {
             LowestSlot::new(Pubkey::default(), 0, 0),
         ));
         assert_eq!(v.wallclock(), 0);
-        let key = v.lowest_slot().unwrap().from;
+        let key = <&LowestSlot>::try_from(&v.data).unwrap().from;
         assert_eq!(v.label(), CrdsValueLabel::LowestSlot(key));
     }
 

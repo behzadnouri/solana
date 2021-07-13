@@ -264,7 +264,7 @@ impl CrdsGossipPull {
             Some((node, _gossip_addr)) => node,
         };
         let filters = self.build_crds_filters(thread_pool, crds, bloom_size);
-        let peer = match crds.read().unwrap().get_contact_info(peer) {
+        let peer = match crds.read().unwrap().get::<&ContactInfo>(peer) {
             None => return Err(CrdsGossipError::NoPeers),
             Some(node) => node.clone(),
         };
@@ -390,7 +390,7 @@ impl CrdsGossipPull {
             } else if now <= response.wallclock().saturating_add(timeout) {
                 active_values.push(response);
                 None
-            } else if crds.get_contact_info(owner).is_some() {
+            } else if crds.get::<&ContactInfo>(owner).is_some() {
                 // Silently insert this old value without bumping record
                 // timestamps
                 expired_values.push(response);
@@ -1272,8 +1272,14 @@ pub(crate) mod tests {
         CrdsGossipPull::process_pull_requests(&dest_crds, callers, 1);
         let dest_crds = dest_crds.read().unwrap();
         assert!(rsp.iter().all(|rsp| rsp.is_empty()));
-        assert!(dest_crds.get(&caller.label()).is_some());
-        assert_eq!(dest_crds.get(&caller.label()).unwrap().local_timestamp, 1);
+        assert!(dest_crds.get::<&CrdsValue>(&caller.label()).is_some());
+        assert_eq!(
+            dest_crds
+                .get::<&VersionedCrdsValue>(&caller.label())
+                .unwrap()
+                .local_timestamp,
+            1
+        );
     }
     #[test]
     fn test_process_pull_request_response() {
@@ -1312,7 +1318,13 @@ pub(crate) mod tests {
         assert_eq!(same_key.label(), new.label());
         assert!(same_key.wallclock() < new.wallclock());
         node_crds.insert(same_key.clone(), 0).unwrap();
-        assert_eq!(node_crds.get(&same_key.label()).unwrap().local_timestamp, 0);
+        assert_eq!(
+            node_crds
+                .get::<&VersionedCrdsValue>(&same_key.label())
+                .unwrap()
+                .local_timestamp,
+            0
+        );
         let node_crds = RwLock::new(node_crds);
         let mut done = false;
         let mut pings = Vec::new();
@@ -1366,12 +1378,18 @@ pub(crate) mod tests {
             assert_eq!(failed, 0);
             assert_eq!(1, {
                 let node_crds = node_crds.read().unwrap();
-                node_crds.get(&new.label()).unwrap().local_timestamp
+                node_crds
+                    .get::<&VersionedCrdsValue>(&new.label())
+                    .unwrap()
+                    .local_timestamp
             });
             // verify that the whole record was updated for dest since this is a response from dest
             assert_eq!(1, {
                 let node_crds = node_crds.read().unwrap();
-                node_crds.get(&same_key.label()).unwrap().local_timestamp
+                node_crds
+                    .get::<&VersionedCrdsValue>(&same_key.label())
+                    .unwrap()
+                    .local_timestamp
             });
             done = true;
             break;
@@ -1395,11 +1413,14 @@ pub(crate) mod tests {
             0,
         )));
         node_crds.insert(old.clone(), 0).unwrap();
-        let value_hash = node_crds.get(&old.label()).unwrap().value_hash;
+        let value_hash = node_crds
+            .get::<&VersionedCrdsValue>(&old.label())
+            .unwrap()
+            .value_hash;
 
         //verify self is valid
         assert_eq!(
-            node_crds.get(&node_label).unwrap().value.label(),
+            node_crds.get::<&CrdsValue>(&node_label).unwrap().label(),
             node_label
         );
         // purge
@@ -1410,9 +1431,12 @@ pub(crate) mod tests {
         //verify self is still valid after purge
         assert_eq!(node_label, {
             let node_crds = node_crds.read().unwrap();
-            node_crds.get(&node_label).unwrap().value.label()
+            node_crds.get::<&CrdsValue>(&node_label).unwrap().label()
         });
-        assert_eq!(node_crds.read().unwrap().get(&old.label()), None);
+        assert_eq!(
+            node_crds.read().unwrap().get::<&CrdsValue>(&old.label()),
+            None
+        );
         assert_eq!(node_crds.read().unwrap().num_purged(), 1);
         for _ in 0..30 {
             // there is a chance of a false positive with bloom filters
