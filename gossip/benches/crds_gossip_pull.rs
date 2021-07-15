@@ -3,6 +3,7 @@
 extern crate test;
 
 use {
+    parking_lot::RwLock,
     rand::{thread_rng, Rng},
     rayon::ThreadPoolBuilder,
     solana_gossip::{
@@ -12,7 +13,6 @@ use {
         crds_value::CrdsValue,
     },
     solana_sdk::hash,
-    std::sync::RwLock,
     test::Bencher,
 };
 

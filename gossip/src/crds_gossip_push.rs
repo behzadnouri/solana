@@ -22,6 +22,7 @@ use {
     indexmap::map::IndexMap,
     itertools::Itertools,
     lru::LruCache,
+    parking_lot::{Mutex, RwLock},
     rand::{seq::SliceRandom, Rng},
     solana_runtime::bloom::{AtomicBloom, Bloom},
     solana_sdk::{packet::PACKET_DATA_SIZE, pubkey::Pubkey, timing::timestamp},
@@ -30,10 +31,7 @@ use {
         collections::{HashMap, HashSet},
         iter::repeat,
         ops::{DerefMut, RangeBounds},
-        sync::{
-            atomic::{AtomicUsize, Ordering},
-            Mutex, RwLock,
-        },
+        sync::atomic::{AtomicUsize, Ordering},
     },
 };
 
@@ -98,8 +96,8 @@ impl Default for CrdsGossipPush {
 }
 impl CrdsGossipPush {
     pub fn num_pending(&self, crds: &RwLock<Crds>) -> usize {
-        let mut cursor: Cursor = *self.crds_cursor.lock().unwrap();
-        crds.read().unwrap().get_entries(&mut cursor).count()
+        let mut cursor: Cursor = *self.crds_cursor.lock();
+        crds.read().get_entries(&mut cursor).count()
     }
 
     fn prune_stake_threshold(self_stake: u64, origin_stake: u64) -> u64 {
@@ -116,7 +114,7 @@ impl CrdsGossipPush {
     where
         I: IntoIterator<Item = Pubkey>,
     {
-        let mut received_cache = self.received_cache.lock().unwrap();
+        let mut received_cache = self.received_cache.lock();
         origins
             .into_iter()
             .flat_map(|origin| {
@@ -211,7 +209,7 @@ impl CrdsGossipPush {
         self.num_total.fetch_add(values.len(), Ordering::Relaxed);
         let values: Vec<_> = {
             let wallclock_window = self.wallclock_window(now);
-            let mut received_cache = self.received_cache.lock().unwrap();
+            let mut received_cache = self.received_cache.lock();
             values
                 .into_iter()
                 .map(|value| {
@@ -228,7 +226,7 @@ impl CrdsGossipPush {
                 })
                 .collect()
         };
-        let mut crds = crds.write().unwrap();
+        let mut crds = crds.write();
         values
             .into_iter()
             .map(|value| {
@@ -255,7 +253,7 @@ impl CrdsGossipPush {
         crds: &RwLock<Crds>,
         now: u64,
     ) -> HashMap<Pubkey, Vec<CrdsValue>> {
-        let active_set = self.active_set.read().unwrap();
+        let active_set = self.active_set.read();
         let active_set_len = active_set.len();
         let push_fanout = self.push_fanout.min(active_set_len);
         if push_fanout == 0 {
@@ -266,9 +264,9 @@ impl CrdsGossipPush {
         let mut total_bytes: usize = 0;
         let mut push_messages: HashMap<Pubkey, Vec<CrdsValue>> = HashMap::new();
         let wallclock_window = self.wallclock_window(now);
-        let mut crds_cursor = self.crds_cursor.lock().unwrap();
+        let mut crds_cursor = self.crds_cursor.lock();
         // crds should be locked last after self.{active_set,crds_cursor}.
-        let crds = crds.read().unwrap();
+        let crds = crds.read();
         let entries = crds
             .get_entries(crds_cursor.deref_mut())
             .map(|entry| &entry.value)
@@ -299,7 +297,7 @@ impl CrdsGossipPush {
         drop(active_set);
         self.num_pushes.fetch_add(num_pushes, Ordering::Relaxed);
         trace!("new_push_messages {} {}", num_values, active_set_len);
-        let mut last_pushed_to = self.last_pushed_to.write().unwrap();
+        let mut last_pushed_to = self.last_pushed_to.write();
         for target_pubkey in push_messages.keys().copied() {
             last_pushed_to.put(target_pubkey, now);
         }
@@ -308,7 +306,7 @@ impl CrdsGossipPush {
 
     /// add the `from` to the peer's filter of nodes
     pub fn process_prune_msg(&self, self_pubkey: &Pubkey, peer: &Pubkey, origins: &[Pubkey]) {
-        if let Some(filter) = self.active_set.read().unwrap().get(peer) {
+        if let Some(filter) = self.active_set.read().get(peer) {
             for origin in origins {
                 if origin != self_pubkey {
                     filter.add(origin);
@@ -352,7 +350,7 @@ impl CrdsGossipPush {
         }
         let num_bloom_items = MIN_NUM_BLOOM_ITEMS.max(network_size);
         let shuffle = WeightedShuffle::new(&mut rng, &weights).unwrap();
-        let mut active_set = self.active_set.write().unwrap();
+        let mut active_set = self.active_set.write();
         let need = Self::compute_need(self.num_active, active_set.len(), ratio);
         for peer in shuffle.map(|i| peers[i]) {
             if new_items.len() >= need {
@@ -392,9 +390,9 @@ impl CrdsGossipPush {
         let mut rng = rand::thread_rng();
         let max_weight = u16::MAX as f32 - 1.0;
         let active_cutoff = now.saturating_sub(PUSH_ACTIVE_TIMEOUT_MS);
-        let last_pushed_to = self.last_pushed_to.read().unwrap();
+        let last_pushed_to = self.last_pushed_to.read();
         // crds should be locked last after self.last_pushed_to.
-        let crds = crds.read().unwrap();
+        let crds = crds.read();
         crds.get_nodes()
             .filter_map(|value| {
                 let info = value.value.contact_info().unwrap();
@@ -431,7 +429,7 @@ impl CrdsGossipPush {
 
     /// purge received push message cache
     pub(crate) fn purge_old_received_cache(&self, min_time: u64) {
-        self.received_cache.lock().unwrap().retain(|_, v| {
+        self.received_cache.lock().retain(|_, v| {
             v.retain(|_, (_, t)| *t > min_time);
             !v.is_empty()
         });
@@ -440,22 +438,22 @@ impl CrdsGossipPush {
     // Only for tests and simulations.
     pub(crate) fn mock_clone(&self) -> Self {
         let active_set = {
-            let active_set = self.active_set.read().unwrap();
+            let active_set = self.active_set.read();
             active_set
                 .iter()
                 .map(|(k, v)| (*k, v.mock_clone()))
                 .collect()
         };
         let last_pushed_to = {
-            let last_pushed_to = self.last_pushed_to.read().unwrap();
+            let last_pushed_to = self.last_pushed_to.read();
             let mut clone = LruCache::new(last_pushed_to.cap());
             for (k, v) in last_pushed_to.iter().rev() {
                 clone.put(*k, *v);
             }
             clone
         };
-        let received_cache = self.received_cache.lock().unwrap().clone();
-        let crds_cursor = *self.crds_cursor.lock().unwrap();
+        let received_cache = self.received_cache.lock().clone();
+        let crds_cursor = *self.crds_cursor.lock();
         Self {
             active_set: RwLock::new(active_set),
             received_cache: Mutex::new(received_cache),
@@ -499,7 +497,7 @@ mod test {
         });
 
         let pruned = {
-            let mut received_cache = push.received_cache.lock().unwrap();
+            let mut received_cache = push.received_cache.lock();
             CrdsGossipPush::prune_received_cache(
                 &self_id,
                 &origin,
@@ -518,7 +516,7 @@ mod test {
         push.process_push_message(&crds, &high_staked_peer, vec![value], 0);
 
         let pruned = {
-            let mut received_cache = push.received_cache.lock().unwrap();
+            let mut received_cache = push.received_cache.lock();
             CrdsGossipPush::prune_received_cache(
                 &self_id,
                 &origin,
@@ -552,7 +550,7 @@ mod test {
             push.process_push_message(&crds, &Pubkey::default(), vec![value.clone()], 0),
             [Ok(label.pubkey())],
         );
-        assert_eq!(crds.read().unwrap().get(&label).unwrap().value, value);
+        assert_eq!(crds.read().get(&label).unwrap().value, value);
 
         // push it again
         assert_eq!(
@@ -650,7 +648,7 @@ mod test {
         let crds = RwLock::new(crds);
         push.refresh_push_active_set(&crds, &HashMap::new(), None, &Pubkey::default(), 0, 1, 1);
 
-        let active_set = push.active_set.read().unwrap();
+        let active_set = push.active_set.read();
         assert!(active_set.get(&value1.label().pubkey()).is_some());
         let value2 = CrdsValue::new_unsigned(CrdsData::ContactInfo(ContactInfo::new_localhost(
             &solana_sdk::pubkey::new_rand(),
@@ -658,26 +656,26 @@ mod test {
         )));
         assert!(active_set.get(&value2.label().pubkey()).is_none());
         drop(active_set);
-        assert_eq!(crds.write().unwrap().insert(value2.clone(), now), Ok(()));
+        assert_eq!(crds.write().insert(value2.clone(), now), Ok(()));
         for _ in 0..30 {
             push.refresh_push_active_set(&crds, &HashMap::new(), None, &Pubkey::default(), 0, 1, 1);
-            let active_set = push.active_set.read().unwrap();
+            let active_set = push.active_set.read();
             if active_set.get(&value2.label().pubkey()).is_some() {
                 break;
             }
         }
         {
-            let active_set = push.active_set.read().unwrap();
+            let active_set = push.active_set.read();
             assert!(active_set.get(&value2.label().pubkey()).is_some());
         }
         for _ in 0..push.num_active {
             let value2 = CrdsValue::new_unsigned(CrdsData::ContactInfo(
                 ContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), 0),
             ));
-            assert_eq!(crds.write().unwrap().insert(value2.clone(), now), Ok(()));
+            assert_eq!(crds.write().insert(value2.clone(), now), Ok(()));
         }
         push.refresh_push_active_set(&crds, &HashMap::new(), None, &Pubkey::default(), 0, 1, 1);
-        assert_eq!(push.active_set.read().unwrap().len(), push.num_active);
+        assert_eq!(push.active_set.read().len(), push.num_active);
     }
     #[test]
     fn test_active_set_refresh_with_bank() {
@@ -694,7 +692,7 @@ mod test {
             let id = peer.label().pubkey();
             crds.insert(peer.clone(), time).unwrap();
             stakes.insert(id, i * 100);
-            push.last_pushed_to.write().unwrap().put(id, time);
+            push.last_pushed_to.write().put(id, time);
         }
         let crds = RwLock::new(crds);
         let mut options = push.push_options(&crds, &Pubkey::default(), 0, &stakes, None);
@@ -843,7 +841,7 @@ mod test {
             push.process_push_message(&crds, &Pubkey::default(), vec![new_msg], 0),
             [Ok(origin)]
         );
-        assert_eq!(push.active_set.read().unwrap().len(), 1);
+        assert_eq!(push.active_set.read().len(), 1);
         assert_eq!(push.new_push_messages(&crds, 0), expected);
     }
     #[test]
@@ -877,7 +875,7 @@ mod test {
         ]
         .into_iter()
         .collect();
-        assert_eq!(push.active_set.read().unwrap().len(), 3);
+        assert_eq!(push.active_set.read().len(), 3);
         assert_eq!(push.new_push_messages(&crds, now), expected);
     }
     #[test]
@@ -947,7 +945,7 @@ mod test {
             push.process_push_message(&crds, &Pubkey::default(), vec![value.clone()], 0),
             [Ok(label.pubkey())]
         );
-        assert_eq!(crds.write().unwrap().get(&label).unwrap().value, value);
+        assert_eq!(crds.write().get(&label).unwrap().value, value);
 
         // push it again
         assert_eq!(

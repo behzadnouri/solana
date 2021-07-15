@@ -747,7 +747,6 @@ mod tests {
             .gossip
             .crds
             .write()
-            .unwrap()
             .insert(
                 CrdsValue::new_unsigned(CrdsData::AccountsHashes(SnapshotHash::new(
                     trusted_validators[0],
@@ -767,7 +766,6 @@ mod tests {
             .gossip
             .crds
             .write()
-            .unwrap()
             .insert(
                 CrdsValue::new_unsigned(CrdsData::AccountsHashes(SnapshotHash::new(
                     trusted_validators[1],
@@ -783,7 +781,6 @@ mod tests {
             .gossip
             .crds
             .write()
-            .unwrap()
             .insert(
                 CrdsValue::new_unsigned(CrdsData::AccountsHashes(SnapshotHash::new(
                     trusted_validators[2],

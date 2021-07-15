@@ -192,7 +192,7 @@ mod test {
         cluster_info.flush_push_queue();
         let lowest = {
             let label = CrdsValueLabel::LowestSlot(pubkey);
-            let gossip_crds = cluster_info.gossip.crds.read().unwrap();
+            let gossip_crds = cluster_info.gossip.crds.read();
             let entry = gossip_crds.get(&label).unwrap();
             entry.value.lowest_slot().unwrap().clone()
         };

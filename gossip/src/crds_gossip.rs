@@ -15,6 +15,7 @@ use {
         duplicate_shred::{self, DuplicateShredIndex, LeaderScheduleFn, MAX_DUPLICATE_SHREDS},
         ping_pong::PingCache,
     },
+    parking_lot::{Mutex, RwLock},
     rayon::ThreadPool,
     solana_ledger::shred::Shred,
     solana_sdk::{
@@ -26,7 +27,6 @@ use {
     std::{
         collections::{HashMap, HashSet},
         net::SocketAddr,
-        sync::{Mutex, RwLock},
         time::Duration,
     },
 };
@@ -74,7 +74,7 @@ impl CrdsGossip {
         now: u64,
     ) -> HashMap<Pubkey, Vec<CrdsValue>> {
         {
-            let mut crds = self.crds.write().unwrap();
+            let mut crds = self.crds.write();
             for entry in pending_push_messages {
                 let _ = crds.insert(entry, now);
             }
@@ -94,7 +94,7 @@ impl CrdsGossip {
         let pubkey = keypair.pubkey();
         // Skip if there are already records of duplicate shreds for this slot.
         let shred_slot = shred.slot();
-        let mut crds = self.crds.write().unwrap();
+        let mut crds = self.crds.write();
         if crds
             .get_records(&pubkey)
             .any(|value| match &value.value.data {
@@ -176,7 +176,7 @@ impl CrdsGossip {
         stakes: &HashMap<Pubkey, u64>,
         gossip_validators: Option<&HashSet<Pubkey>>,
     ) {
-        let network_size = self.crds.read().unwrap().num_nodes();
+        let network_size = self.crds.read().num_nodes();
         self.push.refresh_push_active_set(
             &self.crds,
             stakes,
@@ -305,7 +305,6 @@ impl CrdsGossip {
         }
         self.crds
             .write()
-            .unwrap()
             .trim_purged(now.saturating_sub(5 * self.pull.crds_timeout));
         self.pull.purge_failed_inserts(now);
         rv
@@ -313,7 +312,7 @@ impl CrdsGossip {
 
     // Only for tests and simulations.
     pub(crate) fn mock_clone(&self) -> Self {
-        let crds = self.crds.read().unwrap().clone();
+        let crds = self.crds.read().clone();
         Self {
             crds: RwLock::new(crds),
             push: self.push.mock_clone(),
@@ -356,7 +355,6 @@ mod test {
         crds_gossip
             .crds
             .write()
-            .unwrap()
             .insert(
                 CrdsValue::new_unsigned(CrdsData::ContactInfo(ci.clone())),
                 0,
