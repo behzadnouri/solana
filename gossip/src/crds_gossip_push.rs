@@ -16,6 +16,7 @@ use {
         crds_gossip::{get_stake, get_weight},
         crds_gossip_error::CrdsGossipError,
         crds_value::CrdsValue,
+        rwlock,
         weighted_shuffle::WeightedShuffle,
     },
     bincode::serialized_size,
@@ -97,7 +98,7 @@ impl Default for CrdsGossipPush {
     }
 }
 impl CrdsGossipPush {
-    pub fn num_pending(&self, crds: &RwLock<Crds>) -> usize {
+    pub fn num_pending(&self, crds: &rwlock::RwLock<Crds>) -> usize {
         let mut cursor: Cursor = *self.crds_cursor.lock().unwrap();
         crds.read().unwrap().get_entries(&mut cursor).count()
     }
@@ -203,7 +204,7 @@ impl CrdsGossipPush {
     /// Returns origins' pubkeys of upserted values.
     pub(crate) fn process_push_message(
         &self,
-        crds: &RwLock<Crds>,
+        crds: &rwlock::RwLock<Crds>,
         from: &Pubkey,
         values: Vec<CrdsValue>,
         now: u64,
@@ -252,7 +253,7 @@ impl CrdsGossipPush {
     /// pruned the source addresses.
     pub(crate) fn new_push_messages(
         &self,
-        crds: &RwLock<Crds>,
+        crds: &rwlock::RwLock<Crds>,
         now: u64,
     ) -> HashMap<Pubkey, Vec<CrdsValue>> {
         let active_set = self.active_set.read().unwrap();
@@ -326,7 +327,7 @@ impl CrdsGossipPush {
     /// * ratio - active_set.len()/ratio is the number of actives to rotate
     pub(crate) fn refresh_push_active_set(
         &self,
-        crds: &RwLock<Crds>,
+        crds: &rwlock::RwLock<Crds>,
         stakes: &HashMap<Pubkey, u64>,
         gossip_validators: Option<&HashSet<Pubkey>>,
         self_id: &Pubkey,
@@ -382,7 +383,7 @@ impl CrdsGossipPush {
 
     fn push_options(
         &self,
-        crds: &RwLock<Crds>,
+        crds: &rwlock::RwLock<Crds>,
         self_id: &Pubkey,
         self_shred_version: u16,
         stakes: &HashMap<Pubkey, u64>,
@@ -478,7 +479,7 @@ mod test {
 
     #[test]
     fn test_prune() {
-        let crds = RwLock::<Crds>::default();
+        let crds = rwlock::RwLock::<Crds>::default();
         let push = CrdsGossipPush::default();
         let mut stakes = HashMap::new();
 
@@ -540,7 +541,7 @@ mod test {
 
     #[test]
     fn test_process_push_one() {
-        let crds = RwLock::<Crds>::default();
+        let crds = rwlock::RwLock::<Crds>::default();
         let push = CrdsGossipPush::default();
         let value = CrdsValue::new_unsigned(CrdsData::ContactInfo(ContactInfo::new_localhost(
             &solana_sdk::pubkey::new_rand(),
@@ -562,7 +563,7 @@ mod test {
     }
     #[test]
     fn test_process_push_old_version() {
-        let crds = RwLock::<Crds>::default();
+        let crds = rwlock::RwLock::<Crds>::default();
         let push = CrdsGossipPush::default();
         let mut ci = ContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), 0);
         ci.wallclock = 1;
@@ -584,7 +585,7 @@ mod test {
     }
     #[test]
     fn test_process_push_timeout() {
-        let crds = RwLock::<Crds>::default();
+        let crds = rwlock::RwLock::<Crds>::default();
         let push = CrdsGossipPush::default();
         let timeout = push.msg_timeout;
         let mut ci = ContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), 0);
@@ -607,7 +608,7 @@ mod test {
     }
     #[test]
     fn test_process_push_update() {
-        let crds = RwLock::<Crds>::default();
+        let crds = rwlock::RwLock::<Crds>::default();
         let push = CrdsGossipPush::default();
         let mut ci = ContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), 0);
         let origin = ci.id;
@@ -647,7 +648,7 @@ mod test {
         )));
 
         assert_eq!(crds.insert(value1.clone(), now), Ok(()));
-        let crds = RwLock::new(crds);
+        let crds = rwlock::RwLock::new(crds);
         push.refresh_push_active_set(&crds, &HashMap::new(), None, &Pubkey::default(), 0, 1, 1);
 
         let active_set = push.active_set.read().unwrap();
@@ -696,7 +697,7 @@ mod test {
             stakes.insert(id, i * 100);
             push.last_pushed_to.write().unwrap().put(id, time);
         }
-        let crds = RwLock::new(crds);
+        let crds = rwlock::RwLock::new(crds);
         let mut options = push.push_options(&crds, &Pubkey::default(), 0, &stakes, None);
         assert!(!options.is_empty());
         options.sort_by(|(weight_l, _), (weight_r, _)| weight_r.partial_cmp(weight_l).unwrap());
@@ -742,7 +743,7 @@ mod test {
         crds.insert(spy.clone(), now).unwrap();
         crds.insert(node_123.clone(), now).unwrap();
         crds.insert(node_456, now).unwrap();
-        let crds = RwLock::new(crds);
+        let crds = rwlock::RwLock::new(crds);
 
         // shred version 123 should ignore nodes with versions 0 and 456
         let options = node
@@ -780,7 +781,7 @@ mod test {
 
         crds.insert(me.clone(), 0).unwrap();
         crds.insert(node_123.clone(), now).unwrap();
-        let crds = RwLock::new(crds);
+        let crds = rwlock::RwLock::new(crds);
 
         // Unknown pubkey in gossip_validators -- will push to nobody
         let mut gossip_validators = HashSet::new();
@@ -829,7 +830,7 @@ mod test {
             0,
         )));
         assert_eq!(crds.insert(peer.clone(), now), Ok(()));
-        let crds = RwLock::new(crds);
+        let crds = rwlock::RwLock::new(crds);
         push.refresh_push_active_set(&crds, &HashMap::new(), None, &Pubkey::default(), 0, 1, 1);
 
         let new_msg = CrdsValue::new_unsigned(CrdsData::ContactInfo(ContactInfo::new_localhost(
@@ -863,7 +864,7 @@ mod test {
         let origin: Vec<_> = peers.iter().map(|node| node.pubkey()).collect();
         assert_eq!(crds.insert(peers[0].clone(), now), Ok(()));
         assert_eq!(crds.insert(peers[1].clone(), now), Ok(()));
-        let crds = RwLock::new(crds);
+        let crds = rwlock::RwLock::new(crds);
         assert_eq!(
             push.process_push_message(&crds, &Pubkey::default(), vec![peers[2].clone()], now),
             [Ok(origin[2])],
@@ -890,7 +891,7 @@ mod test {
             0,
         )));
         assert_eq!(crds.insert(peer.clone(), 0), Ok(()));
-        let crds = RwLock::new(crds);
+        let crds = rwlock::RwLock::new(crds);
         push.refresh_push_active_set(&crds, &HashMap::new(), None, &Pubkey::default(), 0, 1, 1);
 
         let new_msg = CrdsValue::new_unsigned(CrdsData::ContactInfo(ContactInfo::new_localhost(
@@ -919,7 +920,7 @@ mod test {
             0,
         )));
         assert_eq!(crds.insert(peer, 0), Ok(()));
-        let crds = RwLock::new(crds);
+        let crds = rwlock::RwLock::new(crds);
         push.refresh_push_active_set(&crds, &HashMap::new(), None, &Pubkey::default(), 0, 1, 1);
 
         let mut ci = ContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), 0);
@@ -936,7 +937,7 @@ mod test {
 
     #[test]
     fn test_purge_old_received_cache() {
-        let crds = RwLock::<Crds>::default();
+        let crds = rwlock::RwLock::<Crds>::default();
         let push = CrdsGossipPush::default();
         let mut ci = ContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), 0);
         ci.wallclock = 0;

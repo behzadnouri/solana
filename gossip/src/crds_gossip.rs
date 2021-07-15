@@ -14,6 +14,7 @@ use {
         crds_value::{CrdsData, CrdsValue},
         duplicate_shred::{self, DuplicateShredIndex, LeaderScheduleFn, MAX_DUPLICATE_SHREDS},
         ping_pong::PingCache,
+        rwlock,
     },
     rayon::ThreadPool,
     solana_ledger::shred::Shred,
@@ -26,14 +27,14 @@ use {
     std::{
         collections::{HashMap, HashSet},
         net::SocketAddr,
-        sync::{Mutex, RwLock},
+        sync::Mutex,
         time::Duration,
     },
 };
 
 #[derive(Default)]
 pub struct CrdsGossip {
-    pub crds: RwLock<Crds>,
+    pub crds: rwlock::RwLock<Crds>,
     pub push: CrdsGossipPush,
     pub pull: CrdsGossipPull,
 }
@@ -315,7 +316,7 @@ impl CrdsGossip {
     pub(crate) fn mock_clone(&self) -> Self {
         let crds = self.crds.read().unwrap().clone();
         Self {
-            crds: RwLock::new(crds),
+            crds: rwlock::RwLock::new(crds),
             push: self.push.mock_clone(),
             pull: self.pull.mock_clone(),
         }
