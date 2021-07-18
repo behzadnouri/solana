@@ -22,7 +22,6 @@ use crate::{
     sigverify_shreds::ShredSigVerifier,
     sigverify_stage::SigVerifyStage,
     snapshot_packager_service::PendingSnapshotPackage,
-    voting_service::VotingService,
 };
 use crossbeam_channel::unbounded;
 use solana_gossip::cluster_info::ClusterInfo;
@@ -68,7 +67,6 @@ pub struct Tvu {
     accounts_background_service: AccountsBackgroundService,
     accounts_hash_verifier: AccountsHashVerifier,
     cost_update_service: CostUpdateService,
-    voting_service: VotingService,
 }
 
 pub struct Sockets {
@@ -275,10 +273,6 @@ impl Tvu {
             wait_for_vote_to_start_leader: tvu_config.wait_for_vote_to_start_leader,
         };
 
-        let (voting_sender, voting_receiver) = channel();
-        let voting_service =
-            VotingService::new(voting_receiver, cluster_info.clone(), poh_recorder.clone());
-
         let (cost_update_sender, cost_update_receiver): (
             Sender<ExecuteTimings>,
             Receiver<ExecuteTimings>,
@@ -308,7 +302,6 @@ impl Tvu {
             gossip_verified_vote_hash_receiver,
             cluster_slots_update_sender,
             cost_update_sender,
-            voting_sender,
         );
 
         let ledger_cleanup_service = tvu_config.max_ledger_shreds.map(|max_ledger_shreds| {
@@ -340,7 +333,6 @@ impl Tvu {
             accounts_background_service,
             accounts_hash_verifier,
             cost_update_service,
-            voting_service,
         }
     }
 
@@ -355,7 +347,6 @@ impl Tvu {
         self.replay_stage.join()?;
         self.accounts_hash_verifier.join()?;
         self.cost_update_service.join()?;
-        self.voting_service.join()?;
         Ok(())
     }
 }
