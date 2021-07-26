@@ -149,6 +149,7 @@ pub(crate) struct GossipStats {
     pub(crate) skip_pull_response_shred_version: Counter,
     pub(crate) skip_pull_shred_version: Counter,
     pub(crate) skip_push_message_shred_version: Counter,
+    pub(crate) skipped_gossip_requests_count: Counter,
     pub(crate) trim_crds_table: Counter,
     pub(crate) trim_crds_table_failed: Counter,
     pub(crate) trim_crds_table_purged_values_count: Counter,
@@ -426,6 +427,11 @@ pub(crate) fn submit_gossip_stats(
         (
             "packets_sent_push_messages_count",
             stats.packets_sent_push_messages_count.clear(),
+            i64
+        ),
+        (
+            "skipped_gossip_requests_count",
+            stats.skipped_gossip_requests_count.clear(),
             i64
         ),
         (

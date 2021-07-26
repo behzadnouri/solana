@@ -1520,7 +1520,6 @@ impl ClusterInfo {
         &self,
         thread_pool: &ThreadPool,
         gossip_validators: Option<&HashSet<Pubkey>>,
-        recycler: &PacketsRecycler,
         stakes: &HashMap<Pubkey, u64>,
         sender: &PacketSender,
         generate_pull_requests: bool,
@@ -1534,14 +1533,29 @@ impl ClusterInfo {
             require_stake_for_gossip,
         );
         let _st = ScopedTimer::from(&self.stats.send_gossip_packets_time);
-        if !reqs.is_empty() {
-            let packets = to_packets_with_destination(recycler.clone(), &reqs);
-            self.stats
-                .packets_sent_gossip_requests_count
-                .add_relaxed(packets.packets.len() as u64);
-            sender.send(packets)?;
+        if reqs.is_empty() {
+            return Ok(());
         }
-        Ok(())
+        let num_requests = reqs.len();
+        let packets: Vec<_> = thread_pool.install(|| {
+            reqs.into_par_iter()
+                .filter_map(|(addr, msg)| {
+                    if addr.ip().is_unspecified() || addr.port() == 0 {
+                        None
+                    } else {
+                        Packet::from_data(Some(&addr), msg).ok()
+                    }
+                })
+                .collect()
+        });
+        self.stats
+            .skipped_gossip_requests_count
+            .add_relaxed((num_requests - packets.len()) as u64);
+        self.stats
+            .packets_sent_gossip_requests_count
+            .add_relaxed(packets.len() as u64);
+        let packets = Packets::new(packets);
+        sender.send(packets).map_err(GossipError::from)
     }
 
     fn process_entrypoints(&self) -> bool {
@@ -1650,7 +1664,6 @@ impl ClusterInfo {
                 let mut last_contact_info_trace = timestamp();
                 let mut last_contact_info_save = timestamp();
                 let mut entrypoints_processed = false;
-                let recycler = PacketsRecycler::default();
                 let crds_data = vec![
                     CrdsData::Version(Version::new(self.id())),
                     CrdsData::NodeInstance(
@@ -1698,7 +1711,6 @@ impl ClusterInfo {
                     let _ = self.run_gossip(
                         &thread_pool,
                         gossip_validators.as_ref(),
-                        &recycler,
                         &stakes,
                         &sender,
                         generate_pull_requests,
