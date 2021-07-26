@@ -145,6 +145,7 @@ pub(crate) struct GossipStats {
     pub(crate) repair_peers: Counter,
     pub(crate) require_stake_for_gossip_unknown_feature_set: Counter,
     pub(crate) require_stake_for_gossip_unknown_stakes: Counter,
+    pub(crate) send_gossip_packets_time: Counter,
     pub(crate) skip_pull_response_shred_version: Counter,
     pub(crate) skip_pull_shred_version: Counter,
     pub(crate) skip_push_message_shred_version: Counter,
@@ -204,6 +205,11 @@ pub(crate) fn submit_gossip_stats(
         (
             "process_gossip_packets_time",
             stats.process_gossip_packets_time.clear(),
+            i64
+        ),
+        (
+            "send_gossip_packets_time",
+            stats.send_gossip_packets_time.clear(),
             i64
         ),
         (

@@ -1533,6 +1533,7 @@ impl ClusterInfo {
             generate_pull_requests,
             require_stake_for_gossip,
         );
+        let _st = ScopedTimer::from(&self.stats.send_gossip_packets_time);
         if !reqs.is_empty() {
             let packets = to_packets_with_destination(recycler.clone(), &reqs);
             self.stats
