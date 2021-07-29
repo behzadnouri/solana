@@ -86,17 +86,11 @@ impl BroadcastRun for BroadcastFakeShredsRun {
 
         // 3) Start broadcast step
         //some indicates fake shreds
-        socket_sender.send((
-            (Some(Arc::new(HashMap::new())), Arc::new(fake_data_shreds)),
-            None,
-        ))?;
-        socket_sender.send((
-            (Some(Arc::new(HashMap::new())), Arc::new(fake_coding_shreds)),
-            None,
-        ))?;
-        //none indicates real shreds
-        socket_sender.send(((None, data_shreds), None))?;
-        socket_sender.send(((None, Arc::new(coding_shreds)), None))?;
+        socket_sender.send(((bank.slot(), Arc::new(fake_data_shreds)), None))?;
+        socket_sender.send(((bank.slot(), Arc::new(fake_coding_shreds)), None))?;
+        // TODO: None stake was used here to signal to transmit.
+        socket_sender.send(((bank.slot(), data_shreds), None))?;
+        socket_sender.send(((bank.slot(), Arc::new(coding_shreds)), None))?;
 
         Ok(())
     }
@@ -107,15 +101,16 @@ impl BroadcastRun for BroadcastFakeShredsRun {
         sock: &UdpSocket,
         _bank_forks: &Arc<RwLock<BankForks>>,
     ) -> Result<()> {
-        for ((stakes, data_shreds), _) in receiver.lock().unwrap().iter() {
+        for ((_slot, data_shreds), _) in receiver.lock().unwrap().iter() {
             let peers = cluster_info.tvu_peers();
+            // TODO: stakes.is_some was used here to identify fakes!
             peers.iter().enumerate().for_each(|(i, peer)| {
-                if i <= self.partition && stakes.is_some() {
+                if i <= self.partition {
                     // Send fake shreds to the first N peers
                     data_shreds.iter().for_each(|b| {
                         sock.send_to(&b.payload, &peer.tvu_forwards).unwrap();
                     });
-                } else if i > self.partition && stakes.is_none() {
+                } else if i > self.partition {
                     data_shreds.iter().for_each(|b| {
                         sock.send_to(&b.payload, &peer.tvu_forwards).unwrap();
                     });
