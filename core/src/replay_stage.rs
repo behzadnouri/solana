@@ -2228,7 +2228,7 @@ impl ReplayStage {
                 descendants,
                 progress,
                 heaviest_bank.total_epoch_stake(),
-                heaviest_bank
+                &heaviest_bank
                     .epoch_vote_accounts(heaviest_bank.epoch())
                     .expect("Bank epoch vote accounts must contain entry for the bank's own epoch"),
                 latest_validator_votes_for_frozen_banks,

@@ -315,7 +315,8 @@ impl PropagatedStats {
                 self.add_node_pubkey_internal(
                     node_pubkey,
                     node_vote_accounts,
-                    bank.epoch_vote_accounts(bank.epoch())
+                    &bank
+                        .epoch_vote_accounts(bank.epoch())
                         .expect("Epoch stakes for bank's own epoch must exist"),
                 );
             }

@@ -14,7 +14,7 @@ use {
     },
     solana_stake_program::stake_state,
     solana_vote_program::vote_state::VoteState,
-    std::{borrow::Borrow, collections::HashMap, sync::Arc},
+    std::{collections::HashMap, sync::Arc},
 };
 
 #[derive(Default, Clone, PartialEq, Debug, Deserialize, Serialize, AbiExample)]
@@ -211,8 +211,8 @@ impl Stakes {
         }
     }
 
-    pub fn vote_accounts(&self) -> &HashMap<Pubkey, (u64, ArcVoteAccount)> {
-        self.vote_accounts.borrow()
+    pub fn vote_accounts(&self) -> Arc<HashMap<Pubkey, (u64, ArcVoteAccount)>> {
+        self.vote_accounts.vote_accounts()
     }
 
     pub fn stake_delegations(&self) -> &HashMap<Pubkey, Delegation> {

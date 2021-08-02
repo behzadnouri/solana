@@ -2217,7 +2217,7 @@ impl Bank {
         let stakes = self.epoch_vote_accounts(epoch)?;
         let stake_weighted_timestamp = calculate_stake_weighted_timestamp(
             recent_timestamps,
-            stakes,
+            &stakes,
             self.slot(),
             slot_duration,
             epoch_start_timestamp,
@@ -5073,10 +5073,9 @@ impl Bank {
     pub fn epoch_vote_accounts(
         &self,
         epoch: Epoch,
-    ) -> Option<&HashMap<Pubkey, (u64, ArcVoteAccount)>> {
-        self.epoch_stakes
-            .get(&epoch)
-            .map(|epoch_stakes| Stakes::vote_accounts(epoch_stakes.stakes()))
+    ) -> Option<Arc<HashMap<Pubkey, (u64, ArcVoteAccount)>>> {
+        let epoch_stakes = self.epoch_stakes.get(&epoch)?;
+        Some(epoch_stakes.stakes().vote_accounts())
     }
 
     /// Get the fixed authorized voter for the given vote account for the
