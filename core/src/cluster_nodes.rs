@@ -55,6 +55,7 @@ pub(crate) struct ClusterNodesCache<T> {
     // Cache entries are wrapped in Arc<Mutex<...>>, so that, when needed, only
     // one thread does the computations to update the entry for the epoch.
     cache: Mutex<LruCache<Epoch, Arc<Mutex<CacheEntry<T>>>>>,
+    seen: Mutex<LruCache<(Epoch, Slot), bool>>,
     ttl: Duration, // Time to live.
 }
 
@@ -257,6 +258,7 @@ impl<T> ClusterNodesCache<T> {
     ) -> Self {
         Self {
             cache: Mutex::new(LruCache::new(cap)),
+            seen: Mutex::new(LruCache::new(4048)),
             ttl,
         }
     }
@@ -295,6 +297,28 @@ impl<T: 'static> ClusterNodesCache<T> {
         let epoch_staked_nodes = [root_bank, working_bank]
             .iter()
             .find_map(|bank| bank.epoch_staked_nodes(epoch));
+        {
+            let mut seen = self.seen.lock().unwrap();
+            let key = (epoch, shred_slot);
+            let val = epoch_staked_nodes.is_none();
+            if seen.get(&key) != Some(&val) {
+                seen.put(key, val);
+                drop(seen);
+                let epoch_schedule = root_bank.epoch_schedule();
+                let root_epoch_stakes: Vec<_> = root_bank.epoch_stakes.keys().sorted().collect();
+                info!(
+                    "shred: {:8}, {:3}, {:3}, root: {:8}, {:3}, {:3}, {:?}{}",
+                    shred_slot,
+                    epoch_schedule.get_epoch(shred_slot),
+                    epoch,
+                    root_bank.slot(),
+                    epoch_schedule.get_epoch(root_bank.slot()),
+                    root_bank.get_leader_schedule_epoch(root_bank.slot()),
+                    root_epoch_stakes,
+                    if val { ", none" } else { "" },
+                );
+            }
+        }
         if epoch_staked_nodes.is_none() {
             inc_new_counter_info!("cluster_nodes-unknown_epoch_staked_nodes", 1);
             if epoch != root_bank.get_leader_schedule_epoch(root_bank.slot()) {
