@@ -102,7 +102,6 @@ impl BroadcastRun for FailEntryVerificationBroadcastRun {
         // 4) Start broadcast step
         let bank_epoch = bank.get_leader_schedule_epoch(bank.slot());
         let stakes = bank.epoch_staked_nodes(bank_epoch);
-        let stakes = stakes.map(Arc::new);
         socket_sender.send(((stakes.clone(), data_shreds), None))?;
         if let Some((good_last_data_shred, bad_last_data_shred)) = last_shreds {
             // Stash away the good shred so we can rewrite them later

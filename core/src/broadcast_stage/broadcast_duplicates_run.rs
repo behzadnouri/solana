@@ -7,6 +7,7 @@ use solana_sdk::{
     signature::{Keypair, Signer},
     system_transaction,
 };
+use std::ops::Deref;
 
 pub const MINIMUM_DUPLICATE_SLOT: Slot = 20;
 pub const DUPLICATE_RATE: usize = 10;
@@ -57,9 +58,9 @@ impl BroadcastDuplicatesRun {
         data_shreds: Arc<Vec<Shred>>,
     ) -> TransmitShreds {
         let bank_epoch = bank.get_leader_schedule_epoch(bank.slot());
-        let mut stakes: HashMap<Pubkey, u64> = bank.epoch_staked_nodes(bank_epoch).unwrap();
-        stakes.retain(|pubkey, _stake| pubkey != my_pubkey);
-        (Some(Arc::new(stakes)), data_shreds)
+        let mut stakes = bank.epoch_staked_nodes(bank_epoch).unwrap();
+        Arc::make_mut(&mut stakes).retain(|pubkey, _stake| pubkey != my_pubkey);
+        (Some(stakes), data_shreds)
     }
 
     fn get_partitioned_batches(
@@ -77,6 +78,8 @@ impl BroadcastDuplicatesRun {
         let mut stakes: Vec<(Pubkey, u64)> = bank
             .epoch_staked_nodes(bank_epoch)
             .unwrap()
+            .deref()
+            .clone()
             .into_iter()
             .filter(|(pubkey, _)| pubkey != my_pubkey)
             .collect();

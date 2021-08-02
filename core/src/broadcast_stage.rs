@@ -341,7 +341,6 @@ impl BroadcastStage {
         for (_, bank) in retransmit_slots.iter() {
             let bank_epoch = bank.get_leader_schedule_epoch(bank.slot());
             let stakes = bank.epoch_staked_nodes(bank_epoch);
-            let stakes = stakes.map(Arc::new);
             let data_shreds = Arc::new(
                 blockstore
                     .get_data_shreds_for_slot(bank.slot(), 0)
