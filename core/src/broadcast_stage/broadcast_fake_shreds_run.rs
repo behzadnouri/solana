@@ -107,6 +107,7 @@ impl BroadcastRun for BroadcastFakeShredsRun {
         cluster_info: &ClusterInfo,
         sock: &UdpSocket,
         _bank_forks: &Arc<RwLock<BankForks>>,
+        _leader_schedule_cache: &LeaderScheduleCache,
     ) -> Result<()> {
         for ((_slot, data_shreds), batch_info) in receiver.lock().unwrap().iter() {
             let fake = batch_info.is_some();

@@ -16,6 +16,7 @@ use crossbeam_channel::{
     Sender as CrossbeamSender,
 };
 use solana_gossip::cluster_info::{ClusterInfo, ClusterInfoError};
+use solana_ledger::leader_schedule_cache::LeaderScheduleCache;
 use solana_ledger::{blockstore::Blockstore, shred::Shred};
 use solana_measure::measure::Measure;
 use solana_metrics::{inc_new_counter_error, inc_new_counter_info};
@@ -78,6 +79,7 @@ impl BroadcastStageType {
         blockstore: &Arc<Blockstore>,
         bank_forks: &Arc<RwLock<BankForks>>,
         shred_version: u16,
+        leader_schedule_cache: Arc<LeaderScheduleCache>,
     ) -> BroadcastStage {
         match self {
             BroadcastStageType::Standard => BroadcastStage::new(
@@ -89,6 +91,7 @@ impl BroadcastStageType {
                 blockstore,
                 bank_forks,
                 StandardBroadcastRun::new(shred_version),
+                leader_schedule_cache,
             ),
 
             BroadcastStageType::FailEntryVerification => BroadcastStage::new(
@@ -100,6 +103,7 @@ impl BroadcastStageType {
                 blockstore,
                 bank_forks,
                 FailEntryVerificationBroadcastRun::new(shred_version),
+                leader_schedule_cache,
             ),
 
             BroadcastStageType::BroadcastFakeShreds => BroadcastStage::new(
@@ -111,6 +115,7 @@ impl BroadcastStageType {
                 blockstore,
                 bank_forks,
                 BroadcastFakeShredsRun::new(0, shred_version),
+                leader_schedule_cache,
             ),
 
             BroadcastStageType::BroadcastDuplicates(config) => BroadcastStage::new(
@@ -122,6 +127,7 @@ impl BroadcastStageType {
                 blockstore,
                 bank_forks,
                 BroadcastDuplicatesRun::new(shred_version, config.clone()),
+                leader_schedule_cache,
             ),
         }
     }
@@ -143,6 +149,7 @@ trait BroadcastRun {
         cluster_info: &ClusterInfo,
         sock: &UdpSocket,
         bank_forks: &Arc<RwLock<BankForks>>,
+        leader_schedule_cache: &LeaderScheduleCache,
     ) -> Result<()>;
     fn record(
         &mut self,
@@ -244,6 +251,7 @@ impl BroadcastStage {
         blockstore: &Arc<Blockstore>,
         bank_forks: &Arc<RwLock<BankForks>>,
         broadcast_stage_run: impl BroadcastRun + Send + 'static + Clone,
+        leader_schedule_cache: Arc<LeaderScheduleCache>,
     ) -> Self {
         let btree = blockstore.clone();
         let exit = exit_sender.clone();
@@ -276,11 +284,17 @@ impl BroadcastStage {
             let mut bs_transmit = broadcast_stage_run.clone();
             let cluster_info = cluster_info.clone();
             let bank_forks = bank_forks.clone();
+            let leader_schedule_cache = Arc::clone(&leader_schedule_cache);
             let t = Builder::new()
                 .name("solana-broadcaster-transmit".to_string())
                 .spawn(move || loop {
-                    let res =
-                        bs_transmit.transmit(&socket_receiver, &cluster_info, &sock, &bank_forks);
+                    let res = bs_transmit.transmit(
+                        &socket_receiver,
+                        &cluster_info,
+                        &sock,
+                        &bank_forks,
+                        &leader_schedule_cache,
+                    );
                     let res = Self::handle_error(res, "solana-broadcaster-transmit");
                     if let Some(res) = res {
                         return res;
@@ -348,6 +362,9 @@ impl BroadcastStage {
                     .get_data_shreds_for_slot(slot, 0)
                     .expect("My own shreds must be reconstructable"),
             );
+            for shred in data_shreds.iter() {
+                assert_eq!(shred.slot(), slot);
+            }
 
             if !data_shreds.is_empty() {
                 socket_sender.send(((slot, data_shreds), None))?;
@@ -358,6 +375,9 @@ impl BroadcastStage {
                     .get_coding_shreds_for_slot(slot, 0)
                     .expect("My own shreds must be reconstructable"),
             );
+            for shred in coding_shreds.iter() {
+                assert_eq!(shred.slot(), slot);
+            }
 
             if !coding_shreds.is_empty() {
                 socket_sender.send(((slot, coding_shreds), None))?;
@@ -400,6 +420,7 @@ pub fn broadcast_shreds(
     self_pubkey: Pubkey,
     bank_forks: &Arc<RwLock<BankForks>>,
     socket_addr_space: &SocketAddrSpace,
+    leader_schedule_cache: &LeaderScheduleCache,
 ) -> Result<()> {
     let mut result = Ok(());
     let broadcast_len = cluster_nodes.num_peers();
@@ -412,6 +433,9 @@ pub fn broadcast_shreds(
     let packets: Vec<_> = shreds
         .iter()
         .filter_map(|shred| {
+            let leader_pubkey =
+                leader_schedule_cache.slot_leader_at(shred.slot(), Some(&root_bank));
+            assert_eq!(leader_pubkey, Some(self_pubkey));
             let seed = shred.seed(Some(self_pubkey), &root_bank);
             let node = cluster_nodes.get_broadcast_peer(seed)?;
             if socket_addr_space.check(&node.tvu) {

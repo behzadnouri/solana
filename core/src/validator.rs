@@ -777,6 +777,7 @@ impl Validator {
             config.tpu_coalesce_ms,
             cluster_confirmed_slot_sender,
             &cost_model,
+            Arc::clone(&leader_schedule_cache),
         );
 
         datapoint_info!("validator-new", ("id", id.to_string(), String));

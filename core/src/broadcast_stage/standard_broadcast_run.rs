@@ -9,6 +9,7 @@ use {
         broadcast_stage::broadcast_utils::UnfinishedSlotInfo, cluster_nodes::ClusterNodesCache,
     },
     solana_entry::entry::Entry,
+    solana_ledger::leader_schedule_cache::LeaderScheduleCache,
     solana_ledger::shred::{
         ProcessShredsStats, Shred, Shredder, MAX_DATA_SHREDS_PER_FEC_BLOCK,
         SHRED_TICK_REFERENCE_MASK,
@@ -244,6 +245,9 @@ impl StandardBroadcastRun {
                 ),
             });
             let shreds = Arc::new(prev_slot_shreds);
+            for shred in shreds.iter() {
+                assert_eq!(shred.slot(), slot);
+            }
             socket_sender.send(((slot, shreds.clone()), batch_info.clone()))?;
             blockstore_sender.send((shreds, batch_info))?;
         }
@@ -270,6 +274,9 @@ impl StandardBroadcastRun {
 
         // Send data shreds
         let data_shreds = Arc::new(data_shreds);
+        for shred in data_shreds.iter() {
+            assert_eq!(shred.slot(), bank.slot());
+        }
         socket_sender.send(((bank.slot(), data_shreds.clone()), batch_info.clone()))?;
         blockstore_sender.send((data_shreds, batch_info.clone()))?;
 
@@ -281,6 +288,9 @@ impl StandardBroadcastRun {
             &mut process_stats,
         );
         let coding_shreds = Arc::new(coding_shreds);
+        for shred in coding_shreds.iter() {
+            assert_eq!(shred.slot(), bank.slot());
+        }
         socket_sender.send(((bank.slot(), coding_shreds.clone()), batch_info.clone()))?;
         blockstore_sender.send((coding_shreds, batch_info))?;
 
@@ -343,6 +353,7 @@ impl StandardBroadcastRun {
         shreds: Arc<Vec<Shred>>,
         broadcast_shred_batch_info: Option<BroadcastShredBatchInfo>,
         bank_forks: &Arc<RwLock<BankForks>>,
+        leader_schedule_cache: &LeaderScheduleCache,
     ) -> Result<()> {
         trace!("Broadcasting {:?} shreds", shreds.len());
         // Get the list of peers to broadcast to
@@ -369,6 +380,7 @@ impl StandardBroadcastRun {
             cluster_info.id(),
             bank_forks,
             cluster_info.socket_addr_space(),
+            &leader_schedule_cache,
         )?;
         transmit_time.stop();
 
@@ -475,9 +487,18 @@ impl BroadcastRun for StandardBroadcastRun {
         cluster_info: &ClusterInfo,
         sock: &UdpSocket,
         bank_forks: &Arc<RwLock<BankForks>>,
+        leader_schedule_cache: &LeaderScheduleCache,
     ) -> Result<()> {
         let ((slot, shreds), slot_start_ts) = receiver.lock().unwrap().recv()?;
-        self.broadcast(sock, cluster_info, slot, shreds, slot_start_ts, bank_forks)
+        self.broadcast(
+            sock,
+            cluster_info,
+            slot,
+            shreds,
+            slot_start_ts,
+            bank_forks,
+            leader_schedule_cache,
+        )
     }
     fn record(
         &mut self,

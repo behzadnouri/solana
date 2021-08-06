@@ -1,6 +1,7 @@
 use {
     super::*,
     crate::cluster_nodes::ClusterNodesCache,
+    solana_ledger::leader_schedule_cache::LeaderScheduleCache,
     solana_ledger::shred::Shredder,
     solana_sdk::{hash::Hash, signature::Keypair},
     std::{thread::sleep, time::Duration},
@@ -136,6 +137,7 @@ impl BroadcastRun for FailEntryVerificationBroadcastRun {
         cluster_info: &ClusterInfo,
         sock: &UdpSocket,
         bank_forks: &Arc<RwLock<BankForks>>,
+        leader_schedule_cache: &LeaderScheduleCache,
     ) -> Result<()> {
         let ((slot, shreds), _) = receiver.lock().unwrap().recv()?;
         let (root_bank, working_bank) = {
@@ -155,6 +157,7 @@ impl BroadcastRun for FailEntryVerificationBroadcastRun {
             cluster_info.id(),
             bank_forks,
             cluster_info.socket_addr_space(),
+            leader_schedule_cache,
         )?;
 
         Ok(())

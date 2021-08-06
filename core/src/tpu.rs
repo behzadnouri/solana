@@ -16,6 +16,7 @@ use crate::{
 };
 use crossbeam_channel::unbounded;
 use solana_gossip::cluster_info::ClusterInfo;
+use solana_ledger::leader_schedule_cache::LeaderScheduleCache;
 use solana_ledger::{blockstore::Blockstore, blockstore_processor::TransactionStatusSender};
 use solana_poh::poh_recorder::{PohRecorder, WorkingBankEntry};
 use solana_rpc::{
@@ -72,6 +73,7 @@ impl Tpu {
         tpu_coalesce_ms: u64,
         cluster_confirmed_slot_sender: GossipDuplicateConfirmedSlotsSender,
         cost_model: &Arc<RwLock<CostModel>>,
+        leader_schedule_cache: Arc<LeaderScheduleCache>,
     ) -> Self {
         let (packet_sender, packet_receiver) = channel();
         let fetch_stage = FetchStage::new_with_sender(
@@ -126,6 +128,7 @@ impl Tpu {
             blockstore,
             &bank_forks,
             shred_version,
+            leader_schedule_cache,
         );
 
         Self {
