@@ -107,6 +107,7 @@ const MAX_GOSSIP_TRAFFIC: usize = 128_000_000 / PACKET_DATA_SIZE;
 /// is equal to PACKET_DATA_SIZE minus serialized size of an empty push
 /// message: Protocol::PushMessage(Pubkey::default(), Vec::default())
 const PUSH_MESSAGE_MAX_PAYLOAD_SIZE: usize = PACKET_DATA_SIZE - 44;
+const PULL_RESPONSE_MAX_PAYLOAD_SIZE: usize = PACKET_DATA_SIZE - 44;
 const DUPLICATE_SHRED_MAX_PAYLOAD_SIZE: usize = PACKET_DATA_SIZE - 115;
 /// Maximum number of hashes in SnapshotHashes/AccountsHashes a node publishes
 /// such that the serialized size of the push/pull message stays below
@@ -1893,7 +1894,6 @@ impl ClusterInfo {
         stakes: &HashMap<Pubkey, u64>,
         require_stake_for_gossip: bool,
     ) -> Packets {
-        const DEFAULT_EPOCH_DURATION_MS: u64 = DEFAULT_SLOTS_PER_EPOCH * DEFAULT_MS_PER_SLOT;
         let mut time = Measure::start("handle_pull_requests");
         let callers = crds_value::filter_current(requests.iter().map(|r| &r.caller));
         {
@@ -1932,25 +1932,30 @@ impl ClusterInfo {
             }
         }
         let (responses, scores): (Vec<_>, Vec<_>) = addrs
-            .iter()
+            .into_iter()
             .zip(pull_responses)
-            .flat_map(|(addr, responses)| repeat(addr).zip(responses))
-            .map(|(addr, response)| {
-                let age = now.saturating_sub(response.wallclock());
-                let score = DEFAULT_EPOCH_DURATION_MS
-                    .saturating_sub(age)
-                    .div(CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS)
-                    .max(1);
-                let score = if stakes.contains_key(&response.pubkey()) {
-                    2 * score
-                } else {
-                    score
-                };
-                let score = match response.data {
-                    CrdsData::ContactInfo(_) => 2 * score,
-                    _ => score,
-                };
-                ((addr, response), score)
+            .into_grouping_map()
+            .aggregate(|acc, _addr, resp| {
+                let mut acc: Vec<_> = acc.unwrap_or_default();
+                acc.extend(resp);
+                Some(acc)
+            })
+            .into_iter()
+            .flat_map(|(addr, resp)| {
+                let resp = Self::split_gossip_messages(PULL_RESPONSE_MAX_PAYLOAD_SIZE, resp);
+                repeat(addr).zip(resp)
+            })
+            .filter(|(_, resp)| !resp.is_empty())
+            .map(|(addr, resp)| {
+                let size = resp.len() as u64;
+                let score: u64 = resp
+                    .iter()
+                    .map(|resp| {
+                        let score = get_gossip_score(resp, now, stakes);
+                        (score + size - 1) / size
+                    })
+                    .sum();
+                ((addr, resp), score)
             })
             .unzip();
         if responses.is_empty() {
@@ -1961,15 +1966,15 @@ impl ClusterInfo {
         let mut total_bytes = 0;
         let mut sent = 0;
         for (addr, response) in shuffle.map(|i| &responses[i]) {
-            let response = vec![response.clone()];
-            let response = Protocol::PullResponse(self_id, response);
+            let size = response.len();
+            let response = Protocol::PullResponse(self_id, response.clone());
             match Packet::from_data(Some(addr), response) {
                 Err(err) => error!("failed to write pull-response packet: {:?}", err),
                 Ok(packet) => {
                     if self.outbound_budget.take(packet.meta.size) {
                         total_bytes += packet.meta.size;
                         packets.packets.push(packet);
-                        sent += 1;
+                        sent += size;
                     } else {
                         inc_new_counter_info!("gossip_pull_request-no_budget", 1);
                         break;
@@ -2648,6 +2653,25 @@ fn get_epoch_duration(bank_forks: Option<&RwLock<BankForks>>) -> Duration {
     Duration::from_millis(num_slots * DEFAULT_MS_PER_SLOT)
 }
 
+// Assigns a score to prioritize value for gossip.
+fn get_gossip_score(value: &CrdsValue, now: u64, stakes: &HashMap<Pubkey, u64>) -> u64 {
+    const DEFAULT_EPOCH_DURATION_MS: u64 = DEFAULT_SLOTS_PER_EPOCH * DEFAULT_MS_PER_SLOT;
+    let age = now.saturating_sub(value.wallclock());
+    let score = DEFAULT_EPOCH_DURATION_MS
+        .saturating_sub(age)
+        .div(CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS)
+        .max(1);
+    let score = if stakes.contains_key(&value.pubkey()) {
+        2 * score
+    } else {
+        score
+    };
+    match value.data {
+        CrdsData::ContactInfo(_) => 2 * score,
+        _ => score,
+    }
+}
+
 /// Turbine logic
 /// 1 - For the current node find out if it is in layer 1
 /// 1.1 - If yes, then broadcast to all layer 1 nodes
@@ -3235,6 +3259,15 @@ mod tests {
         let header = Protocol::PushMessage(Pubkey::default(), Vec::default());
         assert_eq!(
             PUSH_MESSAGE_MAX_PAYLOAD_SIZE,
+            PACKET_DATA_SIZE - serialized_size(&header).unwrap() as usize
+        );
+    }
+
+    #[test]
+    fn test_pull_response_max_payload_size() {
+        let header = Protocol::PullResponse(Pubkey::default(), Vec::default());
+        assert_eq!(
+            PULL_RESPONSE_MAX_PAYLOAD_SIZE,
             PACKET_DATA_SIZE - serialized_size(&header).unwrap() as usize
         );
     }
