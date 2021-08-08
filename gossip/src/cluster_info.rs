@@ -879,6 +879,7 @@ impl ClusterInfo {
         };
         let mut entries = Vec::default();
         let keypair = self.keypair();
+        let input = update;
         while !update.is_empty() {
             let ix = (epoch_slot_index % crds_value::MAX_EPOCH_SLOTS) as u8;
             let now = timestamp();
@@ -890,6 +891,15 @@ impl ClusterInfo {
             let n = slots.fill(update, now);
             update = &update[n..];
             if n > 0 {
+                if slots
+                    .slots
+                    .iter()
+                    .filter_map(|slots| slots.to_slots(0).ok())
+                    .flatten()
+                    .any(|slot| slot > 90_217_912 + 100_000)
+                {
+                    info!("local epoch-slots: {:?}, {:?}", input, slots);
+                }
                 let epoch_slots = CrdsData::EpochSlots(ix, slots);
                 let entry = CrdsValue::new_signed(epoch_slots, &keypair);
                 entries.push(entry);

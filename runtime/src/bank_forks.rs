@@ -5,7 +5,9 @@ use crate::{
     bank::Bank,
     snapshot_config::SnapshotConfig,
 };
+use itertools::Itertools;
 use log::*;
+use rand::Rng;
 use solana_metrics::inc_new_counter_info;
 use solana_sdk::{clock::Slot, hash::Hash, timing};
 use std::{
@@ -138,6 +140,12 @@ impl BankForks {
         self.descendants.entry(slot).or_default();
         for parent in bank.proper_ancestors() {
             self.descendants.entry(parent).or_default().insert(slot);
+        }
+        if rand::thread_rng().gen_ratio(1, 100) {
+            let slots = self.banks.keys().copied().sorted();
+            let gaps: Vec<_> = slots.tuple_windows().map(|(a, b)| b - a).collect();
+            let first = self.banks.keys().min().unwrap();
+            info!("bank-forks: {}, {}, {:?}", self.banks.len(), first, gaps);
         }
         bank
     }

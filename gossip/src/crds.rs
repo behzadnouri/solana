@@ -46,6 +46,7 @@ use {
         cmp::Ordering,
         collections::{hash_map, BTreeMap, HashMap, VecDeque},
         ops::{Bound, Index, IndexMut},
+        time::Duration,
     },
 };
 
@@ -171,6 +172,19 @@ impl Crds {
     }
 
     pub fn insert(&mut self, value: CrdsValue, now: u64) -> Result<(), CrdsError> {
+        if let Some(epoch_slots) = value.epoch_slots() {
+            let age = Duration::from_millis(now.saturating_sub(value.wallclock()));
+            let age = age.as_secs() / 3600 / 24;
+            if epoch_slots
+                .slots
+                .iter()
+                .filter_map(|slots| slots.to_slots(0).ok())
+                .flatten()
+                .any(|slot| slot > 90_217_912 + 100_000)
+            {
+                info!("{} days, from: {}", age, value.pubkey());
+            }
+        }
         let label = value.label();
         let pubkey = value.pubkey();
         let value = VersionedCrdsValue::new(value, self.cursor, now);
@@ -249,7 +263,7 @@ impl Crds {
         V::get_entry(&self.table, key)
     }
 
-    pub(crate) fn get_shred_version(&self, pubkey: &Pubkey) -> Option<u16> {
+    pub fn get_shred_version(&self, pubkey: &Pubkey) -> Option<u16> {
         self.shred_versions.get(pubkey).copied()
     }
 

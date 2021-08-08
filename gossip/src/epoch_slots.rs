@@ -11,14 +11,24 @@ use {
         pubkey::Pubkey,
         sanitize::{Sanitize, SanitizeError},
     },
+    std::fmt::{Debug, Formatter},
+    thiserror::Error,
 };
 
 const MAX_SLOTS_PER_ENTRY: usize = 2048 * 8;
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, AbiExample)]
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, AbiExample)]
 pub struct Uncompressed {
-    pub first_slot: Slot,
-    pub num: usize,
-    pub slots: BitVec<u8>,
+    first_slot: Slot,
+    num: usize,
+    slots: BitVec<u8>,
+}
+
+impl Debug for Uncompressed {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        let slots = self.to_slots(/*min_slot=*/ 0);
+        Debug::fmt(&slots, f)
+    }
 }
 
 impl Sanitize for Uncompressed {
@@ -26,6 +36,7 @@ impl Sanitize for Uncompressed {
         if self.first_slot >= MAX_SLOT {
             return Err(SanitizeError::ValueOutOfBounds);
         }
+        // TODO: this should be '>'
         if self.num >= MAX_SLOTS_PER_ENTRY {
             return Err(SanitizeError::ValueOutOfBounds);
         }
@@ -42,11 +53,20 @@ impl Sanitize for Uncompressed {
     }
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, AbiExample)]
+#[derive(Deserialize, Serialize, Clone, PartialEq, AbiExample)]
 pub struct Flate2 {
-    pub first_slot: Slot,
-    pub num: usize,
-    pub compressed: Vec<u8>,
+    first_slot: Slot,
+    num: usize,
+    compressed: Vec<u8>,
+}
+
+impl Debug for Flate2 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        match self.inflate() {
+            Err(_) => Err(std::fmt::Error),
+            Ok(slots) => Debug::fmt(&slots, f),
+        }
+    }
 }
 
 impl Sanitize for Flate2 {
@@ -54,6 +74,7 @@ impl Sanitize for Flate2 {
         if self.first_slot >= MAX_SLOT {
             return Err(SanitizeError::ValueOutOfBounds);
         }
+        // TODO: this should be '>'
         if self.num >= MAX_SLOTS_PER_ENTRY {
             return Err(SanitizeError::ValueOutOfBounds);
         }
@@ -61,24 +82,15 @@ impl Sanitize for Flate2 {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Error)]
 pub enum Error {
-    CompressError,
-    DecompressError,
+    #[error(transparent)]
+    CompressError(#[from] flate2::CompressError),
+    #[error(transparent)]
+    DecompressError(#[from] flate2::DecompressError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
-
-impl std::convert::From<flate2::CompressError> for Error {
-    fn from(_e: flate2::CompressError) -> Error {
-        Error::CompressError
-    }
-}
-impl std::convert::From<flate2::DecompressError> for Error {
-    fn from(_e: flate2::DecompressError) -> Error {
-        Error::DecompressError
-    }
-}
 
 impl Flate2 {
     fn deflate(mut unc: Uncompressed) -> Result<Self> {
@@ -97,7 +109,7 @@ impl Flate2 {
         let _ = rv.inflate()?;
         Ok(rv)
     }
-    pub fn inflate(&self) -> Result<Uncompressed> {
+    fn inflate(&self) -> Result<Uncompressed> {
         //add some head room for the decompressor which might spill more bits
         let mut uncompressed = Vec::with_capacity(32 + (self.num + 4) / 8);
         let mut decompress = Decompress::new(false);
@@ -111,14 +123,14 @@ impl Flate2 {
 }
 
 impl Uncompressed {
-    pub fn new(max_size: usize) -> Self {
+    fn new(max_size: usize) -> Self {
         Self {
             num: 0,
             first_slot: 0,
             slots: BitVec::new_fill(false, 8 * max_size as u64),
         }
     }
-    pub fn to_slots(&self, min_slot: Slot) -> Vec<Slot> {
+    fn to_slots(&self, min_slot: Slot) -> Vec<Slot> {
         let mut rv = vec![];
         let start = if min_slot < self.first_slot {
             0
@@ -135,7 +147,7 @@ impl Uncompressed {
         }
         rv
     }
-    pub fn add(&mut self, slots: &[Slot]) -> usize {
+    fn add(&mut self, slots: &[Slot]) -> usize {
         for (i, s) in slots.iter().enumerate() {
             if self.num == 0 {
                 self.first_slot = *s;
@@ -182,27 +194,27 @@ impl CompressedSlots {
         CompressedSlots::Uncompressed(Uncompressed::new(max_size))
     }
 
-    pub fn first_slot(&self) -> Slot {
+    fn first_slot(&self) -> Slot {
         match self {
             CompressedSlots::Uncompressed(a) => a.first_slot,
             CompressedSlots::Flate2(b) => b.first_slot,
         }
     }
 
-    pub fn num_slots(&self) -> usize {
+    fn num_slots(&self) -> usize {
         match self {
             CompressedSlots::Uncompressed(a) => a.num,
             CompressedSlots::Flate2(b) => b.num,
         }
     }
 
-    pub fn add(&mut self, slots: &[Slot]) -> usize {
+    fn add(&mut self, slots: &[Slot]) -> usize {
         match self {
             CompressedSlots::Uncompressed(vals) => vals.add(slots),
             CompressedSlots::Flate2(_) => 0,
         }
     }
-    pub fn to_slots(&self, min_slot: Slot) -> Result<Vec<Slot>> {
+    pub(crate) fn to_slots(&self, min_slot: Slot) -> Result<Vec<Slot>> {
         match self {
             CompressedSlots::Uncompressed(vals) => Ok(vals.to_slots(min_slot)),
             CompressedSlots::Flate2(vals) => {
@@ -211,25 +223,20 @@ impl CompressedSlots {
             }
         }
     }
-    pub fn deflate(&mut self) -> Result<()> {
-        match self {
-            CompressedSlots::Uncompressed(vals) => {
-                let unc = vals.clone();
-                let compressed = Flate2::deflate(unc)?;
-                let mut new = CompressedSlots::Flate2(compressed);
-                std::mem::swap(self, &mut new);
-                Ok(())
-            }
-            CompressedSlots::Flate2(_) => Ok(()),
+    fn deflate(&mut self) -> Result<()> {
+        if let CompressedSlots::Uncompressed(slots) = self {
+            let slots = Flate2::deflate(slots.clone())?;
+            *self = CompressedSlots::Flate2(slots);
         }
+        Ok(())
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Default, PartialEq, AbiExample)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, AbiExample)]
 pub struct EpochSlots {
     pub from: Pubkey,
-    pub slots: Vec<CompressedSlots>,
-    pub wallclock: u64,
+    pub(crate) slots: Vec<CompressedSlots>,
+    pub(crate) wallclock: u64,
 }
 
 impl Sanitize for EpochSlots {
@@ -242,25 +249,8 @@ impl Sanitize for EpochSlots {
     }
 }
 
-use std::fmt;
-impl fmt::Debug for EpochSlots {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let num_slots: usize = self.slots.iter().map(|s| s.num_slots()).sum();
-        let lowest_slot = self
-            .slots
-            .iter()
-            .map(|s| s.first_slot())
-            .fold(0, std::cmp::min);
-        write!(
-            f,
-            "EpochSlots {{ from: {} num_slots: {} lowest_slot: {} wallclock: {} }}",
-            self.from, num_slots, lowest_slot, self.wallclock
-        )
-    }
-}
-
 impl EpochSlots {
-    pub fn new(from: Pubkey, now: u64) -> Self {
+    pub(crate) fn new(from: Pubkey, now: u64) -> Self {
         Self {
             from,
             wallclock: now,
@@ -287,7 +277,7 @@ impl EpochSlots {
         }
         num
     }
-    pub fn add(&mut self, slots: &[Slot]) -> usize {
+    fn add(&mut self, slots: &[Slot]) -> usize {
         let mut num = 0;
         for s in &mut self.slots {
             num += s.add(&slots[num..]);
@@ -297,19 +287,19 @@ impl EpochSlots {
         }
         num
     }
-    pub fn deflate(&mut self) -> Result<()> {
+    fn deflate(&mut self) -> Result<()> {
         for s in self.slots.iter_mut() {
             s.deflate()?;
         }
         Ok(())
     }
-    pub fn max_compressed_slot_size(&self) -> isize {
+    fn max_compressed_slot_size(&self) -> isize {
         let len_header = serialized_size(self).unwrap();
         let len_slot = serialized_size(&CompressedSlots::default()).unwrap();
         MAX_CRDS_OBJECT_SIZE as isize - (len_header + len_slot) as isize
     }
 
-    pub fn first_slot(&self) -> Option<Slot> {
+    pub(crate) fn first_slot(&self) -> Option<Slot> {
         self.slots.iter().map(|s| s.first_slot()).min()
     }
 

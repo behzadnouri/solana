@@ -1,5 +1,6 @@
 use {
     itertools::Itertools,
+    rand::Rng,
     solana_gossip::{
         cluster_info::ClusterInfo, contact_info::ContactInfo, crds::Cursor, epoch_slots::EpochSlots,
     },
@@ -9,7 +10,7 @@ use {
         pubkey::Pubkey,
     },
     std::{
-        collections::{BTreeMap, HashMap},
+        collections::{BTreeMap, HashMap, HashSet},
         sync::{Arc, Mutex, RwLock},
     },
 };
@@ -41,6 +42,38 @@ impl ClusterSlots {
         };
         let num_epoch_slots = root_bank.get_slots_in_epoch(root_bank.epoch());
         self.update_internal(root_bank.slot(), epoch_slots, num_epoch_slots);
+        if rand::thread_rng().gen_ratio(1, 100) {
+            let cluster_slots = self.cluster_slots.read().unwrap();
+            if let Some(slot) = cluster_slots.keys().last() {
+                info!(
+                    "num slots: {}, {}-{} ({})",
+                    cluster_slots.len(),
+                    root_bank.slot(),
+                    slot,
+                    slot.saturating_sub(root_bank.slot())
+                );
+            }
+            let num_entries: usize = cluster_slots
+                .values()
+                .map(|keys| keys.read().unwrap().len())
+                .sum();
+            info!("num entries: {}", num_entries);
+            let keys: HashSet<Pubkey> = cluster_slots
+                .values()
+                .flat_map(|keys| {
+                    let keys = keys.read().unwrap();
+                    keys.keys().copied().collect::<Vec<_>>()
+                })
+                .collect();
+            drop(cluster_slots);
+            let gossip_crds = cluster_info.gossip.crds.read().unwrap();
+            let mut cnt = HashMap::<Option<u16>, usize>::new();
+            for key in keys {
+                let shred_version = gossip_crds.get_shred_version(&key);
+                *cnt.entry(shred_version).or_default() += 1;
+            }
+            info!("shred-version: {:?}", cnt);
+        }
     }
 
     fn update_internal(&self, root: Slot, epoch_slots_list: Vec<EpochSlots>, num_epoch_slots: u64) {
@@ -75,16 +108,27 @@ impl ClusterSlots {
                     .zip(std::iter::repeat((epoch_slots.from, stake)))
             })
             .into_group_map();
+        let mut slot_cnt = HashMap::<Slot, usize>::new();
         let slot_nodes_stakes: Vec<_> = {
             let mut cluster_slots = self.cluster_slots.write().unwrap();
             slot_nodes_stakes
                 .into_iter()
                 .map(|(slot, nodes_stakes)| {
+                    *slot_cnt.entry(slot).or_default() += nodes_stakes.len();
                     let slot_nodes = cluster_slots.entry(slot).or_default().clone();
                     (slot_nodes, nodes_stakes)
                 })
                 .collect()
         };
+        if rand::thread_rng().gen_ratio(1, 100) {
+            let slot_cnt: Vec<_> = slot_cnt
+                .into_iter()
+                .sorted()
+                .tuple_windows()
+                .map(|(a, b)| (b.0 - a.0, b.1))
+                .collect();
+            // info!("slot counts: {:?}", slot_cnt);
+        }
         for (slot_nodes, nodes_stakes) in slot_nodes_stakes {
             slot_nodes.write().unwrap().extend(nodes_stakes);
         }
