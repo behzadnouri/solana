@@ -198,17 +198,14 @@ impl Tower {
         Self::new(node_pubkey, vote_account, root, &heaviest_bank)
     }
 
-    pub(crate) fn collect_vote_lockouts<F>(
+    pub(crate) fn collect_vote_lockouts(
         vote_account_pubkey: &Pubkey,
         bank_slot: Slot,
-        vote_accounts: F,
+        vote_accounts: &HashMap<Pubkey, (/*stake:*/ u64, VoteAccount)>,
         ancestors: &HashMap<Slot, HashSet<Slot>>,
         get_frozen_hash: impl Fn(Slot) -> Option<Hash>,
         latest_validator_votes_for_frozen_banks: &mut LatestValidatorVotesForFrozenBanks,
-    ) -> ComputedBankState
-    where
-        F: IntoIterator<Item = (Pubkey, (u64, VoteAccount))>,
-    {
+    ) -> ComputedBankState {
         let mut vote_slots = HashSet::new();
         let mut voted_stakes = HashMap::new();
         let mut total_stake = 0;
@@ -217,7 +214,8 @@ impl Tower {
         // keyed by end of the range
         let mut lockout_intervals = LockoutIntervals::new();
         let mut my_latest_landed_vote = None;
-        for (key, (voted_stake, account)) in vote_accounts {
+        for (&key, (voted_stake, account)) in vote_accounts.iter() {
+            let voted_stake = *voted_stake;
             if voted_stake == 0 {
                 continue;
             }
@@ -1270,56 +1268,60 @@ pub fn reconcile_blockstore_roots_with_tower(
 
 #[cfg(test)]
 pub mod test {
-    use super::*;
-    use crate::{
-        fork_choice::ForkChoice, heaviest_subtree_fork_choice::SlotHashKey,
-        replay_stage::HeaviestForkFailures, tower_storage::FileTowerStorage,
-        vote_simulator::VoteSimulator,
+    use {
+        super::*,
+        crate::{
+            fork_choice::ForkChoice, heaviest_subtree_fork_choice::SlotHashKey,
+            replay_stage::HeaviestForkFailures, tower_storage::FileTowerStorage,
+            vote_simulator::VoteSimulator,
+        },
+        itertools::Itertools,
+        solana_ledger::{blockstore::make_slot_entries, get_tmp_ledger_path},
+        solana_runtime::bank::Bank,
+        solana_sdk::{
+            account::{Account, AccountSharedData, ReadableAccount, WritableAccount},
+            clock::Slot,
+            hash::Hash,
+            pubkey::Pubkey,
+            signature::Signer,
+            slot_history::SlotHistory,
+        },
+        solana_vote_program::vote_state::{Vote, VoteStateVersions, MAX_LOCKOUT_HISTORY},
+        std::{
+            collections::HashMap,
+            fs::{remove_file, OpenOptions},
+            io::{Read, Seek, SeekFrom, Write},
+            path::PathBuf,
+            sync::Arc,
+        },
+        tempfile::TempDir,
+        trees::tr,
     };
-    use solana_ledger::{blockstore::make_slot_entries, get_tmp_ledger_path};
-    use solana_runtime::bank::Bank;
-    use solana_sdk::{
-        account::{Account, AccountSharedData, ReadableAccount, WritableAccount},
-        clock::Slot,
-        hash::Hash,
-        pubkey::Pubkey,
-        signature::Signer,
-        slot_history::SlotHistory,
-    };
-    use solana_vote_program::vote_state::{Vote, VoteStateVersions, MAX_LOCKOUT_HISTORY};
-    use std::{
-        collections::HashMap,
-        fs::{remove_file, OpenOptions},
-        io::{Read, Seek, SeekFrom, Write},
-        path::PathBuf,
-        sync::Arc,
-    };
-    use tempfile::TempDir;
-    use trees::tr;
 
-    fn gen_stakes(stake_votes: &[(u64, &[u64])]) -> Vec<(Pubkey, (u64, VoteAccount))> {
-        let mut stakes = vec![];
-        for (lamports, votes) in stake_votes {
-            let mut account = AccountSharedData::from(Account {
-                data: vec![0; VoteState::size_of()],
-                lamports: *lamports,
-                ..Account::default()
-            });
-            let mut vote_state = VoteState::default();
-            for slot in *votes {
-                vote_state.process_slot_vote_unchecked(*slot);
-            }
-            VoteState::serialize(
-                &VoteStateVersions::new_current(vote_state),
-                &mut account.data_as_mut_slice(),
-            )
-            .expect("serialize state");
-            stakes.push((
-                solana_sdk::pubkey::new_rand(),
-                (*lamports, VoteAccount::from(account)),
-            ));
-        }
-        stakes
+    fn gen_stakes(stake_votes: &[(u64, &[u64])]) -> HashMap<Pubkey, (u64, VoteAccount)> {
+        stake_votes
+            .iter()
+            .map(|(lamports, votes)| {
+                let mut account = AccountSharedData::from(Account {
+                    data: vec![0; VoteState::size_of()],
+                    lamports: *lamports,
+                    ..Account::default()
+                });
+                let mut vote_state = VoteState::default();
+                for slot in *votes {
+                    vote_state.process_slot_vote_unchecked(*slot);
+                }
+                VoteState::serialize(
+                    &VoteStateVersions::new_current(vote_state),
+                    &mut account.data_as_mut_slice(),
+                )
+                .expect("serialize state");
+                (
+                    solana_sdk::pubkey::new_rand(),
+                    (*lamports, VoteAccount::from(account)),
+                )
+            })
+            .collect()
     }
 
     #[test]
@@ -1495,7 +1497,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),
@@ -1528,7 +1530,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             );
@@ -1565,7 +1567,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),
@@ -1580,7 +1582,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),
@@ -1597,7 +1599,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),
@@ -1614,7 +1616,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),
@@ -1631,7 +1633,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),
@@ -1650,7 +1652,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),
@@ -1667,7 +1669,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),
@@ -1685,7 +1687,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),
@@ -1712,7 +1714,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),
@@ -1745,7 +1747,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),
@@ -1761,7 +1763,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),
@@ -1794,7 +1796,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),
@@ -1819,7 +1821,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),
@@ -1964,11 +1966,11 @@ pub mod test {
     #[test]
     fn test_collect_vote_lockouts_sums() {
         //two accounts voting for slot 0 with 1 token staked
-        let mut accounts = gen_stakes(&[(1, &[0]), (1, &[0])]);
-        accounts.sort_by_key(|(pk, _)| *pk);
+        let accounts = gen_stakes(&[(1, &[0]), (1, &[0])]);
         let account_latest_votes: Vec<(Pubkey, SlotHashKey)> = accounts
             .iter()
             .map(|(pubkey, _)| (*pubkey, (0, Hash::default())))
+            .sorted_by_key(|(pk, _)| *pk)
             .collect();
 
         let ancestors = vec![(1, vec![0].into_iter().collect()), (0, HashSet::new())]
@@ -1984,7 +1986,7 @@ pub mod test {
         } = Tower::collect_vote_lockouts(
             &Pubkey::default(),
             1,
-            accounts.into_iter(),
+            &accounts,
             &ancestors,
             |_| Some(Hash::default()),
             &mut latest_validator_votes_for_frozen_banks,
@@ -2004,8 +2006,7 @@ pub mod test {
     fn test_collect_vote_lockouts_root() {
         let votes: Vec<u64> = (0..MAX_LOCKOUT_HISTORY as u64).collect();
         //two accounts voting for slots 0..MAX_LOCKOUT_HISTORY with 1 token staked
-        let mut accounts = gen_stakes(&[(1, &votes), (1, &votes)]);
-        accounts.sort_by_key(|(pk, _)| *pk);
+        let accounts = gen_stakes(&[(1, &votes), (1, &votes)]);
         let account_latest_votes: Vec<(Pubkey, SlotHashKey)> = accounts
             .iter()
             .map(|(pubkey, _)| {
@@ -2014,6 +2015,7 @@ pub mod test {
                     ((MAX_LOCKOUT_HISTORY - 1) as Slot, Hash::default()),
                 )
             })
+            .sorted_by_key(|(pk, _)| *pk)
             .collect();
         let mut tower = Tower::new_for_tests(0, 0.67);
         let mut ancestors = HashMap::new();
@@ -2044,7 +2046,7 @@ pub mod test {
         } = Tower::collect_vote_lockouts(
             &Pubkey::default(),
             MAX_LOCKOUT_HISTORY as u64,
-            accounts.into_iter(),
+            &accounts,
             &ancestors,
             |_| Some(Hash::default()),
             &mut latest_validator_votes_for_frozen_banks,
@@ -2340,7 +2342,7 @@ pub mod test {
         } = Tower::collect_vote_lockouts(
             &Pubkey::default(),
             vote_to_evaluate,
-            accounts.clone().into_iter(),
+            &accounts,
             &ancestors,
             |_| None,
             &mut LatestValidatorVotesForFrozenBanks::default(),
@@ -2358,7 +2360,7 @@ pub mod test {
         } = Tower::collect_vote_lockouts(
             &Pubkey::default(),
             vote_to_evaluate,
-            accounts.into_iter(),
+            &accounts,
             &ancestors,
             |_| None,
             &mut LatestValidatorVotesForFrozenBanks::default(),
@@ -2499,7 +2501,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),
@@ -2514,7 +2516,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),
@@ -2530,7 +2532,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),
@@ -2601,7 +2603,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),
@@ -2617,7 +2619,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),
@@ -2633,7 +2635,7 @@ pub mod test {
                 &descendants,
                 &vote_simulator.progress,
                 total_stake,
-                bank0.epoch_vote_accounts(0).unwrap(),
+                &bank0.epoch_vote_accounts(0).unwrap(),
                 &vote_simulator.latest_validator_votes_for_frozen_banks,
                 &vote_simulator.heaviest_subtree_fork_choice,
             ),

@@ -2169,7 +2169,7 @@ impl ReplayStage {
                     let computed_bank_state = Tower::collect_vote_lockouts(
                         my_vote_pubkey,
                         bank_slot,
-                        bank.vote_accounts().into_iter(),
+                        &bank.vote_accounts(),
                         ancestors,
                         |slot| progress.get_hash(slot),
                         latest_validator_votes_for_frozen_banks,
@@ -2337,7 +2337,7 @@ impl ReplayStage {
                 descendants,
                 progress,
                 heaviest_bank.total_epoch_stake(),
-                heaviest_bank
+                &heaviest_bank
                     .epoch_vote_accounts(heaviest_bank.epoch())
                     .expect("Bank epoch vote accounts must contain entry for the bank's own epoch"),
                 latest_validator_votes_for_frozen_banks,
