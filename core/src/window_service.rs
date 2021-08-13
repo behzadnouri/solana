@@ -29,6 +29,7 @@ use {
     solana_streamer::streamer::PacketSender,
     std::collections::HashSet,
     std::{
+        collections::HashMap,
         net::{SocketAddr, UdpSocket},
         ops::Deref,
         sync::{
@@ -69,6 +70,15 @@ impl WindowServiceMetrics {
             ),
         );
     }
+}
+
+#[derive(Default)]
+struct WindowServiceStats {
+    num_packets: usize,
+    num_shreds: usize,
+    num_repairs: usize,
+    slots: HashMap<Slot, /*num shreds:*/ usize>,
+    addrs: HashMap<SocketAddr, /*num packets:*/ usize>,
 }
 
 fn verify_shred_slot(shred: &Shred, root: u64) -> bool {
@@ -253,6 +263,7 @@ where
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn recv_window<F>(
     blockstore: &Blockstore,
     leader_schedule_cache: &LeaderScheduleCache,
@@ -263,6 +274,7 @@ fn recv_window<F>(
     retransmit: &PacketSender,
     shred_filter: F,
     thread_pool: &ThreadPool,
+    stats: &mut WindowServiceStats,
 ) -> Result<()>
 where
     F: Fn(&Shred, Arc<Bank>, /*last root:*/ u64) -> bool + Sync,
@@ -270,9 +282,7 @@ where
     let timer = Duration::from_millis(200);
     let mut packets = verified_receiver.recv_timeout(timer)?;
     packets.extend(verified_receiver.try_iter().flatten());
-    let total_packets: usize = packets.iter().map(|p| p.packets.len()).sum();
     let now = Instant::now();
-    inc_new_counter_debug!("streamer-recv_window-recv", total_packets);
 
     let (root_bank, working_bank) = {
         let bank_forks = bank_forks.read().unwrap();
@@ -320,10 +330,16 @@ where
             .flat_map_iter(|packet| packet.packets.iter_mut().filter_map(handle_packet))
             .unzip()
     });
-
+    stats.num_packets += packets.iter().map(|pkt| pkt.packets.len()).sum::<usize>();
+    stats.num_repairs += repair_infos.iter().filter(|r| r.is_some()).count();
+    stats.num_shreds += shreds.len();
+    for shred in &shreds {
+        *stats.slots.entry(shred.slot()).or_default() += 1;
+    }
+    for packet in packets.iter().flat_map(|pkt| pkt.packets.iter()) {
+        *stats.addrs.entry(packet.meta.addr()).or_default() += 1;
+    }
     trace!("{:?} shreds from packets", shreds.len());
-
-    trace!("{} num total shreds received: {}", my_pubkey, total_packets);
 
     for packets in packets.into_iter() {
         if !packets.is_empty() {
@@ -556,57 +572,52 @@ impl WindowService {
             + std::marker::Send
             + std::marker::Sync,
     {
-        Builder::new()
-            .name("solana-window".to_string())
-            .spawn(move || {
-                let _exit = Finalizer::new(exit.clone());
-                trace!("{}: RECV_WINDOW started", id);
-                let thread_pool = rayon::ThreadPoolBuilder::new()
-                    .num_threads(get_thread_count())
-                    .build()
-                    .unwrap();
-                let mut now = Instant::now();
-                let handle_error = || {
-                    inc_new_counter_error!("solana-window-error", 1, 1);
-                };
-
-                loop {
-                    if exit.load(Ordering::Relaxed) {
-                        break;
-                    }
-
-                    let mut handle_timeout = || {
-                        if now.elapsed() > Duration::from_secs(30) {
-                            warn!("Window does not seem to be receiving data. Ensure port configuration is correct...");
-                            now = Instant::now();
-                        }
-                    };
-                    if let Err(e) = recv_window(
-                        &blockstore,
-                        &leader_schedule_cache,
-                        &bank_forks,
-                        &insert_sender,
-                        &id,
-                        &verified_receiver,
-                        &retransmit,
-                        |shred, bank, last_root| {
-                            shred_filter(
-                                &id,
-                                shred,
-                                Some(bank),
-                                last_root,
-                            )
-                        },
-                        &thread_pool,
-                    ) {
-                        if Self::should_exit_on_error(e, &mut handle_timeout, &handle_error) {
-                            break;
-                        }
-                    } else {
+        let thread_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(get_thread_count())
+            .build()
+            .unwrap();
+        let handle_error = || {
+            inc_new_counter_error!("solana-window-error", 1, 1);
+        };
+        let mut now = Instant::now();
+        let mut stats = WindowServiceStats::default();
+        let run_recv_window = move || {
+            let _exit = Finalizer::new(exit.clone());
+            trace!("{}: RECV_WINDOW started", id);
+            while !exit.load(Ordering::Relaxed) {
+                let mut handle_timeout = || {
+                    if now.elapsed() > Duration::from_secs(30) {
+                        warn!(
+                            "Window does not seem to be receiving data. \
+                            Ensure port configuration is correct..."
+                        );
                         now = Instant::now();
                     }
+                };
+                match recv_window(
+                    &blockstore,
+                    &leader_schedule_cache,
+                    &bank_forks,
+                    &insert_sender,
+                    &id,
+                    &verified_receiver,
+                    &retransmit,
+                    |shred, bank, last_root| shred_filter(&id, shred, Some(bank), last_root),
+                    &thread_pool,
+                    &mut stats,
+                ) {
+                    Ok(_) => now = Instant::now(),
+                    Err(err) => {
+                        if Self::should_exit_on_error(err, &mut handle_timeout, &handle_error) {
+                            break;
+                        }
+                    }
                 }
-            })
+            }
+        };
+        Builder::new()
+            .name("solana-window".to_string())
+            .spawn(run_recv_window)
             .unwrap()
     }
 
