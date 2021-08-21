@@ -1,12 +1,16 @@
-use crate::{
-    account::{from_account, AccountSharedData, ReadableAccount},
-    account_utils::{State, StateMut},
-};
-use solana_program::{clock::Epoch, instruction::InstructionError, pubkey::Pubkey, sysvar::Sysvar};
-use std::{
-    cell::{Ref, RefCell, RefMut},
-    iter::FromIterator,
-    rc::Rc,
+use {
+    crate::{
+        account::{AccountSharedData, ReadableAccount},
+        account_utils::State,
+    },
+    bincode::ErrorKind,
+    serde::{de::DeserializeOwned, Serialize},
+    solana_program::{clock::Epoch, instruction::InstructionError, pubkey::Pubkey, sysvar::Sysvar},
+    std::{
+        cell::{Ref, RefCell, RefMut},
+        iter::FromIterator,
+        rc::Rc,
+    },
 };
 
 #[repr(C)]
@@ -234,37 +238,51 @@ pub fn is_executable(keyed_accounts: &[KeyedAccount]) -> Result<bool, Instructio
 
 impl<'a, T> State<T> for crate::keyed_account::KeyedAccount<'a>
 where
-    T: serde::Serialize + serde::de::DeserializeOwned,
+    T: Clone + Send + Sync + Serialize + DeserializeOwned + 'static,
 {
     fn state(&self) -> Result<T, InstructionError> {
-        self.try_account_ref()?.state()
+        self.try_account_ref()?
+            .get()
+            .ok_or(InstructionError::InvalidAccountData)
     }
     fn set_state(&self, state: &T) -> Result<(), InstructionError> {
-        self.try_account_ref_mut()?.set_state(state)
+        self.try_account_ref_mut()?
+            .emplace(state.clone())
+            .map_err(|err| match *err {
+                ErrorKind::SizeLimit => InstructionError::AccountDataTooSmall,
+                _ => InstructionError::GenericError,
+            })
     }
 }
 
-pub fn from_keyed_account<S: Sysvar>(
+pub fn from_keyed_account<S>(
     keyed_account: &crate::keyed_account::KeyedAccount,
-) -> Result<S, InstructionError> {
+) -> Result<S, InstructionError>
+where
+    S: Clone + Send + Sync + Sysvar + 'static,
+{
     if !S::check_id(keyed_account.unsigned_key()) {
         return Err(InstructionError::InvalidArgument);
     }
-    from_account::<S, AccountSharedData>(&*keyed_account.try_account_ref()?)
+    keyed_account
+        .try_account_ref()?
+        .get::<S>()
         .ok_or(InstructionError::InvalidArgument)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{
-        account::{create_account_for_test, to_account},
-        pubkey::Pubkey,
+    use {
+        super::*,
+        crate::{
+            account::{create_account_for_test, from_account, to_account},
+            pubkey::Pubkey,
+        },
+        std::cell::RefCell,
     };
-    use std::cell::RefCell;
 
     #[repr(C)]
-    #[derive(Serialize, Deserialize, Debug, Default, PartialEq)]
+    #[derive(Clone, Serialize, Deserialize, Debug, Default, PartialEq)]
     struct TestSysvar {
         something: Pubkey,
     }

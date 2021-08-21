@@ -10,6 +10,7 @@ pub use signer::signers;
 pub use solana_program::*;
 
 pub mod account;
+mod account_data;
 pub mod account_utils;
 pub mod builtins;
 pub mod client;

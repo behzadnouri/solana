@@ -1,10 +1,19 @@
-use crate::{
-    clock::{Epoch, INITIAL_RENT_EPOCH},
-    lamports::LamportsError,
-    pubkey::Pubkey,
+use {
+    crate::{
+        account_data::AccountData,
+        clock::{Epoch, INITIAL_RENT_EPOCH},
+        lamports::LamportsError,
+        pubkey::Pubkey,
+    },
+    serde::{de::DeserializeOwned, Serialize},
+    solana_program::{account_info::AccountInfo, sysvar::Sysvar},
+    std::{
+        cell::{Ref, RefCell},
+        cmp, fmt,
+        rc::Rc,
+        sync::Arc,
+    },
 };
-use solana_program::{account_info::AccountInfo, sysvar::Sysvar};
-use std::{cell::Ref, cell::RefCell, cmp, fmt, rc::Rc, sync::Arc};
 
 /// An Account with data that is stored on chain
 #[repr(C)]
@@ -33,7 +42,7 @@ pub struct AccountSharedData {
     /// lamports in the account
     lamports: u64,
     /// data held in this account
-    data: Arc<Vec<u8>>,
+    data: Arc<AccountData>,
     /// the program that owns this account. If executable, the program that loads this account.
     owner: Pubkey,
     /// this account's data contains a loaded program (and is now read-only)
@@ -58,7 +67,7 @@ impl From<AccountSharedData> for Account {
         let account_data = Arc::make_mut(&mut other.data);
         Self {
             lamports: other.lamports,
-            data: std::mem::take(account_data),
+            data: Vec::from(std::mem::take(account_data)),
             owner: other.owner,
             executable: other.executable,
             rent_epoch: other.rent_epoch,
@@ -70,7 +79,7 @@ impl From<Account> for AccountSharedData {
     fn from(other: Account) -> Self {
         Self {
             lamports: other.lamports,
-            data: Arc::new(other.data),
+            data: Arc::new(AccountData::from(other.data)),
             owner: other.owner,
             executable: other.executable,
             rent_epoch: other.rent_epoch,
@@ -186,8 +195,7 @@ impl WritableAccount for AccountSharedData {
         self.lamports = lamports;
     }
     fn data_as_mut_slice(&mut self) -> &mut [u8] {
-        let data = Arc::make_mut(&mut self.data);
-        &mut data[..]
+        Arc::make_mut(&mut self.data).as_mut()
     }
     fn set_owner(&mut self, owner: Pubkey) {
         self.owner = owner;
@@ -210,7 +218,7 @@ impl WritableAccount for AccountSharedData {
     ) -> Self {
         AccountSharedData {
             lamports,
-            data: Arc::new(data),
+            data: Arc::new(AccountData::from(data)),
             owner,
             executable,
             rent_epoch,
@@ -223,7 +231,7 @@ impl ReadableAccount for AccountSharedData {
         self.lamports
     }
     fn data(&self) -> &[u8] {
-        &self.data
+        (*self.data).as_ref()
     }
     fn owner(&self) -> &Pubkey {
         &self.owner
@@ -233,6 +241,9 @@ impl ReadableAccount for AccountSharedData {
     }
     fn rent_epoch(&self) -> Epoch {
         self.rent_epoch
+    }
+    fn to_account_shared_data(&self) -> AccountSharedData {
+        self.clone()
     }
 }
 
@@ -241,7 +252,7 @@ impl ReadableAccount for Ref<'_, AccountSharedData> {
         self.lamports
     }
     fn data(&self) -> &[u8] {
-        &self.data
+        (*self.data).as_ref()
     }
     fn owner(&self) -> &Pubkey {
         &self.owner
@@ -251,6 +262,9 @@ impl ReadableAccount for Ref<'_, AccountSharedData> {
     }
     fn rent_epoch(&self) -> Epoch {
         self.rent_epoch
+    }
+    fn to_account_shared_data(&self) -> AccountSharedData {
+        (*self).clone()
     }
 }
 
@@ -433,13 +447,13 @@ impl AccountSharedData {
     pub fn set_data_from_slice(&mut self, data: &[u8]) {
         let len = self.data.len();
         let len_different = len != data.len();
-        let different = len_different || data != &self.data[..];
+        let different = len_different || data != self.data();
         if different {
-            self.data = Arc::new(data.to_vec());
+            self.data = Arc::new(AccountData::from(data.to_vec()));
         }
     }
     pub fn set_data(&mut self, data: Vec<u8>) {
-        self.data = Arc::new(data);
+        self.data = Arc::new(AccountData::from(data));
     }
     pub fn new(lamports: u64, space: usize, owner: &Pubkey) -> Self {
         shared_new(lamports, space, owner)
@@ -482,6 +496,24 @@ impl AccountSharedData {
     }
     pub fn serialize_data<T: serde::Serialize>(&mut self, state: &T) -> Result<(), bincode::Error> {
         shared_serialize_data(self, state)
+    }
+
+    /// Deserializes and returns value of type T stored in the data buffer.
+    pub(crate) fn get<T>(&self) -> Option<T>
+    where
+        T: Clone + Send + Sync + DeserializeOwned + 'static,
+    {
+        self.data.get()
+    }
+
+    // Serializes the value and stores it into the inner data buffer
+    // **without** resizing the buffer. The call will fail if the buffer
+    // is too small to serialize the value into.
+    pub(crate) fn emplace<T>(&mut self, value: T) -> bincode::Result<()>
+    where
+        T: Send + Sync + Serialize + 'static,
+    {
+        Arc::make_mut(&mut self.data).emplace(value)
     }
 }
 
@@ -825,9 +857,9 @@ pub mod tests {
                         account1.data[0] += 1;
                     } else if pass == 1 {
                         account_expected.data[0] += 1;
-                        account2.data_as_mut_slice()[0] = account2.data[0] + 1;
+                        account2.data_as_mut_slice()[0] = account2.data()[0] + 1;
                     } else if pass == 2 {
-                        account1.data_as_mut_slice()[0] = account1.data[0] + 1;
+                        account1.data_as_mut_slice()[0] = account1.data()[0] + 1;
                     } else if pass == 3 {
                         account_expected.data[0] += 1;
                         account2.data_as_mut_slice()[0] += 1;
