@@ -1847,8 +1847,11 @@ impl Bank {
             let new_epoch_stakes =
                 EpochStakes::new(&self.stakes.read().unwrap(), leader_schedule_epoch);
             {
-                let vote_accounts = self.stakes.read().unwrap().vote_accounts();
-                let vote_stakes: HashMap<_, _> = vote_accounts
+                let vote_stakes: HashMap<_, _> = self
+                    .stakes
+                    .read()
+                    .unwrap()
+                    .vote_accounts()
                     .iter()
                     .map(|(pubkey, (stake, _))| (*pubkey, *stake))
                     .collect();
@@ -5183,14 +5186,14 @@ impl Bank {
 
     /// current vote accounts for this bank along with the stake
     ///   attributed to each account
-    pub fn vote_accounts(&self) -> Arc<HashMap<Pubkey, (/*stake:*/ u64, VoteAccount)>> {
+    pub fn vote_accounts(&self) -> &HashMap<Pubkey, (/*stake:*/ u64, VoteAccount)> {
         self.stakes.read().unwrap().vote_accounts()
     }
 
     /// Vote account for the given vote account pubkey along with the stake.
     pub fn get_vote_account(&self, vote_account: &Pubkey) -> Option<(/*stake:*/ u64, VoteAccount)> {
-        let vote_accounts = self.stakes.read().unwrap().vote_accounts();
-        vote_accounts.get(vote_account).cloned()
+        let stakes = self.stakes.read().unwrap();
+        stakes.vote_accounts().get(vote_account).cloned()
     }
 
     /// Get the EpochStakes for a given epoch
@@ -5211,7 +5214,7 @@ impl Bank {
     pub fn epoch_vote_accounts(
         &self,
         epoch: Epoch,
-    ) -> Option<Arc<HashMap<Pubkey, (u64, VoteAccount)>>> {
+    ) -> Option<&HashMap<Pubkey, (u64, VoteAccount)>> {
         let epoch_stakes = self.epoch_stakes.get(&epoch)?;
         Some(epoch_stakes.stakes().vote_accounts())
     }

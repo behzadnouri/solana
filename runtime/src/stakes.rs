@@ -196,8 +196,8 @@ impl Stakes {
         }
     }
 
-    pub fn vote_accounts(&self) -> Arc<HashMap<Pubkey, (/*stake:*/ u64, VoteAccount)>> {
-        Arc::<HashMap<Pubkey, (u64, VoteAccount)>>::from(&self.vote_accounts)
+    pub fn vote_accounts(&self) -> &HashMap<Pubkey, (/*stake:*/ u64, VoteAccount)> {
+        self.vote_accounts.as_ref()
     }
 
     pub fn stake_delegations(&self) -> &HashMap<Pubkey, Delegation> {

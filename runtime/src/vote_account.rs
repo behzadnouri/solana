@@ -269,6 +269,12 @@ impl From<Arc<VoteAccountsHashMap>> for VoteAccounts {
     }
 }
 
+impl AsRef<VoteAccountsHashMap> for VoteAccounts {
+    fn as_ref(&self) -> &VoteAccountsHashMap {
+        self.vote_accounts.as_ref()
+    }
+}
+
 impl From<&VoteAccounts> for Arc<VoteAccountsHashMap> {
     fn from(vote_accounts: &VoteAccounts) -> Self {
         Arc::clone(&vote_accounts.vote_accounts)
