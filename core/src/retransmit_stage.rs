@@ -35,15 +35,16 @@ use {
     },
     std::{
         collections::{BTreeSet, HashSet},
+        iter::repeat,
         net::UdpSocket,
         ops::DerefMut,
         sync::{
-            atomic::{AtomicBool, AtomicU64, Ordering},
+            atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
             mpsc::{self, channel, RecvTimeoutError},
             Arc, Mutex, RwLock,
         },
         thread::{self, Builder, JoinHandle},
-        time::Duration,
+        time::{Duration, Instant},
     },
 };
 
@@ -68,6 +69,8 @@ struct RetransmitStats {
     retransmit_total: AtomicU64,
     last_ts: AtomicInterval,
     compute_turbine_peers_total: AtomicU64,
+    num_shreds_done: AtomicUsize,
+    shreds_done_elapsed: AtomicU64,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -101,6 +104,13 @@ fn update_retransmit_stats(
         .epoch_cache_update
         .fetch_add(epoch_cach_update, Ordering::Relaxed);
     if stats.last_ts.should_update(2000) {
+        let num_shreds_done = stats.num_shreds_done.swap(0, Ordering::Relaxed) as u64;
+        let shreds_done_elapsed = stats.shreds_done_elapsed.swap(0, Ordering::Relaxed);
+        let avg_shreds_done_elapsed_micros = if num_shreds_done == 0 {
+            0
+        } else {
+            shreds_done_elapsed / num_shreds_done
+        };
         datapoint_info!("retransmit-num_nodes", ("count", peers_len, i64));
         datapoint_info!(
             "retransmit-stage",
@@ -142,6 +152,12 @@ fn update_retransmit_stats(
             (
                 "compute_turbine",
                 stats.compute_turbine_peers_total.swap(0, Ordering::Relaxed) as i64,
+                i64
+            ),
+            ("num_shreds_done", num_shreds_done, i64),
+            (
+                "avg_shreds_done_elapsed_micros",
+                avg_shreds_done_elapsed_micros,
                 i64
             ),
         );
@@ -227,7 +243,7 @@ fn retransmit(
     bank_forks: &RwLock<BankForks>,
     leader_schedule_cache: &LeaderScheduleCache,
     cluster_info: &ClusterInfo,
-    shreds_receiver: &Mutex<mpsc::Receiver<Vec<Shred>>>,
+    shreds_receiver: &Mutex<mpsc::Receiver<(Instant, Vec<Shred>)>>,
     sock: &UdpSocket,
     id: u32,
     stats: &RetransmitStats,
@@ -240,10 +256,11 @@ fn retransmit(
 ) -> Result<()> {
     const RECV_TIMEOUT: Duration = Duration::from_secs(1);
     let shreds_receiver = shreds_receiver.lock().unwrap();
-    let mut shreds = shreds_receiver.recv_timeout(RECV_TIMEOUT)?;
+    let (tic, shreds) = shreds_receiver.recv_timeout(RECV_TIMEOUT)?;
+    let mut shreds: Vec<_> = repeat(tic).zip(shreds).collect();
     let mut timer_start = Measure::start("retransmit");
-    while let Ok(more_shreds) = shreds_receiver.try_recv() {
-        shreds.extend(more_shreds);
+    while let Ok((tic, more_shreds)) = shreds_receiver.try_recv() {
+        shreds.extend(repeat(tic).zip(more_shreds));
         if shreds.len() >= MAX_SHREDS_BATCH_SIZE {
             break;
         }
@@ -268,7 +285,7 @@ fn retransmit(
     let mut num_shreds_skipped = 0;
     let mut compute_turbine_peers_total = 0;
     let mut max_slot = 0;
-    for shred in shreds {
+    for (tic, shred) in shreds {
         if should_skip_retransmit(&shred, shreds_received) {
             num_shreds_skipped += 1;
             continue;
@@ -320,6 +337,10 @@ fn retransmit(
             socket_addr_space,
         );
         retransmit_time.stop();
+        stats.num_shreds_done.fetch_add(1, Ordering::Relaxed);
+        stats
+            .shreds_done_elapsed
+            .fetch_add(tic.elapsed().as_micros() as u64, Ordering::Relaxed);
         retransmit_total += retransmit_time.as_us();
     }
     max_slots.retransmit.fetch_max(max_slot, Ordering::Relaxed);
@@ -361,7 +382,7 @@ pub fn retransmitter(
     bank_forks: Arc<RwLock<BankForks>>,
     leader_schedule_cache: Arc<LeaderScheduleCache>,
     cluster_info: Arc<ClusterInfo>,
-    shreds_receiver: Arc<Mutex<mpsc::Receiver<Vec<Shred>>>>,
+    shreds_receiver: Arc<Mutex<mpsc::Receiver<(Instant, Vec<Shred>)>>>,
     max_slots: Arc<MaxSlots>,
     rpc_subscriptions: Option<Arc<RpcSubscriptions>>,
 ) -> Vec<JoinHandle<()>> {
