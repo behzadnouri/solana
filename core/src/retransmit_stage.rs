@@ -30,6 +30,7 @@ use {
     solana_sdk::{clock::Slot, epoch_schedule::EpochSchedule, pubkey::Pubkey, timing::timestamp},
     std::{
         collections::{BTreeSet, HashSet},
+        iter::repeat,
         net::UdpSocket,
         ops::DerefMut,
         sync::{
@@ -59,6 +60,8 @@ struct RetransmitStats {
     epoch_cache_update: u64,
     retransmit_total: AtomicU64,
     compute_turbine_peers_total: AtomicU64,
+    num_shreds_done: AtomicUsize,
+    shreds_done_elapsed: AtomicU64,
 }
 
 impl RetransmitStats {
@@ -84,6 +87,12 @@ impl RetransmitStats {
                 ..Self::default()
             },
         );
+        let num_shreds_done = stats.num_shreds_done.into_inner() as u64;
+        let avg_shreds_done_elapsed_micros = if num_shreds_done == 0 {
+            0
+        } else {
+            stats.shreds_done_elapsed.into_inner() / num_shreds_done
+        };
         datapoint_info!("retransmit-num_nodes", ("count", num_peers, i64));
         datapoint_info!(
             "retransmit-stage",
@@ -101,6 +110,12 @@ impl RetransmitStats {
             (
                 "compute_turbine",
                 stats.compute_turbine_peers_total.into_inner(),
+                i64
+            ),
+            ("num_shreds_done", num_shreds_done, i64),
+            (
+                "avg_shreds_done_elapsed_micros",
+                avg_shreds_done_elapsed_micros,
                 i64
             ),
         );
@@ -179,7 +194,7 @@ fn retransmit(
     bank_forks: &RwLock<BankForks>,
     leader_schedule_cache: &LeaderScheduleCache,
     cluster_info: &ClusterInfo,
-    shreds_receiver: &mpsc::Receiver<Vec<Shred>>,
+    shreds_receiver: &mpsc::Receiver<(Instant, Vec<Shred>)>,
     sockets: &[UdpSocket],
     stats: &mut RetransmitStats,
     cluster_nodes_cache: &ClusterNodesCache<RetransmitStage>,
@@ -190,9 +205,14 @@ fn retransmit(
     rpc_subscriptions: Option<&RpcSubscriptions>,
 ) -> Result<(), RecvTimeoutError> {
     const RECV_TIMEOUT: Duration = Duration::from_secs(1);
-    let mut shreds = shreds_receiver.recv_timeout(RECV_TIMEOUT)?;
+    let (tic, shreds) = shreds_receiver.recv_timeout(RECV_TIMEOUT)?;
+    let mut shreds: Vec<_> = repeat(tic).zip(shreds).collect();
     let mut timer_start = Measure::start("retransmit");
-    shreds.extend(shreds_receiver.try_iter().flatten());
+    shreds.extend(
+        shreds_receiver
+            .try_iter()
+            .flat_map(|(tic, shreds)| repeat(tic).zip(shreds)),
+    );
     stats.num_shreds += shreds.len();
     stats.total_batches += 1;
 
@@ -211,7 +231,7 @@ fn retransmit(
 
     let my_id = cluster_info.id();
     let socket_addr_space = cluster_info.socket_addr_space();
-    let retransmit_shred = |shred: Shred, socket: &UdpSocket| {
+    let retransmit_shred = |(tic, shred): (Instant, Shred), socket: &UdpSocket| {
         if should_skip_retransmit(&shred, shreds_received) {
             stats.num_shreds_skipped.fetch_add(1, Ordering::Relaxed);
             return;
@@ -267,12 +287,16 @@ fn retransmit(
             socket_addr_space,
         );
         retransmit_time.stop();
+        stats.num_shreds_done.fetch_add(1, Ordering::Relaxed);
+        stats
+            .shreds_done_elapsed
+            .fetch_add(tic.elapsed().as_micros() as u64, Ordering::Relaxed);
         stats
             .retransmit_total
             .fetch_add(retransmit_time.as_us(), Ordering::Relaxed);
     };
     thread_pool.install(|| {
-        shreds.into_par_iter().for_each(|shred| {
+        shreds.into_par_iter().with_min_len(8).for_each(|shred| {
             let index = thread_pool.current_thread_index().unwrap();
             let socket = &sockets[index % sockets.len()];
             retransmit_shred(shred, socket);
@@ -297,7 +321,7 @@ pub fn retransmitter(
     bank_forks: Arc<RwLock<BankForks>>,
     leader_schedule_cache: Arc<LeaderScheduleCache>,
     cluster_info: Arc<ClusterInfo>,
-    shreds_receiver: mpsc::Receiver<Vec<Shred>>,
+    shreds_receiver: mpsc::Receiver<(Instant, Vec<Shred>)>,
     max_slots: Arc<MaxSlots>,
     rpc_subscriptions: Option<Arc<RpcSubscriptions>>,
 ) -> JoinHandle<()> {

@@ -260,7 +260,7 @@ fn run_insert<F>(
     metrics: &mut BlockstoreInsertionMetrics,
     ws_metrics: &mut WindowServiceMetrics,
     completed_data_sets_sender: &CompletedDataSetsSender,
-    retransmit_sender: &Sender<Vec<Shred>>,
+    retransmit_sender: &Sender<(Instant, Vec<Shred>)>,
     outstanding_requests: &RwLock<OutstandingShredRepairs>,
 ) -> Result<()>
 where
@@ -313,7 +313,7 @@ fn recv_window<F>(
     bank_forks: &RwLock<BankForks>,
     insert_shred_sender: &CrossbeamSender<(Vec<Shred>, Vec<Option<RepairMeta>>)>,
     verified_receiver: &CrossbeamReceiver<Vec<Packets>>,
-    retransmit_sender: &Sender<Vec<Shred>>,
+    retransmit_sender: &Sender<(Instant, Vec<Shred>)>,
     shred_filter: F,
     thread_pool: &ThreadPool,
     stats: &mut ReceiveWindowStats,
@@ -359,15 +359,16 @@ where
             .unzip()
     });
     // Exclude repair packets from retransmit.
-    let _ = retransmit_sender.send(
-        shreds
+    let _ = {
+        let shreds = shreds
             .iter()
             .zip(&repair_infos)
             .filter(|(_, repair_info)| repair_info.is_none())
             .map(|(shred, _)| shred)
             .cloned()
-            .collect(),
-    );
+            .collect();
+        retransmit_sender.send((Instant::now(), shreds))
+    };
     stats.num_repairs += repair_infos.iter().filter(|r| r.is_some()).count();
     stats.num_shreds += shreds.len();
     for shred in &shreds {
@@ -418,7 +419,7 @@ impl WindowService {
     pub(crate) fn new<F>(
         blockstore: Arc<Blockstore>,
         verified_receiver: CrossbeamReceiver<Vec<Packets>>,
-        retransmit_sender: Sender<Vec<Shred>>,
+        retransmit_sender: Sender<(Instant, Vec<Shred>)>,
         repair_socket: Arc<UdpSocket>,
         exit: Arc<AtomicBool>,
         repair_info: RepairInfo,
@@ -531,7 +532,7 @@ impl WindowService {
         insert_receiver: CrossbeamReceiver<(Vec<Shred>, Vec<Option<RepairMeta>>)>,
         check_duplicate_sender: CrossbeamSender<Shred>,
         completed_data_sets_sender: CompletedDataSetsSender,
-        retransmit_sender: Sender<Vec<Shred>>,
+        retransmit_sender: Sender<(Instant, Vec<Shred>)>,
         outstanding_requests: Arc<RwLock<OutstandingShredRepairs>>,
     ) -> JoinHandle<()> {
         let mut handle_timeout = || {};
@@ -590,7 +591,7 @@ impl WindowService {
         verified_receiver: CrossbeamReceiver<Vec<Packets>>,
         shred_filter: F,
         bank_forks: Arc<RwLock<BankForks>>,
-        retransmit_sender: Sender<Vec<Shred>>,
+        retransmit_sender: Sender<(Instant, Vec<Shred>)>,
     ) -> JoinHandle<()>
     where
         F: 'static
