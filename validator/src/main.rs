@@ -84,6 +84,12 @@ use {
     },
 };
 
+
+// speice.io/2018/10/case-study-optimization.html
+use std::alloc::System;
+#[global_allocator]
+static GLOBAL: System = System;
+
 #[derive(Debug, PartialEq)]
 enum Operation {
     Initialize,
