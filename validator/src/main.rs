@@ -83,6 +83,13 @@ use {
     },
 };
 
+extern crate tcmalloc;
+
+use tcmalloc::TCMalloc;
+
+#[global_allocator]
+static GLOBAL: TCMalloc = TCMalloc;
+
 #[derive(Debug, PartialEq)]
 enum Operation {
     Initialize,
