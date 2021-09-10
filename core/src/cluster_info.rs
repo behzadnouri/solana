@@ -39,7 +39,6 @@ use {
     serde::ser::Serialize,
     solana_ledger::shred::Shred,
     solana_measure::measure::Measure,
-    solana_measure::thread_mem_usage,
     solana_metrics::{inc_new_counter_debug, inc_new_counter_error},
     solana_net_utils::{
         bind_common, bind_common_in_range, bind_in_range, find_available_port_in_range,
@@ -1807,7 +1806,6 @@ impl ClusterInfo {
                 let mut generate_pull_requests = true;
                 loop {
                     let start = timestamp();
-                    thread_mem_usage::datapoint("solana-gossip");
                     if self.contact_debug_interval != 0
                         && start - last_contact_info_trace > self.contact_debug_interval
                     {
@@ -2778,7 +2776,6 @@ impl ClusterInfo {
                             _ => error!("gossip run_listen failed: {}", err),
                         }
                     }
-                    thread_mem_usage::datapoint("solana-listen");
                 }
             })
             .unwrap()
