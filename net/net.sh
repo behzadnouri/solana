@@ -186,11 +186,6 @@ annotateBlockexplorerUrl() {
 build() {
   supported=("20.04")
   declare MAYBE_DOCKER=
-  if [[ $(uname) != Linux || ! " ${supported[*]} " =~ $(lsb_release -sr) ]]; then
-    # shellcheck source=ci/rust-version.sh
-    source "$SOLANA_ROOT"/ci/rust-version.sh
-    MAYBE_DOCKER="ci/docker-run.sh $rust_stable_docker_image"
-  fi
   SECONDS=0
   (
     cd "$SOLANA_ROOT"
@@ -267,7 +262,7 @@ syncScripts() {
   rsync -vPrc -e "ssh ${sshOptions[*]}" \
     --exclude 'net/log*' \
     "$SOLANA_ROOT"/{fetch-perf-libs.sh,fetch-spl.sh,scripts,net,multinode-demo} \
-    "$ipAddress":"$SOLANA_HOME"/ > /dev/null
+    "$ipAddress":"solana"/ > /dev/null
 }
 
 # Deploy local binaries to bootstrap validator.  Other validators and clients later fetch the
@@ -278,11 +273,11 @@ deployBootstrapValidator() {
   echo "Deploying software to bootstrap validator ($ipAddress)"
   case $deployMethod in
   tar)
-    rsync -vPrc -e "ssh ${sshOptions[*]}" "$SOLANA_ROOT"/solana-release/bin/* "$ipAddress:$CARGO_BIN/"
+    rsync -vPrc -e "ssh ${sshOptions[*]}" "$SOLANA_ROOT"/solana-release/bin/* "$ipAddress:.cargo/bin/"
     rsync -vPrc -e "ssh ${sshOptions[*]}" "$SOLANA_ROOT"/solana-release/version.yml "$ipAddress:~/"
     ;;
   local)
-    rsync -vPrc -e "ssh ${sshOptions[*]}" "$SOLANA_ROOT"/farf/bin/* "$ipAddress:$CARGO_BIN/"
+    rsync -vPrc -e "ssh ${sshOptions[*]}" "$SOLANA_ROOT"/farf/bin/* "$ipAddress:.cargo/bin/"
     rsync -vPrc -e "ssh ${sshOptions[*]}" "$SOLANA_ROOT"/farf/version.yml "$ipAddress:~/"
     ;;
   skip)
