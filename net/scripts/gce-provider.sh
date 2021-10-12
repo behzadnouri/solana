@@ -185,7 +185,7 @@ cloud_CreateInstances() {
     echo "Error: Not supported" >&2
     exit 1
   else
-    imageName="ubuntu-2204-jammy-v20241119 --image-project ubuntu-os-cloud"
+    imageName="ubuntu-2410-oracular-amd64-v20250116 --image-project ubuntu-os-cloud"
   fi
 
   declare -a nodes

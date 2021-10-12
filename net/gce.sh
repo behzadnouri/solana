@@ -62,7 +62,7 @@ prefix=testnet-dev-${USER//[^A-Za-z0-9]/}
 additionalValidatorCount=2
 clientNodeCount=0
 blockstreamer=false
-validatorBootDiskSizeInGb=100
+validatorBootDiskSizeInGb=900
 clientBootDiskSizeInGb=75
 validatorAdditionalDiskSizeInGb=
 externalNodes=false
@@ -502,7 +502,7 @@ EOF
       # machine can be pinged...
       (
         set -o pipefail
-        for i in $(seq 1 60); do
+        for i in $(seq 1 32); do
           set -x
           cloud_FetchFile "$nodeName" "$nodeIp" /solana-scratch/id_ecdsa "$sshPrivateKey" "$nodeZone" &&
             cloud_FetchFile "$nodeName" "$nodeIp" /solana-scratch/id_ecdsa.pub "$sshPrivateKey.pub" "$nodeZone" &&
@@ -542,7 +542,7 @@ EOF
     (
       set +e
       fetchPrivateKey || exit 1
-      for i in $(seq 1 60); do
+      for i in $(seq 1 32); do
         (
           set -x
           timeout --preserve-status --foreground 20s ssh "${sshOptions[@]}" "$publicIp" "ls -l /solana-scratch/.instance-startup-complete"
