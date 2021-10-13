@@ -16,7 +16,9 @@ use {
     rayon::{prelude::*, ThreadPool},
     solana_gossip::cluster_info::ClusterInfo,
     solana_ledger::{
-        blockstore::{self, Blockstore, BlockstoreInsertionMetrics, MAX_DATA_SHREDS_PER_SLOT},
+        blockstore::{
+            self, Blockstore, BlockstoreError, BlockstoreInsertionMetrics, MAX_DATA_SHREDS_PER_SLOT,
+        },
         leader_schedule_cache::LeaderScheduleCache,
         shred::{Nonce, Shred},
     },
@@ -50,6 +52,29 @@ struct WindowServiceMetrics {
     num_shreds_received: u64,
     shred_receiver_elapsed_us: u64,
     prune_shreds_elapsed_us: u64,
+    num_errors: u64,
+    num_errors_blockstore_dead_slot: u64,
+    num_errors_blockstore_empty_epoch_stakes: u64,
+    num_errors_blockstore_fs_extra_error: u64,
+    num_errors_blockstore_invalid_shred_data: u64,
+    num_errors_blockstore_io: u64,
+    num_errors_blockstore_no_vote_timestamps_in_range: u64,
+    num_errors_blockstore_parent_entries_unavailable: u64,
+    num_errors_blockstore_protobuf_decode_error: u64,
+    num_errors_blockstore_protobuf_encode_error: u64,
+    num_errors_blockstore_rocks_db: u64,
+    num_errors_blockstore_serialize: u64,
+    num_errors_blockstore_shred_for_index_exists: u64,
+    num_errors_blockstore_slot_cleaned_up: u64,
+    num_errors_blockstore_slot_not_rooted: u64,
+    num_errors_blockstore_slot_unavailable: u64,
+    num_errors_blockstore_transaction_status_slot_mismatch: u64,
+    num_errors_blockstore_unable_to_set_open_file_descriptor_limit: u64,
+    num_errors_blockstore_unpack: u64,
+    num_errors_blockstore_unsupported_transaction_version: u64,
+    num_errors_other: u64,
+    num_errors_try_crossbeam_send: u64,
+    num_errors_cross_beam_recv_timeout: u64,
 }
 
 impl WindowServiceMetrics {
@@ -68,7 +93,166 @@ impl WindowServiceMetrics {
                 self.prune_shreds_elapsed_us as i64,
                 i64
             ),
+            ("num_errors", self.num_errors, i64),
+            (
+                "num_errors_blockstore_dead_slot",
+                self.num_errors_blockstore_dead_slot,
+                i64
+            ),
+            (
+                "num_errors_blockstore_empty_epoch_stakes",
+                self.num_errors_blockstore_empty_epoch_stakes,
+                i64
+            ),
+            (
+                "num_errors_blockstore_fs_extra_error",
+                self.num_errors_blockstore_fs_extra_error,
+                i64
+            ),
+            (
+                "num_errors_blockstore_invalid_shred_data",
+                self.num_errors_blockstore_invalid_shred_data,
+                i64
+            ),
+            (
+                "num_errors_blockstore_io",
+                self.num_errors_blockstore_io,
+                i64
+            ),
+            (
+                "num_errors_blockstore_no_vote_timestamps_in_range",
+                self.num_errors_blockstore_no_vote_timestamps_in_range,
+                i64
+            ),
+            (
+                "num_errors_blockstore_parent_entries_unavailable",
+                self.num_errors_blockstore_parent_entries_unavailable,
+                i64
+            ),
+            (
+                "num_errors_blockstore_protobuf_decode_error",
+                self.num_errors_blockstore_protobuf_decode_error,
+                i64
+            ),
+            (
+                "num_errors_blockstore_protobuf_encode_error",
+                self.num_errors_blockstore_protobuf_encode_error,
+                i64
+            ),
+            (
+                "num_errors_blockstore_rocks_db",
+                self.num_errors_blockstore_rocks_db,
+                i64
+            ),
+            (
+                "num_errors_blockstore_serialize",
+                self.num_errors_blockstore_serialize,
+                i64
+            ),
+            (
+                "num_errors_blockstore_shred_for_index_exists",
+                self.num_errors_blockstore_shred_for_index_exists,
+                i64
+            ),
+            (
+                "num_errors_blockstore_slot_cleaned_up",
+                self.num_errors_blockstore_slot_cleaned_up,
+                i64
+            ),
+            (
+                "num_errors_blockstore_slot_not_rooted",
+                self.num_errors_blockstore_slot_not_rooted,
+                i64
+            ),
+            (
+                "num_errors_blockstore_slot_unavailable",
+                self.num_errors_blockstore_slot_unavailable,
+                i64
+            ),
+            (
+                "num_errors_blockstore_transaction_status_slot_mismatch",
+                self.num_errors_blockstore_transaction_status_slot_mismatch,
+                i64
+            ),
+            (
+                "num_errors_blockstore_unable_to_set_open_file_descriptor_limit",
+                self.num_errors_blockstore_unable_to_set_open_file_descriptor_limit,
+                i64
+            ),
+            (
+                "num_errors_blockstore_unpack",
+                self.num_errors_blockstore_unpack,
+                i64
+            ),
+            (
+                "num_errors_blockstore_unsupported_transaction_version",
+                self.num_errors_blockstore_unsupported_transaction_version,
+                i64
+            ),
+            ("num_errors_other", self.num_errors_other, i64),
+            (
+                "num_errors_try_crossbeam_send",
+                self.num_errors_try_crossbeam_send,
+                i64
+            ),
+            (
+                "num_errors_cross_beam_recv_timeout",
+                self.num_errors_cross_beam_recv_timeout,
+                i64
+            ),
         );
+    }
+
+    fn record_error(&mut self, err: &Error) {
+        self.num_errors += 1;
+        match err {
+            Error::TryCrossbeamSend => self.num_errors_try_crossbeam_send += 1,
+            Error::CrossbeamRecvTimeout(_) => self.num_errors_cross_beam_recv_timeout += 1,
+            Error::Blockstore(err) => match err {
+                BlockstoreError::ShredForIndexExists => {
+                    self.num_errors_blockstore_shred_for_index_exists += 1
+                }
+                BlockstoreError::InvalidShredData(_) => {
+                    self.num_errors_blockstore_invalid_shred_data += 1
+                }
+                BlockstoreError::RocksDb(_) => self.num_errors_blockstore_rocks_db += 1,
+                BlockstoreError::SlotNotRooted => self.num_errors_blockstore_slot_not_rooted += 1,
+                BlockstoreError::DeadSlot => self.num_errors_blockstore_dead_slot += 1,
+                BlockstoreError::Io(_) => self.num_errors_blockstore_io += 1,
+                BlockstoreError::Serialize(_) => self.num_errors_blockstore_serialize += 1,
+                BlockstoreError::FsExtraError(_) => self.num_errors_blockstore_fs_extra_error += 1,
+                BlockstoreError::SlotCleanedUp => self.num_errors_blockstore_slot_cleaned_up += 1,
+                BlockstoreError::UnpackError(_) => self.num_errors_blockstore_unpack += 1,
+                BlockstoreError::UnableToSetOpenFileDescriptorLimit => {
+                    self.num_errors_blockstore_unable_to_set_open_file_descriptor_limit += 1
+                }
+                BlockstoreError::TransactionStatusSlotMismatch => {
+                    self.num_errors_blockstore_transaction_status_slot_mismatch += 1
+                }
+                BlockstoreError::EmptyEpochStakes => {
+                    self.num_errors_blockstore_empty_epoch_stakes += 1
+                }
+                BlockstoreError::NoVoteTimestampsInRange => {
+                    self.num_errors_blockstore_no_vote_timestamps_in_range += 1
+                }
+                BlockstoreError::ProtobufEncodeError(_) => {
+                    self.num_errors_blockstore_protobuf_encode_error += 1
+                }
+                BlockstoreError::ProtobufDecodeError(_) => {
+                    self.num_errors_blockstore_protobuf_decode_error += 1
+                }
+                BlockstoreError::ParentEntriesUnavailable => {
+                    self.num_errors_blockstore_parent_entries_unavailable += 1
+                }
+                BlockstoreError::SlotUnavailable => {
+                    self.num_errors_blockstore_slot_unavailable += 1
+                }
+                BlockstoreError::UnsupportedTransactionVersion => {
+                    self.num_errors_blockstore_unsupported_transaction_version += 1
+                }
+            },
+            _ => self.num_errors_other += 1,
+        }
     }
 }
 
@@ -269,6 +453,7 @@ fn run_insert<F>(
 where
     F: Fn(Shred),
 {
+    ws_metrics.run_insert_count += 1;
     let mut shred_receiver_elapsed = Measure::start("shred_receiver_elapsed");
     let timer = Duration::from_millis(200);
     let (mut shreds, mut repair_infos) = shred_receiver.recv_timeout(timer)?;
@@ -277,6 +462,7 @@ where
         repair_infos.extend(more_repair_infos);
     }
     shred_receiver_elapsed.stop();
+    ws_metrics.shred_receiver_elapsed_us += shred_receiver_elapsed.as_us();
     ws_metrics.num_shreds_received += shreds.len() as u64;
 
     let mut prune_shreds_elapsed = Measure::start("prune_shreds_elapsed");
@@ -286,6 +472,7 @@ where
         .map(|repair_info| repair_info.is_some())
         .collect();
     prune_shreds_elapsed.stop();
+    ws_metrics.prune_shreds_elapsed_us += prune_shreds_elapsed.as_us();
 
     let (completed_data_sets, inserted_indices) = blockstore.insert_shreds_handle_duplicate(
         shreds,
@@ -303,11 +490,6 @@ where
     }
 
     completed_data_sets_sender.try_send(completed_data_sets)?;
-
-    ws_metrics.run_insert_count += 1;
-    ws_metrics.shred_receiver_elapsed_us += shred_receiver_elapsed.as_us();
-    ws_metrics.prune_shreds_elapsed_us += prune_shreds_elapsed.as_us();
-
     Ok(())
 }
 
@@ -567,6 +749,7 @@ impl WindowService {
                         &retransmit_sender,
                         &outstanding_requests,
                     ) {
+                        ws_metrics.record_error(&e);
                         if Self::should_exit_on_error(e, &mut handle_timeout, &handle_error) {
                             break;
                         }
