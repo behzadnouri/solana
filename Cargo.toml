@@ -582,3 +582,15 @@ rev = "b500cdc2a920cd5bff9e2dd974d7b97349d61464"
 [patch.crates-io.tokio]
 git = "https://github.com/anza-xyz/solana-tokio.git"
 rev = "7cf47705faacf7bf0e43e4131a5377b3291fce21"
+
+[profile.release]
+debug = true
+# strip = false
+
+[profile.release.package."*"]
+debug = true
+# strip = false
+
+[profile.release.build-override]
+debug = true
+# strip = false
