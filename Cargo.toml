@@ -656,3 +656,15 @@ crossbeam-epoch = { git = "https://github.com/anza-xyz/crossbeam", rev = "fd279d
 # comments and the overrides in sync.
 solana-curve25519 = { path = "curves/curve25519" }
 solana-zk-sdk = { path = "zk-sdk" }
+
+[profile.release]
+debug = true
+# strip = false
+
+[profile.release.package."*"]
+debug = true
+# strip = false
+
+[profile.release.build-override]
+debug = true
+# strip = false
