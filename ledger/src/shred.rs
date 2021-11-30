@@ -69,11 +69,7 @@ use {
         pubkey::Pubkey,
         signature::{Keypair, Signature, Signer},
     },
-    std::{
-        cell::RefCell,
-        convert::{TryFrom, TryInto},
-        mem::size_of,
-    },
+    std::{cell::RefCell, convert::TryInto, mem::size_of},
     thiserror::Error,
 };
 
@@ -373,6 +369,7 @@ impl Shred {
                 }
             }
         };
+        // TODO sanitize shreds here before returning!
 
         Ok(shred)
     }
@@ -451,8 +448,8 @@ impl Shred {
     pub fn parent(&self) -> Option<Slot> {
         match self.shred_type() {
             ShredType::Data => {
-                let parent_offset = Slot::try_from(self.data_header.parent_offset);
-                self.slot().checked_sub(parent_offset.ok()?)
+                let parent_offset = Slot::from(self.data_header.parent_offset);
+                self.slot().checked_sub(parent_offset)
             }
             ShredType::Code => None,
         }
@@ -462,22 +459,75 @@ impl Shred {
         self.common_header.index
     }
 
+    pub(crate) fn fec_set_index(&self) -> u32 {
+        self.common_header.fec_set_index
+    }
+
+    pub(crate) fn first_coding_index(&self) -> Option<u32> {
+        match self.shred_type() {
+            ShredType::Data => None,
+            // TODO: should use self.index() - self.position.
+            // XXX how to keep this backward compatible?
+            // maybe can check that if the index >= self.fec_set_index() or
+            // not!
+            // ShredType::Code => Some(self.fec_set_index()),
+            // TODO position == 0 might imply that the field is not populated.
+            // TODO need to check if num_data + num_coding is consisen with
+            // index and position.
+            ShredType::Code => self
+                .index()
+                .checked_sub(u32::from(self.coding_header.position)),
+        }
+    }
+
+    // Returns true if shred fields sanity check.
+    pub(crate) fn sanitize(&self) -> bool {
+        // TODO add more sanity checks here!
+        self.erasure_block_index().is_some()
+            && match self.shred_type() {
+                ShredType::Data => true,
+                ShredType::Code => {
+                    u32::from(self.coding_header.num_coding_shreds)
+                        <= 8 * MAX_DATA_SHREDS_PER_FEC_BLOCK
+                }
+            }
+    }
+
     pub fn version(&self) -> u16 {
         self.common_header.version
     }
 
     // Returns the block index within the erasure coding set.
     fn erasure_block_index(&self) -> Option<usize> {
-        let fec_set_index = self.common_header.fec_set_index;
-        let index = self.index().checked_sub(fec_set_index)? as usize;
         match self.shred_type() {
-            ShredType::Data => Some(index),
+            ShredType::Data => {
+                let index = self.index().checked_sub(self.fec_set_index())?;
+                Some(usize::try_from(index).ok()?)
+            }
             ShredType::Code => {
-                let num_data_shreds = self.coding_header.num_data_shreds as usize;
-                let num_coding_shreds = self.coding_header.num_coding_shreds as usize;
+                // Assert that the last shred index in the erasure set does not
+                // overshoot u32.
+                self.fec_set_index().checked_add(u32::from(
+                    self.coding_header
+                        .num_data_shreds
+                        .max(self.coding_header.num_coding_shreds)
+                        .checked_sub(1)?,
+                ))?;
+                // XXX this is not good if indices are misaligned.
+                let num_data_shreds = usize::try_from(self.coding_header.num_data_shreds).ok()?;
+                let num_coding_shreds =
+                    usize::try_from(self.coding_header.num_coding_shreds).ok()?;
                 let fec_set_size = num_data_shreds.checked_add(num_coding_shreds)?;
-                let index = index.checked_add(num_data_shreds)?;
-                (index < fec_set_size).then(|| index)
+                // let index = self.index().checked_sub(self.fec_set_index())? as usize;
+                // let index = index.checked_add(num_data_shreds)?;
+                // XXX not backward compatible.
+                if self.index() < u32::from(self.coding_header.position) {
+                    None
+                } else {
+                    let position = usize::from(self.coding_header.position);
+                    let index = num_data_shreds.checked_add(position)?;
+                    (index < fec_set_size).then(|| index)
+                }
             }
         }
     }
@@ -766,6 +816,7 @@ impl Shredder {
     pub fn data_shreds_to_coding_shreds(
         keypair: &Keypair,
         data_shreds: &[Shred],
+        first_coding_index: u32,
         is_last_in_slot: bool,
         process_stats: &mut ProcessShredsStats,
     ) -> Result<Vec<Shred>> {
@@ -778,8 +829,10 @@ impl Shredder {
             thread_pool.borrow().install(|| {
                 data_shreds
                     .par_chunks(MAX_DATA_SHREDS_PER_FEC_BLOCK as usize)
-                    .flat_map(|shred_data_batch| {
-                        Shredder::generate_coding_shreds(shred_data_batch, is_last_in_slot)
+                    .enumerate()
+                    .flat_map(|(i, shred_data_batch)| {
+                        let first_coding_index = first_coding_index.checked_add(i * usize::try_from(MAX_DATA_SHREDS_PER_FEC_BLOCK).unwrap());
+                        Shredder::generate_coding_shreds(shred_data_batch, first_coding_index, is_last_in_slot)
                     })
                     .collect()
             })
@@ -837,7 +890,8 @@ impl Shredder {
     }
 
     /// Generates coding shreds for the data shreds in the current FEC set
-    pub fn generate_coding_shreds(data: &[Shred], is_last_in_slot: bool) -> Vec<Shred> {
+    /// TODO: is_last_in_slot can be removed!
+    pub fn generate_coding_shreds(data: &[Shred], first_coding_index: u32, is_last_in_slot: bool) -> Vec<Shred> {
         const PAYLOAD_ENCODE_SIZE: usize = SHRED_PAYLOAD_SIZE - SIZE_OF_CODING_SHRED_HEADERS;
         let ShredCommonHeader {
             slot,
@@ -849,7 +903,7 @@ impl Shredder {
         assert_eq!(fec_set_index, index);
         assert!(data.iter().all(|shred| shred.common_header.slot == slot
             && shred.common_header.version == version
-            && shred.common_header.fec_set_index == fec_set_index));
+            && shred.fec_set_index() == fec_set_index));
         let num_data = data.len();
         let num_coding = if is_last_in_slot {
             (2 * MAX_DATA_SHREDS_PER_FEC_BLOCK as usize)
@@ -873,9 +927,10 @@ impl Shredder {
             .iter()
             .enumerate()
             .map(|(i, parity)| {
+                let index = first_coding_index + u32::try_from(i).unwrap();
                 let mut shred = Shred::new_empty_coding(
                     slot,
-                    fec_set_index + i as u32, // shred index
+                    index,
                     fec_set_index,
                     num_data,
                     num_coding,
@@ -895,7 +950,7 @@ impl Shredder {
         Self::verify_consistent_shred_payload_sizes("try_recovery()", &shreds)?;
         let (slot, fec_set_index) = match shreds.first() {
             None => return Ok(Vec::default()),
-            Some(shred) => (shred.slot(), shred.common_header.fec_set_index),
+            Some(shred) => (shred.slot(), shred.fec_set_index()),
         };
         let (num_data_shreds, num_coding_shreds) = match shreds.iter().find(|shred| shred.is_code())
         {
@@ -905,9 +960,9 @@ impl Shredder {
                 shred.coding_header.num_coding_shreds,
             ),
         };
-        debug_assert!(shreds.iter().all(
-            |shred| shred.slot() == slot && shred.common_header.fec_set_index == fec_set_index
-        ));
+        debug_assert!(shreds
+            .iter()
+            .all(|shred| shred.slot() == slot && shred.fec_set_index() == fec_set_index));
         debug_assert!(shreds
             .iter()
             .filter(|shred| shred.is_code())
@@ -1750,7 +1805,7 @@ pub mod tests {
         let max_per_block = MAX_DATA_SHREDS_PER_FEC_BLOCK as usize;
         data_shreds.iter().enumerate().for_each(|(i, s)| {
             let expected_fec_set_index = start_index + ((i / max_per_block) * max_per_block) as u32;
-            assert_eq!(s.common_header.fec_set_index, expected_fec_set_index);
+            assert_eq!(s.fec_set_index(), expected_fec_set_index);
         });
 
         coding_shreds.iter().enumerate().for_each(|(i, s)| {
@@ -1758,7 +1813,7 @@ pub mod tests {
             while expected_fec_set_index as usize > data_shreds.len() {
                 expected_fec_set_index -= max_per_block as u32;
             }
-            assert_eq!(s.common_header.fec_set_index, expected_fec_set_index);
+            assert_eq!(s.fec_set_index(), expected_fec_set_index);
         });
     }
 
