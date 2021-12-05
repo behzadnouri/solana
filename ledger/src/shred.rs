@@ -727,6 +727,7 @@ impl Shredder {
         entries: &[Entry],
         is_last_in_slot: bool,
         next_shred_index: u32,
+        next_code_index: u32,
     ) -> (Vec<Shred>, Vec<Shred>, u32) {
         let mut stats = ProcessShredsStats::default();
         let (data_shreds, last_shred_index) = self.entries_to_data_shreds(
@@ -737,9 +738,14 @@ impl Shredder {
             next_shred_index, // fec_set_offset
             &mut stats,
         );
-        let coding_shreds =
-            Self::data_shreds_to_coding_shreds(keypair, &data_shreds, is_last_in_slot, &mut stats)
-                .unwrap();
+        let coding_shreds = Self::data_shreds_to_coding_shreds(
+            keypair,
+            &data_shreds,
+            is_last_in_slot,
+            next_code_index,
+            &mut stats,
+        )
+        .unwrap();
         (data_shreds, coding_shreds, last_shred_index)
     }
 
@@ -816,8 +822,8 @@ impl Shredder {
     pub fn data_shreds_to_coding_shreds(
         keypair: &Keypair,
         data_shreds: &[Shred],
-        first_coding_index: u32,
         is_last_in_slot: bool,
+        next_code_index: u32,
         process_stats: &mut ProcessShredsStats,
     ) -> Result<Vec<Shred>> {
         if data_shreds.is_empty() {
@@ -831,8 +837,19 @@ impl Shredder {
                     .par_chunks(MAX_DATA_SHREDS_PER_FEC_BLOCK as usize)
                     .enumerate()
                     .flat_map(|(i, shred_data_batch)| {
-                        let first_coding_index = first_coding_index.checked_add(i * usize::try_from(MAX_DATA_SHREDS_PER_FEC_BLOCK).unwrap());
-                        Shredder::generate_coding_shreds(shred_data_batch, first_coding_index, is_last_in_slot)
+                        let next_code_index = next_code_index
+                            .checked_add(
+                                u32::try_from(i)
+                                    .unwrap()
+                                    .checked_mul(MAX_DATA_SHREDS_PER_FEC_BLOCK)
+                                    .unwrap(),
+                            )
+                            .unwrap();
+                        Shredder::generate_coding_shreds(
+                            shred_data_batch,
+                            is_last_in_slot,
+                            next_code_index,
+                        )
                     })
                     .collect()
             })
@@ -891,7 +908,11 @@ impl Shredder {
 
     /// Generates coding shreds for the data shreds in the current FEC set
     /// TODO: is_last_in_slot can be removed!
-    pub fn generate_coding_shreds(data: &[Shred], first_coding_index: u32, is_last_in_slot: bool) -> Vec<Shred> {
+    pub fn generate_coding_shreds(
+        data: &[Shred],
+        is_last_in_slot: bool,
+        next_code_index: u32,
+    ) -> Vec<Shred> {
         const PAYLOAD_ENCODE_SIZE: usize = SHRED_PAYLOAD_SIZE - SIZE_OF_CODING_SHRED_HEADERS;
         let ShredCommonHeader {
             slot,
@@ -927,7 +948,7 @@ impl Shredder {
             .iter()
             .enumerate()
             .map(|(i, parity)| {
-                let index = first_coding_index + u32::try_from(i).unwrap();
+                let index = next_code_index + u32::try_from(i).unwrap();
                 let mut shred = Shred::new_empty_coding(
                     slot,
                     index,
@@ -1279,7 +1300,9 @@ pub mod tests {
             .max(num_expected_data_shreds as usize);
         let start_index = 0;
         let (data_shreds, coding_shreds, next_index) =
-            shredder.entries_to_shreds(&keypair, &entries, true, start_index);
+            shredder.entries_to_shreds(&keypair, &entries, true, // is_last_in_slot
+                                       start_index, // next_shred_index
+                                       start_index, // next_code_index);
         assert_eq!(next_index as u64, num_expected_data_shreds);
 
         let mut data_shred_indexes = HashSet::new();
