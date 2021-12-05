@@ -129,7 +129,7 @@ fn bench_deserialize_hdr(bencher: &mut Bencher) {
 
 #[bench]
 fn bench_shredder_coding(bencher: &mut Bencher) {
-    let symbol_count = MAX_DATA_SHREDS_PER_FEC_BLOCK as usize;
+    let symbol_count = MAX_DATA_SHREDS_PER_FEC_BLOCK;
     let data_shreds = make_shreds(symbol_count);
     bencher.iter(|| {
         Shredder::generate_coding_shreds(
@@ -142,7 +142,7 @@ fn bench_shredder_coding(bencher: &mut Bencher) {
 
 #[bench]
 fn bench_shredder_decoding(bencher: &mut Bencher) {
-    let symbol_count = MAX_DATA_SHREDS_PER_FEC_BLOCK as usize;
+    let symbol_count = MAX_DATA_SHREDS_PER_FEC_BLOCK;
     let data_shreds = make_shreds(symbol_count);
     let coding_shreds = Shredder::generate_coding_shreds(
         &data_shreds[..symbol_count],
@@ -155,7 +155,7 @@ fn bench_shredder_decoding(bencher: &mut Bencher) {
 
 #[bench]
 fn bench_shredder_coding_raptorq(bencher: &mut Bencher) {
-    let symbol_count = MAX_DATA_SHREDS_PER_FEC_BLOCK;
+    let symbol_count = MAX_DATA_SHREDS_PER_FEC_BLOCK as u32;
     let data = make_concatenated_shreds(symbol_count as usize);
     let valid_shred_data_len = (SHRED_PAYLOAD_SIZE - SIZE_OF_CODING_SHRED_HEADERS) as usize;
     bencher.iter(|| {

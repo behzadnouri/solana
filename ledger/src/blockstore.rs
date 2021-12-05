@@ -1251,7 +1251,7 @@ impl Blockstore {
             && shred_index >= fec_set_index
             && shred_index - fec_set_index < num_coding_shreds
             && num_coding_shreds != 0
-            && num_coding_shreds <= 8 * MAX_DATA_SHREDS_PER_FEC_BLOCK
+            && num_coding_shreds <= 8 * MAX_DATA_SHREDS_PER_FEC_BLOCK as u32
             && num_coding_shreds - 1 <= u32::MAX - fec_set_index
             && shred.slot() > *last_root.read().unwrap()
     }

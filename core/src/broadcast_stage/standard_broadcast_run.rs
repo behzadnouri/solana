@@ -454,7 +454,7 @@ fn make_coding_shreds(
             let offset = if is_slot_end {
                 0
             } else {
-                size % MAX_DATA_SHREDS_PER_FEC_BLOCK as usize
+                size % MAX_DATA_SHREDS_PER_FEC_BLOCK
             };
             unfinished_slot
                 .data_shreds_buffer
