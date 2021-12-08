@@ -506,6 +506,13 @@ impl Shred {
             ShredType::Data => None,
             // TODO should be: self.index() - self.coding_header.position
             // once position field is populated.
+            // XXX how to keep this backward compatible?
+            // maybe can check that if the index >= self.fec_set_index() or
+            // not!
+            // ShredType::Code => Some(self.fec_set_index()),
+            // TODO position == 0 might imply that the field is not populated.
+            // TODO need to check if num_data + num_coding is consisen with
+            // index and position.
             ShredType::Code => Some(self.fec_set_index()),
         }
     }
@@ -536,10 +543,11 @@ impl Shred {
 
     // Returns the block index within the erasure coding set.
     fn erasure_block_index(&self) -> Option<usize> {
-        let index = self.index().checked_sub(self.fec_set_index())?;
-        let index = usize::try_from(index).ok()?;
         match self.shred_type() {
-            ShredType::Data => Some(index),
+            ShredType::Data => {
+                let index = self.index().checked_sub(self.fec_set_index())?;
+                Some(usize::try_from(index).ok()?)
+            }
             ShredType::Code => {
                 // TODO should use first_coding_index once position field is
                 // populated.
@@ -551,11 +559,20 @@ impl Shred {
                         .max(self.coding_header.num_coding_shreds)
                         .checked_sub(1)?,
                 ))?;
+                // XXX this is not good if indices are misaligned.
                 let num_data_shreds = usize::from(self.coding_header.num_data_shreds);
                 let num_coding_shreds = usize::from(self.coding_header.num_coding_shreds);
                 let fec_set_size = num_data_shreds.checked_add(num_coding_shreds)?;
-                let index = index.checked_add(num_data_shreds)?;
-                (index < fec_set_size).then(|| index)
+                // let index = self.index().checked_sub(self.fec_set_index())? as usize;
+                // let index = index.checked_add(num_data_shreds)?;
+                // XXX not backward compatible.
+                if self.index() < u32::from(self.coding_header.position) {
+                    None
+                } else {
+                    let position = usize::from(self.coding_header.position);
+                    let index = num_data_shreds.checked_add(position)?;
+                    (index < fec_set_size).then(|| index)
+                }
             }
         }
     }
@@ -943,6 +960,7 @@ impl Shredder {
     }
 
     /// Generates coding shreds for the data shreds in the current FEC set
+    /// TODO: is_last_in_slot can be removed!
     pub fn generate_coding_shreds(
         data: &[Shred],
         is_last_in_slot: bool,

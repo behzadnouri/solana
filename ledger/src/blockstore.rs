@@ -2815,6 +2815,8 @@ impl Blockstore {
             .range(start_index..consumed)
             .scan(start_index, |begin, index| {
                 let out = (*begin, *index);
+                // XXX this does not seem right!
+                // what if there are missing ranges in between?
                 *begin = index + 1;
                 Some(out)
             })

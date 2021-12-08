@@ -19,15 +19,18 @@ pub struct SlotMeta {
     pub slot: Slot,
     // The total number of consecutive shreds starting from index 0
     // we have received for this slot.
+    // XXX data or code?
     pub consumed: u64,
     // The index *plus one* of the highest shred received for this slot.  Useful
     // for checking if the slot has received any shreds yet, and to calculate the
     // range where there is one or more holes: `(consumed..received)`.
+    // XXX data or code?
     pub received: u64,
     // The timestamp of the first time a shred was added for this slot
     pub first_shred_timestamp: u64,
     // The index of the shred that is flagged as the last shred for this slot.
     // None until the shred with LAST_SHRED_IN_SLOT flag is received.
+    // XXX should ensure this is only compared against data shreds
     #[serde(with = "serde_compat")]
     pub last_index: Option<u64>,
     // The slot height of the block this one derives from.
@@ -81,6 +84,8 @@ pub struct ShredIndex {
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
 /// Erasure coding information
+/// TODO erasure meta do not seem to be written to rocks and this might be
+/// better refactored!
 pub struct ErasureMeta {
     /// Which erasure set in the slot this is
     set_index: u64,
@@ -261,6 +266,8 @@ impl ErasureMeta {
         // TODO remove this once cluster is upgraded to always populate
         // first_coding_index field.
         other.first_coding_index = self.first_coding_index;
+        // XXX How to make this backward compatible if coding shreds are not
+        // aligned with data shreds. i.e. position != 0
         self == &other
     }
 
@@ -274,6 +281,7 @@ impl ErasureMeta {
     }
 
     pub(crate) fn coding_shreds_indices(&self) -> Range<u64> {
+        // XXX maybe to be safe this can start of from set_index?!
         let num_coding = self.config.num_coding() as u64;
         // first_coding_index == 0 may imply that the field is not populated.
         // self.set_index to be backward compatible.
