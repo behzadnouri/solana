@@ -27,6 +27,7 @@ pub struct SlotMeta {
     // The timestamp of the first time a shred was added for this slot
     pub first_shred_timestamp: u64,
     // The index of the shred that is flagged as the last shred for this slot.
+    // TODO ensure that this is only data-shreds indices.
     #[serde(with = "serde_compat")]
     pub last_index: Option<u64>,
     // The slot height of the block this one derives from.
