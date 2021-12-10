@@ -31,8 +31,8 @@ pub struct SlotMeta {
     #[serde(with = "serde_compat")]
     pub last_index: Option<u64>,
     // The slot height of the block this one derives from.
-    // TODO use Option<Slot> instead.
-    pub parent_slot: Slot,
+    #[serde(with = "serde_compat")]
+    pub parent_slot: Option<Slot>,
     // The list of slots, each of which contains a block that derives
     // from this one.
     pub next_slots: Vec<Slot>,
@@ -218,17 +218,13 @@ impl SlotMeta {
         Some(self.consumed) == self.last_index.map(|ix| ix + 1)
     }
 
-    pub fn is_parent_set(&self) -> bool {
-        self.parent_slot != std::u64::MAX
-    }
-
     pub fn clear_unconfirmed_slot(&mut self) {
         let mut new_self = SlotMeta::new_orphan(self.slot);
         std::mem::swap(&mut new_self.next_slots, &mut self.next_slots);
         std::mem::swap(self, &mut new_self);
     }
 
-    pub(crate) fn new(slot: Slot, parent_slot: Slot) -> Self {
+    pub(crate) fn new(slot: Slot, parent_slot: Option<Slot>) -> Self {
         SlotMeta {
             slot,
             parent_slot,
@@ -238,7 +234,7 @@ impl SlotMeta {
     }
 
     pub(crate) fn new_orphan(slot: Slot) -> Self {
-        Self::new(slot, std::u64::MAX)
+        Self::new(slot, /*parent_slot:*/ None)
     }
 }
 

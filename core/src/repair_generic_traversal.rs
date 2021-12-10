@@ -96,7 +96,9 @@ fn get_unrepaired_path(
                 break;
             }
             path.push(slot);
-            slot = slot_meta.parent_slot;
+            if let Some(parent_slot) = slot_meta.parent_slot {
+                slot = parent_slot
+            }
         }
     }
     path.reverse();
