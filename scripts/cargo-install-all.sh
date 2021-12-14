@@ -138,12 +138,12 @@ mkdir -p "$installDir/bin"
 (
   set -x
   # shellcheck disable=SC2086 # Don't want to double quote $rust_version
-  "$cargo" $maybeRustVersion build $maybeReleaseFlag "${binArgs[@]}"
+  RUSTFLAGS='-C force-frame-pointers=yes -g' "$cargo" $maybeRustVersion build $maybeReleaseFlag "${binArgs[@]}"
 
   # Exclude `spl-token` binary for net.sh builds
   if [[ -z "$validatorOnly" ]]; then
     # shellcheck disable=SC2086 # Don't want to double quote $rust_version
-    "$cargo" $maybeRustVersion install --locked spl-token-cli --root "$installDir"
+    RUSTFLAGS='-C force-frame-pointers=yes -g' "$cargo" $maybeRustVersion install --locked spl-token-cli --root "$installDir"
   fi
 )
 
