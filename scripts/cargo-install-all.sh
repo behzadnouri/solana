@@ -155,7 +155,7 @@ mkdir -p "$installDir/bin"
 
 cargo_build() {
   # shellcheck disable=SC2086 # Don't want to double quote $maybeRustVersion
-  "$cargo" $maybeRustVersion build $buildProfileArg "$@"
+  RUSTFLAGS='-C force-frame-pointers=yes -g' "$cargo" $maybeRustVersion build $buildProfileArg "$@"
 }
 
 # This is called to detect both of unintended activation AND deactivation of
@@ -202,7 +202,8 @@ check_dcou() {
     source "$SOLANA_ROOT"/scripts/spl-token-cli-version.sh
 
     # shellcheck disable=SC2086
-    "$cargo" $maybeRustVersion install --locked spl-token-cli --root "$installDir" $maybeSplTokenCliVersionArg
+    RUSTFLAGS='-C force-frame-pointers=yes -g' \
+      "$cargo" $maybeRustVersion install --locked spl-token-cli --root "$installDir" $maybeSplTokenCliVersionArg
   fi
 )
 
