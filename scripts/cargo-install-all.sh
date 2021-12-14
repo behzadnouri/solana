@@ -155,7 +155,7 @@ mkdir -p "$installDir/bin"
 
 cargo_build() {
   # shellcheck disable=SC2086 # Don't want to double quote $maybeRustVersion
-  "$cargo" $maybeRustVersion build $buildProfileArg "$@"
+  RUSTFLAGS='-C force-frame-pointers=yes -g' "$cargo" $maybeRustVersion build $buildProfileArg "$@"
 }
 
 # This is called to detect both of unintended activation AND deactivation of
@@ -203,7 +203,7 @@ check_dcou() {
 
     # the patch-related configs are needed for rust 1.69+ on Windows; see Cargo.toml
     # shellcheck disable=SC2086 # Don't want to double quote $rust_version
-    "$cargo" $maybeRustVersion \
+    RUSTFLAGS='-C force-frame-pointers=yes -g' "$cargo" $maybeRustVersion \
       --config 'patch.crates-io.ntapi.git="https://github.com/solana-labs/ntapi"' \
       --config 'patch.crates-io.ntapi.rev="97ede981a1777883ff86d142b75024b023f04fad"' \
       install --locked spl-token-cli --root "$installDir" $maybeSplTokenCliVersionArg
