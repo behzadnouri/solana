@@ -36,7 +36,6 @@ use {
     },
     solana_sdk::{
         clock::{Epoch, Slot, DEFAULT_MS_PER_SLOT, DEFAULT_TICKS_PER_SLOT},
-        epoch_schedule::EpochSchedule,
         hash::Hash,
         pubkey::Pubkey,
         signature::Signature,
@@ -49,6 +48,7 @@ use {
     },
     std::{
         collections::{HashMap, HashSet},
+        iter::repeat,
         sync::{
             atomic::{AtomicBool, Ordering},
             Arc, Mutex, RwLock,
@@ -107,7 +107,6 @@ pub struct VoteTracker {
     epoch_authorized_voters: RwLock<HashMap<Epoch, Arc<EpochAuthorizedVoters>>>,
     leader_schedule_epoch: RwLock<Epoch>,
     current_epoch: RwLock<Epoch>,
-    epoch_schedule: EpochSchedule,
 }
 
 impl VoteTracker {
@@ -116,7 +115,6 @@ impl VoteTracker {
         let vote_tracker = Self {
             leader_schedule_epoch: RwLock::new(current_epoch),
             current_epoch: RwLock::new(current_epoch),
-            epoch_schedule: *root_bank.epoch_schedule(),
             ..VoteTracker::default()
         };
         vote_tracker.progress_with_new_root_bank(root_bank);
@@ -150,17 +148,6 @@ impl VoteTracker {
 
     pub fn get_slot_vote_tracker(&self, slot: Slot) -> Option<Arc<RwLock<SlotVoteTracker>>> {
         self.slot_vote_trackers.read().unwrap().get(&slot).cloned()
-    }
-
-    pub fn get_authorized_voter(&self, pubkey: &Pubkey, slot: Slot) -> Option<Pubkey> {
-        let epoch = self.epoch_schedule.get_epoch(slot);
-        self.epoch_authorized_voters
-            .read()
-            .unwrap()
-            .get(&epoch)
-            .map(|epoch_authorized_voters| epoch_authorized_voters.get(pubkey))
-            .unwrap_or(None)
-            .cloned()
     }
 
     pub fn vote_contains_authorized_voter(
@@ -788,39 +775,6 @@ impl ClusterInfoVoteListener {
         }
     }
 
-    fn filter_gossip_votes(
-        vote_tracker: &VoteTracker,
-        vote_pubkey: &Pubkey,
-        vote: &VoteTransaction,
-        gossip_tx: &Transaction,
-    ) -> bool {
-        if vote.is_empty() {
-            return false;
-        }
-        let last_vote_slot = vote.last_voted_slot().unwrap();
-        // Votes from gossip need to be verified as they have not been
-        // verified by the replay pipeline. Determine the authorized voter
-        // based on the last vote slot. This will  drop votes from authorized
-        // voters trying to make votes for slots earlier than the epoch for
-        // which they are authorized
-        let actual_authorized_voter =
-            vote_tracker.get_authorized_voter(vote_pubkey, last_vote_slot);
-
-        if actual_authorized_voter.is_none() {
-            return false;
-        }
-
-        // Voting without the correct authorized pubkey, dump the vote
-        if !VoteTracker::vote_contains_authorized_voter(
-            gossip_tx,
-            &actual_authorized_voter.unwrap(),
-        ) {
-            return false;
-        }
-
-        true
-    }
-
     fn filter_and_confirm_with_new_votes(
         vote_tracker: &VoteTracker,
         gossip_vote_txs: Vec<Transaction>,
@@ -836,16 +790,12 @@ impl ClusterInfoVoteListener {
         let mut new_optimistic_confirmed_slots = vec![];
 
         // Process votes from gossip and ReplayStage
-        for (is_gossip, (vote_pubkey, vote, _)) in gossip_vote_txs
+        let gossip_votes = gossip_vote_txs
             .iter()
-            .filter_map(|gossip_tx| {
-                vote_transaction::parse_vote_transaction(gossip_tx)
-                    .filter(|(vote_pubkey, vote, _)| {
-                        Self::filter_gossip_votes(vote_tracker, vote_pubkey, vote, gossip_tx)
-                    })
-                    .map(|v| (true, v))
-            })
-            .chain(replayed_votes.into_iter().map(|v| (false, v)))
+            .filter_map(vote_transaction::parse_vote_transaction);
+        for (is_gossip, (vote_pubkey, vote, _)) in repeat(true)
+            .zip(gossip_votes)
+            .chain(repeat(false).zip(replayed_votes))
         {
             Self::track_new_votes_and_notify_confirmations(
                 vote,
@@ -1579,59 +1529,6 @@ mod tests {
     fn test_run_test_process_votes3() {
         run_test_process_votes3(None);
         run_test_process_votes3(Some(Hash::default()));
-    }
-
-    #[test]
-    fn test_get_voters_by_epoch() {
-        // Create some voters at genesis
-        let (vote_tracker, bank, validator_voting_keypairs, _) = setup();
-        let last_known_epoch = bank.get_leader_schedule_epoch(bank.slot());
-        let last_known_slot = bank
-            .epoch_schedule()
-            .get_last_slot_in_epoch(last_known_epoch);
-
-        // Check we can get the authorized voters
-        for keypairs in &validator_voting_keypairs {
-            assert!(vote_tracker
-                .get_authorized_voter(&keypairs.vote_keypair.pubkey(), last_known_slot)
-                .is_some());
-            assert!(vote_tracker
-                .get_authorized_voter(&keypairs.vote_keypair.pubkey(), last_known_slot + 1)
-                .is_none());
-        }
-
-        // Create the set of relevant voters for the next epoch
-        let new_epoch = last_known_epoch + 1;
-        let first_slot_in_new_epoch = bank.epoch_schedule().get_first_slot_in_epoch(new_epoch);
-        let new_keypairs: Vec<_> = (0..10).map(|_| ValidatorVoteKeypairs::new_rand()).collect();
-        let new_epoch_authorized_voters: HashMap<_, _> = new_keypairs
-            .iter()
-            .chain(validator_voting_keypairs[0..5].iter())
-            .map(|keypair| (keypair.vote_keypair.pubkey(), keypair.vote_keypair.pubkey()))
-            .collect();
-
-        vote_tracker
-            .epoch_authorized_voters
-            .write()
-            .unwrap()
-            .insert(new_epoch, Arc::new(new_epoch_authorized_voters));
-
-        // These keypairs made it into the new epoch
-        for keypairs in new_keypairs
-            .iter()
-            .chain(validator_voting_keypairs[0..5].iter())
-        {
-            assert!(vote_tracker
-                .get_authorized_voter(&keypairs.vote_keypair.pubkey(), first_slot_in_new_epoch)
-                .is_some());
-        }
-
-        // These keypairs were not refreshed in new epoch
-        for keypairs in validator_voting_keypairs[5..10].iter() {
-            assert!(vote_tracker
-                .get_authorized_voter(&keypairs.vote_keypair.pubkey(), first_slot_in_new_epoch)
-                .is_none());
-        }
     }
 
     #[test]
