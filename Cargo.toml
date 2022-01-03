@@ -91,3 +91,15 @@ members = [
 exclude = [
     "programs/bpf",
 ]
+
+[profile.release]
+debug = true
+# strip = false
+
+[profile.release.package."*"]
+debug = true
+# strip = false
+
+[profile.release.build-override]
+debug = true
+# strip = false
