@@ -91,3 +91,15 @@ exclude = [
 # dependency is supported on Apple M1. v2 of the feature resolver is needed to
 # specify arch-specific features.
 resolver = "2"
+
+[profile.release]
+debug = true
+strip = false
+
+[profile.release.package."*"]
+debug = true
+strip = false
+
+[profile.release.build-override]
+debug = true
+strip = false
