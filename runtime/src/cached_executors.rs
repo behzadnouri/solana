@@ -6,8 +6,9 @@ use {
     solana_program_runtime::invoke_context::Executor,
     solana_sdk::{
         clock::{Epoch, Slot},
+        message::legacy::BUILTIN_PROGRAMS_KEYS,
         pubkey::Pubkey,
-        saturating_add_assign,
+        saturating_add_assign, sysvar,
     },
     std::{
         collections::HashMap,
@@ -120,6 +121,9 @@ impl CachedExecutors {
     }
 
     pub(crate) fn get(&self, pubkey: &Pubkey) -> Option<Arc<dyn Executor>> {
+        if sysvar::is_sysvar_id(pubkey) || BUILTIN_PROGRAMS_KEYS.contains(pubkey) {
+            return None;
+        }
         if let Some(entry) = self.executors.get(pubkey) {
             self.stats.hits.fetch_add(1, Relaxed);
             entry.epoch_count.fetch_add(1, Relaxed);
@@ -134,6 +138,9 @@ impl CachedExecutors {
         let mut new_executors: Vec<_> = executors
             .iter()
             .filter_map(|(key, executor)| {
+                if sysvar::is_sysvar_id(key) || BUILTIN_PROGRAMS_KEYS.contains(key) {
+                    info!("builtin-cache: {}", key);
+                }
                 if let Some(mut entry) = self.executors.remove(key) {
                     self.stats.replacements.fetch_add(1, Relaxed);
                     entry.executor = executor.clone();
