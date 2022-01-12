@@ -16,7 +16,7 @@ use {
         iter::repeat_with,
         sync::{
             atomic::{AtomicU64, Ordering::Relaxed},
-            Arc,
+            Arc, RwLock,
         },
     },
 };
@@ -46,6 +46,7 @@ struct CachedExecutorsEntry {
 struct CachedExecutorsStats {
     hits: AtomicU64,
     num_gets: AtomicU64,
+    misses: RwLock<HashMap<Pubkey, u64>>,
     evictions: HashMap<Pubkey, u64>,
     insertions: AtomicU64,
     replacements: AtomicU64,
@@ -130,6 +131,10 @@ impl CachedExecutors {
             return None;
         }
         self.stats.num_gets.fetch_add(1, Relaxed);
+        if !self.executors.contains_key(pubkey) {
+            let mut misses = self.stats.misses.write().unwrap();
+            *misses.entry(*pubkey).or_default() += 1;
+        }
         // self.entries never discards keys with cached executor;
         // So if the key is not in the entries, the executor is not cached.
         let entry = self.entries.get(pubkey)?;
@@ -230,6 +235,16 @@ impl CachedExecutorsStats {
                 "Count",
                 evictions
             );
+        }
+        if slot % 10 == 0 {
+            let misses = std::mem::take(&mut *self.misses.write().unwrap());
+            let mut misses: Vec<_> = misses.into_iter().collect();
+            if misses.len() > 5 {
+                misses.select_nth_unstable_by_key(5, |(_, x)| std::cmp::Reverse(*x));
+            }
+            for (pubkey, count) in misses.into_iter().take(5) {
+                info!("missed-executor: {}, {}", count, pubkey);
+            }
         }
     }
 }
