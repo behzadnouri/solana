@@ -3320,7 +3320,8 @@ impl Bank {
             num_executors += program_indices_of_instruction.len();
         }
         let mut executors = HashMap::with_capacity(num_executors);
-        let cache = self.cached_executors.read().unwrap();
+        let mut cache = self.cached_executors.write().unwrap();
+        let cache = Arc::make_mut(&mut cache);
 
         for key in message.account_keys_iter() {
             if let Some(executor) = cache.get(key) {
