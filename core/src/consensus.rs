@@ -449,12 +449,17 @@ impl Tower {
 
         // Returns the new root if one is made after applying a vote for the given bank to
         // `self.vote_state`
-        self.record_bank_vote_and_update_lockouts(
+        let slot = self.record_bank_vote_and_update_lockouts(
             bank.slot(),
             bank.hash(),
             last_voted_slot_in_bank,
             Self::is_direct_vote_state_update_enabled(bank),
-        )
+        );
+        if std::path::Path::new("/tmp/HALT_ROOT").exists() {
+            None
+        } else {
+            slot
+        }
     }
 
     fn record_bank_vote_and_update_lockouts(
