@@ -167,7 +167,7 @@ mod sysvar_cache;
 mod transaction_account_state_info;
 
 lazy_static::lazy_static! {
-    pub static ref REWARDS_THREAD_POOL: ThreadPool = rayon::ThreadPoolBuilder::new()
+    static ref REWARDS_THREAD_POOL: ThreadPool = rayon::ThreadPoolBuilder::new()
         .thread_name(|ix| format!("rewards-replay-{}", ix))
         .build()
         .unwrap();
@@ -1703,12 +1703,13 @@ impl Bank {
 
         // Following code may touch AccountsDb, requiring proper ancestors
         let parent_epoch = parent.epoch();
+        let thread_pool: &ThreadPool = &*REWARDS_THREAD_POOL;
         let (_, update_epoch_time) = Measure::this(
             |_| {
                 if parent_epoch < new.epoch() {
                     use solana_sdk::timing::timestamp;
+                    eprintln!("thread-name: {:?}", std::thread::current().name());
                     eprintln!("{}: bank at new epoch:", timestamp() / 1000);
-                    let thread_pool = &REWARDS_THREAD_POOL;
 
                     let (_, apply_feature_activations_time) = Measure::this(
                         |_| new.apply_feature_activations(false, false),
