@@ -2532,10 +2532,10 @@ impl Bank {
         let invalid_stake_keys: DashMap<Pubkey, InvalidCacheEntryReason> = DashMap::new();
         let invalid_vote_keys: DashMap<Pubkey, InvalidCacheEntryReason> = DashMap::new();
 
+        let stake_delegations: Vec<_> = stakes.stake_delegations().iter().collect();
         thread_pool.install(|| {
-            stakes
-                .stake_delegations()
-                .par_iter()
+            stake_delegations
+                .into_par_iter()
                 .for_each(|(stake_pubkey, delegation)| {
                     let vote_pubkey = &delegation.voter_pubkey;
                     if invalid_vote_keys.contains_key(vote_pubkey) {
@@ -6748,7 +6748,6 @@ pub(crate) mod tests {
                 create_genesis_config_with_leader, create_genesis_config_with_vote_accounts,
                 GenesisConfigInfo, ValidatorVoteKeypairs,
             },
-            stake_delegations::StakeDelegations,
             status_cache::MAX_CACHE_ENTRIES,
         },
         crossbeam_channel::{bounded, unbounded},
@@ -6791,12 +6790,6 @@ pub(crate) mod tests {
         },
         std::{result, thread::Builder, time::Duration},
     };
-
-    impl Bank {
-        fn cloned_stake_delegations(&self) -> StakeDelegations {
-            self.stakes_cache.stakes().stake_delegations().clone()
-        }
-    }
 
     fn new_sanitized_message(
         instructions: &[Instruction],
@@ -10928,7 +10921,7 @@ pub(crate) mod tests {
         } = create_genesis_config_with_leader(500, &solana_sdk::pubkey::new_rand(), 1);
         let bank = Arc::new(Bank::new_for_tests(&genesis_config));
 
-        let stake_delegations = bank.cloned_stake_delegations();
+        let stake_delegations = bank.stakes_cache.stakes().stake_delegations().clone();
         assert_eq!(stake_delegations.len(), 1); // bootstrap validator has
                                                 // to have a stake delegation
 
@@ -10964,7 +10957,7 @@ pub(crate) mod tests {
 
         bank.process_transaction(&transaction).unwrap();
 
-        let stake_delegations = bank.cloned_stake_delegations();
+        let stake_delegations = bank.stakes_cache.stakes().stake_delegations().clone();
         assert_eq!(stake_delegations.len(), 2);
         assert!(stake_delegations.get(&stake_keypair.pubkey()).is_some());
     }
