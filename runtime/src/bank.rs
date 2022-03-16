@@ -1706,6 +1706,8 @@ impl Bank {
         let (_, update_epoch_time) = Measure::this(
             |_| {
                 if parent_epoch < new.epoch() {
+                    use solana_sdk::timing::timestamp;
+                    eprintln!("{}: bank at new epoch:", timestamp() / 1000);
                     let thread_pool = &REWARDS_THREAD_POOL;
 
                     let (_, apply_feature_activations_time) = Measure::this(
@@ -1767,6 +1769,7 @@ impl Bank {
                             i64
                         ),
                     );
+                    eprintln!("{}: bank at new epoch done!", timestamp() / 1000);
                 } else {
                     // Save a snapshot of stakes for use in consensus and stake weighted networking
                     let leader_schedule_epoch = epoch_schedule.get_leader_schedule_epoch(slot);
