@@ -73,7 +73,7 @@ use {
     rand::Rng,
     rayon::{
         iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
-        ThreadPool, ThreadPoolBuilder,
+        ThreadPool,
     },
     solana_measure::measure::Measure,
     solana_metrics::{inc_new_counter_debug, inc_new_counter_info},
@@ -165,6 +165,13 @@ use {
 mod builtin_programs;
 mod sysvar_cache;
 mod transaction_account_state_info;
+
+lazy_static::lazy_static! {
+    pub static ref REWARDS_THREAD_POOL: ThreadPool = rayon::ThreadPoolBuilder::new()
+        .thread_name(|ix| format!("rewards-replay-{}", ix))
+        .build()
+        .unwrap();
+}
 
 pub const SECONDS_PER_YEAR: f64 = 365.25 * 24.0 * 60.0 * 60.0;
 
@@ -1699,11 +1706,7 @@ impl Bank {
         let (_, update_epoch_time) = Measure::this(
             |_| {
                 if parent_epoch < new.epoch() {
-                    let (thread_pool, thread_pool_time) = Measure::this(
-                        |_| ThreadPoolBuilder::new().build().unwrap(),
-                        (),
-                        "thread_pool_creation",
-                    );
+                    let thread_pool = &REWARDS_THREAD_POOL;
 
                     let (_, apply_feature_activations_time) = Measure::this(
                         |_| new.apply_feature_activations(false, false),
@@ -1746,7 +1749,7 @@ impl Bank {
                         ("epoch", new.epoch(), i64),
                         ("slot", slot, i64),
                         ("parent_slot", parent.slot(), i64),
-                        ("thread_pool_creation_us", thread_pool_time.as_us(), i64),
+                        ("thread_pool_creation_us", 0, i64),
                         (
                             "apply_feature_activations",
                             apply_feature_activations_time.as_us(),
