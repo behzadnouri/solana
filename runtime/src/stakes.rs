@@ -172,6 +172,19 @@ impl Stakes {
         let prev_epoch = self.epoch;
         self.epoch = next_epoch;
 
+        eprintln!(
+            "activate_epoch] stakes.stake_delegations: {}",
+            self.stake_delegations.len()
+        );
+        eprintln!(
+            "activate_epoch] stakes.stake_history: {}",
+            self.stake_history.len()
+        );
+        eprintln!(
+            "activate_epoch] stakes.vote_accounts: {}",
+            self.vote_accounts.as_ref().len()
+        );
+
         thread_pool.install(|| {
             let stake_delegations = &self.stake_delegations;
             let stake_history = &mut self.stake_history;
@@ -192,6 +205,10 @@ impl Stakes {
                 vote_delegations
             };
 
+            eprintln!(
+                "activate_epoch] vote_delegations: {}",
+                vote_delegations.len()
+            );
             // wrap up the prev epoch by adding new stake history entry for the prev epoch
             {
                 let stake_history_entry = vote_delegations
@@ -229,7 +246,10 @@ impl Stakes {
                     (*vote_pubkey, (delegated_stake, vote_account.clone()))
                 })
                 .collect();
-
+            eprintln!(
+                "activate_epoch] vote_accounts_for_next_epoch: {}",
+                vote_accounts_for_next_epoch.len()
+            );
             // overwrite vote accounts so that staked nodes singleton is reset
             self.vote_accounts = VoteAccounts::from(Arc::new(vote_accounts_for_next_epoch));
         });
@@ -261,6 +281,14 @@ impl Stakes {
         let get_stake = |(_, stake_delegation): (_, &Delegation)| stake_delegation.stake;
         let get_lamports = |(_, (_, vote_account)): (_, &(_, VoteAccount))| vote_account.lamports();
 
+        eprintln!(
+            "vote_balance_and_staked] Stakes.stake_delegations: {}",
+            self.stake_delegations.len()
+        );
+        eprintln!(
+            "vote_balance_and_staked] Stakes.vote_accounts: {}",
+            self.vote_accounts.as_ref().len()
+        );
         self.stake_delegations.iter().map(get_stake).sum::<u64>()
             + self.vote_accounts.iter().map(get_lamports).sum::<u64>()
     }
@@ -269,7 +297,7 @@ impl Stakes {
         self.vote_accounts.remove(vote_pubkey);
     }
 
-    pub fn remove_stake_delegation(&mut self, stake_pubkey: &Pubkey) {
+    fn remove_stake_delegation(&mut self, stake_pubkey: &Pubkey) {
         if let Some(removed_delegation) = self.stake_delegations.remove(stake_pubkey) {
             let removed_stake = removed_delegation.stake(self.epoch, Some(&self.stake_history));
             self.vote_accounts
@@ -298,7 +326,7 @@ impl Stakes {
         }
     }
 
-    pub fn update_stake_delegation(
+    fn update_stake_delegation(
         &mut self,
         stake_pubkey: &Pubkey,
         new_delegation: Option<(u64, Delegation)>,
