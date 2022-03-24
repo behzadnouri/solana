@@ -272,7 +272,7 @@ impl Tower {
                 continue;
             }
             trace!("{} {} with stake {}", vote_account_pubkey, key, voted_stake);
-            let mut vote_state = match account.vote_state().as_ref() {
+            let mut vote_state = match account.vote_state() {
                 Err(_) => {
                     datapoint_warn!(
                         "tower_warn",
@@ -1248,7 +1248,6 @@ impl Tower {
         if let Some((_stake, vote_account)) = bank.get_vote_account(vote_account_pubkey) {
             self.vote_state = vote_account
                 .vote_state()
-                .as_ref()
                 .expect("vote_account isn't a VoteState?")
                 .clone();
             self.initialize_root(root);

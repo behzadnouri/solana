@@ -393,7 +393,7 @@ fn graph_forks(bank_forks: &BankForks, include_all_votes: bool) -> String {
             .sum();
         for (stake, vote_account) in bank.vote_accounts().values() {
             let vote_state = vote_account.vote_state();
-            let vote_state = vote_state.as_ref().unwrap_or(&default_vote_state);
+            let vote_state = vote_state.unwrap_or(&default_vote_state);
             if let Some(last_vote) = vote_state.votes.iter().last() {
                 let entry = last_votes.entry(vote_state.node_pubkey).or_insert((
                     last_vote.slot,
@@ -434,7 +434,7 @@ fn graph_forks(bank_forks: &BankForks, include_all_votes: bool) -> String {
         loop {
             for (_, vote_account) in bank.vote_accounts().values() {
                 let vote_state = vote_account.vote_state();
-                let vote_state = vote_state.as_ref().unwrap_or(&default_vote_state);
+                let vote_state = vote_state.unwrap_or(&default_vote_state);
                 if let Some(last_vote) = vote_state.votes.iter().last() {
                     let validator_votes = all_votes.entry(vote_state.node_pubkey).or_default();
                     validator_votes

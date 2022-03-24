@@ -2347,7 +2347,7 @@ impl ReplayStage {
                         bank.get_vote_account(my_vote_pubkey),
                     ) {
                         if let Some(mut bank_vote_state) =
-                            vote_account.vote_state().as_ref().ok().cloned()
+                            vote_account.vote_state().ok().cloned()
                         {
                             if bank_vote_state.last_voted_slot()
                                 > tower.vote_state.last_voted_slot()
