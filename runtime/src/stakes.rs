@@ -7,12 +7,14 @@ use {
     },
     dashmap::DashMap,
     im::HashMap as ImHashMap,
+    log::log_enabled,
     num_derive::ToPrimitive,
     num_traits::ToPrimitive,
     rayon::{
         iter::{IntoParallelRefIterator, ParallelIterator},
         ThreadPool,
     },
+    solana_metrics::inc_new_counter_info,
     solana_sdk::{
         account::{AccountSharedData, ReadableAccount},
         clock::{Epoch, Slot},
@@ -230,6 +232,7 @@ impl Stakes {
                 })
                 .collect();
 
+            // XXX This is discarding cache and copy-on-write.
             // overwrite vote accounts so that staked nodes singleton is reset
             self.vote_accounts = VoteAccounts::from(Arc::new(vote_accounts_for_next_epoch));
         });
@@ -285,17 +288,25 @@ impl Stakes {
         // unconditionally remove existing at first; there is no dependent calculated state for
         // votes, not like stakes (stake codepath maintains calculated stake value grouped by
         // delegated vote pubkey)
-        let old_entry = self.vote_accounts.remove(vote_pubkey);
-        if let Some(new_vote_account) = new_vote_account {
-            debug_assert!(new_vote_account.is_deserialized());
-            let new_stake = old_entry.as_ref().map_or_else(
-                || self.calculate_stake(vote_pubkey, self.epoch, &self.stake_history),
-                |(old_stake, _old_vote_account)| *old_stake,
-            );
-
-            self.vote_accounts
-                .insert(*vote_pubkey, (new_stake, new_vote_account));
-        }
+        let new_vote_account = match new_vote_account {
+            Some(vote_account) => vote_account,
+            None => {
+                inc_new_counter_info!("stakes-vote-accounts-remove", 1);
+                self.vote_accounts.remove(vote_pubkey);
+                return;
+            }
+        };
+        let stake = match self.vote_accounts.get(vote_pubkey) {
+            Some((_, vote_account)) if *vote_account == new_vote_account => {
+                inc_new_counter_info!("stakes-vote-accounts-retain", 1);
+                return;
+            }
+            Some((stake, _)) => *stake,
+            None => self.calculate_stake(vote_pubkey, self.epoch, &self.stake_history),
+        };
+        inc_new_counter_info!("stakes-vote-accounts-rewrite", 1);
+        self.vote_accounts
+            .insert(*vote_pubkey, (stake, new_vote_account));
     }
 
     pub fn update_stake_delegation(
