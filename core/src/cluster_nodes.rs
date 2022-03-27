@@ -10,13 +10,12 @@ use {
         crds::GossipRoute,
         crds_gossip_pull::CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS,
         crds_value::{CrdsData, CrdsValue},
-        weighted_shuffle::{weighted_best, weighted_shuffle, WeightedShuffle},
+        weighted_shuffle::{weighted_shuffle, WeightedShuffle},
     },
     solana_ledger::shred::Shred,
     solana_runtime::bank::Bank,
     solana_sdk::{
         clock::{Epoch, Slot},
-        feature_set,
         pubkey::Pubkey,
         signature::Keypair,
         timing::timestamp,
@@ -126,14 +125,6 @@ impl ClusterNodes<BroadcastStage> {
     ) -> Vec<SocketAddr> {
         const MAX_CONTACT_INFO_AGE: Duration = Duration::from_secs(2 * 60);
         let shred_seed = shred.seed(self.pubkey, root_bank);
-        if !enable_turbine_peers_shuffle_patch(shred.slot(), root_bank) {
-            if let Some(node) = self.get_broadcast_peer(shred_seed) {
-                if socket_addr_space.check(&node.tvu) {
-                    return vec![node.tvu];
-                }
-            }
-            return Vec::default();
-        }
         let mut rng = ChaChaRng::from_seed(shred_seed);
         let index = match self.weighted_shuffle.first(&mut rng) {
             None => return Vec::default(),
@@ -178,7 +169,9 @@ impl ClusterNodes<BroadcastStage> {
 
     /// Returns the root of turbine broadcast tree, which the leader sends the
     /// shred to.
+    #[cfg(test)]
     fn get_broadcast_peer(&self, shred_seed: [u8; 32]) -> Option<&ContactInfo> {
+        use solana_gossip::weighted_shuffle::weighted_best;
         if self.compat_index.is_empty() {
             None
         } else {
@@ -234,9 +227,6 @@ impl ClusterNodes<RetransmitStage> {
         Vec<&Node>, // children
     ) {
         let shred_seed = shred.seed(slot_leader, root_bank);
-        if !enable_turbine_peers_shuffle_patch(shred.slot(), root_bank) {
-            return self.get_retransmit_peers_compat(shred_seed, fanout, slot_leader);
-        }
         self.get_retransmit_peers_deterministic(shred_seed, fanout, slot_leader)
     }
 
@@ -387,21 +377,6 @@ fn get_nodes(cluster_info: &ClusterInfo, stakes: &HashMap<Pubkey, u64>) -> Vec<N
     .collect()
 }
 
-fn enable_turbine_peers_shuffle_patch(shred_slot: Slot, root_bank: &Bank) -> bool {
-    let feature_slot = root_bank
-        .feature_set
-        .activated_slot(&feature_set::turbine_peers_shuffle::id());
-    match feature_slot {
-        None => false,
-        Some(feature_slot) => {
-            let epoch_schedule = root_bank.epoch_schedule();
-            let feature_epoch = epoch_schedule.get_epoch(feature_slot);
-            let shred_epoch = epoch_schedule.get_epoch(shred_slot);
-            feature_epoch < shred_epoch
-        }
-    }
-}
-
 impl<T> ClusterNodesCache<T> {
     pub fn new(
         // Capacity of underlying LRU-cache in terms of number of epochs.
@@ -530,8 +505,12 @@ pub fn make_test_cluster<R: Rng>(
 mod tests {
     use {
         super::*,
-        solana_gossip::deprecated::{
-            shuffle_peers_and_index, sorted_retransmit_peers_and_stakes, sorted_stakes_with_index,
+        solana_gossip::{
+            deprecated::{
+                shuffle_peers_and_index, sorted_retransmit_peers_and_stakes,
+                sorted_stakes_with_index,
+            },
+            weighted_shuffle::weighted_best,
         },
     };
 
