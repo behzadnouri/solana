@@ -985,6 +985,7 @@ impl Blockstore {
                             None
                         }
                         Err(InsertDataShredError::InvalidShred) => {
+                            shred.dump("invalid-data", self.last_root());
                             metrics.num_recovered_failed_invalid += 1;
                             None
                         }
@@ -1149,6 +1150,7 @@ impl Blockstore {
             }
 
             if !Blockstore::should_insert_coding_shred(&shred, &self.last_root) {
+                shred.dump("invalid-code", self.last_root());
                 metrics.num_coding_shreds_invalid += 1;
                 return false;
             }
@@ -1164,6 +1166,7 @@ impl Blockstore {
         // TODO: handle_duplicate is not invoked and so duplicate shreds are
         // not gossiped to the rest of cluster.
         if !erasure_meta.check_coding_shred(&shred) {
+            shred.dump("invalid-erasure-conf", self.last_root());
             metrics.num_coding_shreds_invalid_erasure_config += 1;
             let conflicting_shred = self.find_conflicting_coding_shred(
                 &shred,
@@ -1342,6 +1345,7 @@ impl Blockstore {
                 leader_schedule,
                 shred_source,
             ) {
+                shred.dump("invalid-data", self.last_root());
                 return Err(InsertDataShredError::InvalidShred);
             }
         }

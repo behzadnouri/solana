@@ -266,6 +266,32 @@ impl ErasureSetId {
 }
 
 impl Shred {
+    pub(crate) fn dump(&self, name: &'static str, root: Slot) {
+        match self.shred_type() {
+            ShredType::Data => eprintln!(
+                "data-shred-dump-{}] sane: {}, slot: {}, root: {}, index: {}, fec-set-index: {}, done: {}, last: {}",
+                name,
+                self.sanitize(),
+                self.slot(),
+                root,
+                self.index(),
+                self.fec_set_index(),
+                self.data_complete(),
+                self.last_in_slot(),
+            ),
+            ShredType::Code => eprintln!(
+                "code-shred-dump-{}] sane: {}, slot: {}, root: {}, index: {}, fec-set-index: {}, {:?}",
+                name,
+                self.sanitize(),
+                self.slot(),
+                root,
+                self.index(),
+                self.fec_set_index(),
+                self.coding_header
+            ),
+        }
+    }
+
     fn deserialize_obj<'de, T>(index: &mut usize, size: usize, buf: &'de [u8]) -> bincode::Result<T>
     where
         T: Deserialize<'de>,
