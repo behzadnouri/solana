@@ -54,6 +54,7 @@ use {
     bincode::config::Options,
     num_derive::FromPrimitive,
     num_traits::FromPrimitive,
+    rand::Rng,
     rayon::{prelude::*, ThreadPool},
     serde::{Deserialize, Deserializer, Serialize, Serializer},
     solana_entry::entry::{create_ticks, Entry},
@@ -69,7 +70,7 @@ use {
         pubkey::Pubkey,
         signature::{Keypair, Signature, Signer},
     },
-    std::{cell::RefCell, convert::TryInto, mem::size_of},
+    std::{cell::RefCell, convert::TryInto, mem::size_of, ops::Deref},
     thiserror::Error,
 };
 
@@ -133,6 +134,9 @@ thread_local!(static PAR_THREAD_POOL: RefCell<ThreadPool> = RefCell::new(rayon::
                     .build()
                     .unwrap()));
 
+lazy_static::lazy_static! {
+    pub(crate) static ref EXPAND_BATCH_SIZE: u32 = rand::thread_rng().gen_range(1, 5);
+}
 pub const MAX_DATA_SHREDS_PER_FEC_BLOCK: u32 = 32;
 
 pub const SHRED_TICK_REFERENCE_MASK: u8 = 0b0011_1111;
@@ -876,7 +880,9 @@ impl Shredder {
                             .checked_add(
                                 u32::try_from(i)
                                     .unwrap()
-                                    .checked_mul(MAX_DATA_SHREDS_PER_FEC_BLOCK * 2)
+                                    .checked_mul(
+                                        MAX_DATA_SHREDS_PER_FEC_BLOCK * EXPAND_BATCH_SIZE.deref(),
+                                    )
                                     .unwrap(),
                             )
                             .unwrap();
@@ -960,12 +966,13 @@ impl Shredder {
             && shred.common_header.version == version
             && shred.fec_set_index() == fec_set_index));
         let num_data = data.len();
+        let expand_batch_size: usize = *EXPAND_BATCH_SIZE as usize;
         let num_coding = if is_last_in_slot {
-            (3 * MAX_DATA_SHREDS_PER_FEC_BLOCK as usize)
+            ((expand_batch_size + 1) * MAX_DATA_SHREDS_PER_FEC_BLOCK as usize)
                 .saturating_sub(num_data)
                 .max(num_data)
         } else {
-            num_data * 2
+            num_data * expand_batch_size
         };
         let data: Vec<_> = data
             .iter()

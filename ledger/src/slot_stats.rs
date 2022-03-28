@@ -75,6 +75,11 @@ impl SlotsStats {
                 ("last_index", last_index, i64),
                 ("num_repaired", entry.num_repaired, i64),
                 ("num_recovered", entry.num_recovered, i64),
+                (
+                    "expand_batch_size",
+                    i64::from(*crate::shred::EXPAND_BATCH_SIZE),
+                    i64
+                ),
             );
         }
         entry.flags |= SlotFlags::FULL;
