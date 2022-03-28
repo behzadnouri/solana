@@ -876,7 +876,7 @@ impl Shredder {
                             .checked_add(
                                 u32::try_from(i)
                                     .unwrap()
-                                    .checked_mul(MAX_DATA_SHREDS_PER_FEC_BLOCK)
+                                    .checked_mul(MAX_DATA_SHREDS_PER_FEC_BLOCK * 2)
                                     .unwrap(),
                             )
                             .unwrap();
@@ -961,11 +961,11 @@ impl Shredder {
             && shred.fec_set_index() == fec_set_index));
         let num_data = data.len();
         let num_coding = if is_last_in_slot {
-            (2 * MAX_DATA_SHREDS_PER_FEC_BLOCK as usize)
+            (3 * MAX_DATA_SHREDS_PER_FEC_BLOCK as usize)
                 .saturating_sub(num_data)
                 .max(num_data)
         } else {
-            num_data
+            num_data * 2
         };
         let data: Vec<_> = data
             .iter()
