@@ -170,6 +170,10 @@ pub const SECONDS_PER_YEAR: f64 = 365.25 * 24.0 * 60.0 * 60.0;
 
 pub const MAX_LEADER_SCHEDULE_STAKES: Epoch = 5;
 
+lazy_static::lazy_static! {
+    static ref BANK_COUNTER: AtomicU64 = AtomicU64::default();
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct RentDebit {
     rent_collected: u64,
@@ -1737,6 +1741,85 @@ impl Bank {
 
         // Following code may touch AccountsDb, requiring proper ancestors
         let parent_epoch = parent.epoch();
+        if BANK_COUNTER.fetch_add(1, Relaxed) < 1000 || rand::thread_rng().gen_ratio(1, 75) {
+            let now = Instant::now();
+            let parent_vote_accounts = new
+                .parent()
+                .map(|bank| bank.vote_accounts())
+                .unwrap_or_default();
+            let (voter_pubkeys, num_stake_delegations) = {
+                let stakes = new.stakes_cache.stakes();
+                let stake_delegations = stakes.stake_delegations();
+                let voter_pubkeys: HashSet<_> = stake_delegations
+                    .values()
+                    .map(|delegation| delegation.voter_pubkey)
+                    .collect();
+                (voter_pubkeys, stake_delegations.len())
+            };
+            let mut num_mismatch = 0;
+            let mut num_missing = 0;
+            let mut num_zoombie = 0;
+            for voter_pubkey in &voter_pubkeys {
+                let vote_account = new
+                    .get_account_with_fixed_root(voter_pubkey)
+                    .map(Account::from);
+                let other_vote_account = parent_vote_accounts
+                    .get(voter_pubkey)
+                    .map(|(_stake, vote_account)| vote_account.account().clone());
+                if other_vote_account != vote_account {
+                    num_mismatch += 1;
+                    if other_vote_account.is_none() {
+                        num_missing += 1;
+                    }
+                    if vote_account.is_none() {
+                        num_zoombie += 1;
+                    }
+                }
+            }
+            let mut num_orphan = 0;
+            let mut num_orphan_mismatch = 0;
+            let mut num_orphan_zoombie = 0;
+            let mut num_orphan_dead = 0;
+            let mut num_orphan_corrupt = 0;
+            for (voter_pubkey, (_, other_vote_account)) in parent_vote_accounts.iter() {
+                if voter_pubkeys.contains(voter_pubkey) {
+                    continue;
+                }
+                num_orphan += 1;
+                if other_vote_account.account().lamports == 0 {
+                    num_orphan_dead += 1;
+                }
+                if let Err(_) = *other_vote_account.vote_state() {
+                    num_orphan_corrupt += 1;
+                }
+                let other_vote_account = other_vote_account.account().clone();
+                let vote_account = new
+                    .get_account_with_fixed_root(voter_pubkey)
+                    .map(Account::from);
+                if Some(other_vote_account) != vote_account {
+                    num_orphan_mismatch += 1;
+                    if vote_account.is_none() {
+                        num_orphan_zoombie += 1;
+                    }
+                }
+            }
+            datapoint_error!(
+                "vote-account-compare",
+                ("elapsed_ms", now.elapsed().as_millis(), i64),
+                ("num_mismatch", num_mismatch, i64),
+                ("num_missing", num_missing, i64),
+                ("num_orphan", num_orphan, i64),
+                ("num_orphan_corrupt", num_orphan_corrupt, i64),
+                ("num_orphan_dead", num_orphan_dead, i64),
+                ("num_orphan_mismatch", num_orphan_mismatch, i64),
+                ("num_orphan_zoombie", num_orphan_zoombie, i64),
+                ("num_stake_delegations", num_stake_delegations, i64),
+                ("num_vote_accounts", parent_vote_accounts.len(), i64),
+                ("num_voter_pubkeys", voter_pubkeys.len(), i64),
+                ("num_zoombie", num_zoombie, i64),
+                ("slot", new.slot(), i64),
+            );
+        }
         let (_, update_epoch_time) = Measure::this(
             |_| {
                 if parent_epoch < new.epoch() {
