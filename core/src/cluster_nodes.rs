@@ -1,3 +1,4 @@
+#![allow(unreachable_code, unused_variables)]
 use {
     crate::{broadcast_stage::BroadcastStage, retransmit_stage::RetransmitStage},
     itertools::Itertools,
@@ -127,6 +128,7 @@ impl ClusterNodes<BroadcastStage> {
         const MAX_CONTACT_INFO_AGE: Duration = Duration::from_secs(2 * 60);
         let shred_seed = shred.seed(self.pubkey, root_bank);
         if !enable_turbine_peers_shuffle_patch(shred.slot(), root_bank) {
+            panic!("turbine shuffle not enabled!");
             if let Some(node) = self.get_broadcast_peer(shred_seed) {
                 if socket_addr_space.check(&node.tvu) {
                     return vec![node.tvu];
@@ -179,6 +181,7 @@ impl ClusterNodes<BroadcastStage> {
     /// Returns the root of turbine broadcast tree, which the leader sends the
     /// shred to.
     fn get_broadcast_peer(&self, shred_seed: [u8; 32]) -> Option<&ContactInfo> {
+        panic!("turbine shuffle not enabled!");
         if self.compat_index.is_empty() {
             None
         } else {
@@ -235,6 +238,7 @@ impl ClusterNodes<RetransmitStage> {
     ) {
         let shred_seed = shred.seed(slot_leader, root_bank);
         if !enable_turbine_peers_shuffle_patch(shred.slot(), root_bank) {
+            panic!("turbine shuffle not enabled!");
             return self.get_retransmit_peers_compat(shred_seed, fanout, slot_leader);
         }
         self.get_retransmit_peers_deterministic(shred_seed, fanout, slot_leader)
@@ -281,6 +285,7 @@ impl ClusterNodes<RetransmitStage> {
         Vec<&Node>, // neighbors
         Vec<&Node>, // children
     ) {
+        panic!("turbine shuffle not enabled");
         // Exclude leader from list of nodes.
         let (weights, index): (Vec<u64>, Vec<usize>) = if slot_leader == self.pubkey {
             error!("retransmit from slot leader: {}", slot_leader);
@@ -391,7 +396,7 @@ fn enable_turbine_peers_shuffle_patch(shred_slot: Slot, root_bank: &Bank) -> boo
     let feature_slot = root_bank
         .feature_set
         .activated_slot(&feature_set::turbine_peers_shuffle::id());
-    match feature_slot {
+    let out = match feature_slot {
         None => false,
         Some(feature_slot) => {
             let epoch_schedule = root_bank.epoch_schedule();
@@ -399,7 +404,12 @@ fn enable_turbine_peers_shuffle_patch(shred_slot: Slot, root_bank: &Bank) -> boo
             let shred_epoch = epoch_schedule.get_epoch(shred_slot);
             feature_epoch < shred_epoch
         }
+    };
+    if !out {
+        panic!("turbine shuffle not enabled!");
     }
+    assert!(out);
+    out
 }
 
 impl<T> ClusterNodesCache<T> {
