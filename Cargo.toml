@@ -88,3 +88,9 @@ members = [
 exclude = [
     "programs/bpf",
 ]
+
+# [profile.release]
+# debug = true
+#
+# [profile.release.package."*"]
+# debug = true

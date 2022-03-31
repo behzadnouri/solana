@@ -68,6 +68,10 @@ impl StakeHistory {
         }
         (self.0).truncate(MAX_ENTRIES);
     }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
 }
 
 impl Deref for StakeHistory {
