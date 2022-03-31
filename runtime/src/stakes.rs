@@ -169,6 +169,15 @@ impl Stakes {
     }
 
     pub fn activate_epoch(&mut self, next_epoch: Epoch, thread_pool: &ThreadPool) {
+        // {
+        //     let file = format!(
+        //         "/tmp/stakes-epoch-{}-{}.bin",
+        //         next_epoch,
+        //         solana_sdk::timing::timestamp()
+        //     );
+        //     let mut file = std::fs::File::create(file).unwrap();
+        //     bincode::serialize_into(&mut file, self).unwrap();
+        // }
         let prev_epoch = self.epoch;
         self.epoch = next_epoch;
 
