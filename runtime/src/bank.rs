@@ -1782,7 +1782,7 @@ impl Bank {
                         "update_rewards_with_thread_pool",
                     );
 
-                    datapoint_info!(
+                    datapoint_error!(
                         "bank-new_from_parent-new_epoch_timings",
                         ("epoch", new.epoch(), i64),
                         ("slot", slot, i64),
@@ -2538,7 +2538,7 @@ impl Bank {
             0
         };
 
-        datapoint_warn!(
+        datapoint_error!(
             "epoch_rewards",
             ("slot", self.slot, i64),
             ("epoch", prev_epoch, i64),
