@@ -3,10 +3,11 @@
 use {
     crate::{
         stake_history::StakeHistory,
-        vote_account::{VoteAccount, VoteAccounts, VoteAccountsHashMap},
+        vote_account::{VoteAccount, VoteAccounts},
     },
     dashmap::DashMap,
     im::HashMap as ImHashMap,
+    itertools::Itertools,
     num_derive::ToPrimitive,
     num_traits::ToPrimitive,
     rayon::{
@@ -26,6 +27,7 @@ use {
     solana_vote_program::vote_state::VoteState,
     std::{
         collections::HashMap,
+        ops::Add,
         sync::{Arc, RwLock, RwLockReadGuard},
     },
 };
@@ -169,6 +171,7 @@ impl Stakes {
     }
 
     pub fn activate_epoch(&mut self, next_epoch: Epoch, thread_pool: &ThreadPool) {
+        use std::time::Instant;
         // {
         //     let file = format!(
         //         "/tmp/stakes-epoch-{}-{}.bin",
@@ -178,70 +181,58 @@ impl Stakes {
         //     let mut file = std::fs::File::create(file).unwrap();
         //     bincode::serialize_into(&mut file, self).unwrap();
         // }
-        let prev_epoch = self.epoch;
-        self.epoch = next_epoch;
-
-        thread_pool.install(|| {
-            let stake_delegations = &self.stake_delegations;
-            let stake_history = &mut self.stake_history;
-            let vote_accounts: &VoteAccountsHashMap = self.vote_accounts.as_ref();
-
-            // construct map of vote pubkey -> list of stake delegations
-            let vote_delegations: HashMap<Pubkey, Vec<&Delegation>> = {
-                let mut vote_delegations = HashMap::with_capacity(vote_accounts.len());
-                stake_delegations
-                    .iter()
-                    .for_each(|(_stake_pubkey, delegation)| {
-                        let vote_pubkey = &delegation.voter_pubkey;
-                        vote_delegations
-                            .entry(*vote_pubkey)
-                            .and_modify(|delegations: &mut Vec<_>| delegations.push(delegation))
-                            .or_insert_with(|| vec![delegation]);
-                    });
-                vote_delegations
-            };
-
-            // wrap up the prev epoch by adding new stake history entry for the prev epoch
-            {
-                let stake_history_entry = vote_delegations
-                    .par_iter()
-                    .map(|(_vote_pubkey, delegations)| {
-                        delegations
-                            .par_iter()
-                            .map(|delegation| {
-                                delegation.stake_activating_and_deactivating(
-                                    prev_epoch,
-                                    Some(stake_history),
-                                )
-                            })
-                            .reduce(StakeActivationStatus::default, |a, b| a + b)
-                    })
-                    .reduce(StakeActivationStatus::default, |a, b| a + b);
-
-                stake_history.add(prev_epoch, stake_history_entry);
-            }
-
-            // refresh the stake distribution of vote accounts for the next epoch, using new stake history
-            let vote_accounts_for_next_epoch: VoteAccountsHashMap = vote_accounts
+        let now = Instant::now();
+        let stake_delegations: Vec<_> = self.stake_delegations.values().collect();
+        eprintln!("collect: {}us", now.elapsed().as_micros());
+        // Wrap up the prev epoch by adding new stake history entry for the
+        // prev epoch.
+        let now = Instant::now();
+        let stake_history_entry = thread_pool.install(|| {
+            stake_delegations
                 .par_iter()
-                .map(|(vote_pubkey, (_stake, vote_account))| {
-                    let delegated_stake = vote_delegations
-                        .get(vote_pubkey)
-                        .map(|delegations| {
-                            delegations
-                                .par_iter()
-                                .map(|delegation| delegation.stake(next_epoch, Some(stake_history)))
-                                .sum()
-                        })
-                        .unwrap_or_default();
-
-                    (*vote_pubkey, (delegated_stake, vote_account.clone()))
+                .map(|delegation| {
+                    delegation
+                        .stake_activating_and_deactivating(self.epoch, Some(&self.stake_history))
                 })
-                .collect();
-
-            // overwrite vote accounts so that staked nodes singleton is reset
-            self.vote_accounts = VoteAccounts::from(Arc::new(vote_accounts_for_next_epoch));
+                .reduce(StakeActivationStatus::default, Add::add)
         });
+        eprintln!("stake_history_entry: {}us", now.elapsed().as_micros());
+        self.stake_history.add(self.epoch, stake_history_entry);
+        self.epoch = next_epoch;
+        // Refresh the stake distribution of vote accounts for the next epoch,
+        // using new stake history.
+        let now = Instant::now();
+        let delegated_stakes: Vec<(Pubkey, /*stake:*/ u64)> = thread_pool.install(|| {
+            stake_delegations
+                .par_iter()
+                .map(|delegation| {
+                    (
+                        delegation.voter_pubkey,
+                        delegation.stake(self.epoch, Some(&self.stake_history)),
+                    )
+                })
+                .collect()
+        });
+        eprintln!("delegated_stakes: {}us", now.elapsed().as_micros());
+        let now = Instant::now();
+        let delegated_stakes: HashMap<Pubkey, /*stake:*/ u64> = delegated_stakes
+            .into_iter()
+            .into_grouping_map()
+            .aggregate(|acc, _voter_pubkey, stake| Some(acc.unwrap_or_default() + stake));
+        eprintln!("delegated_stakes: {}us", now.elapsed().as_micros());
+        let now = Instant::now();
+        self.vote_accounts = self
+            .vote_accounts
+            .iter()
+            .map(|(vote_pubkey, (_ /*stake*/, vote_account))| {
+                let delegated_stake = delegated_stakes
+                    .get(vote_pubkey)
+                    .copied()
+                    .unwrap_or_default();
+                (*vote_pubkey, (delegated_stake, vote_account.clone()))
+            })
+            .collect();
+        eprintln!("vote_accounts: {}us", now.elapsed().as_micros());
     }
 
     /// Sum the stakes that point to the given voter_pubkey
