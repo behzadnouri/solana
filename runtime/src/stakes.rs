@@ -10,24 +10,19 @@ use {
     itertools::Itertools,
     num_derive::ToPrimitive,
     num_traits::ToPrimitive,
-    rayon::{
-        iter::{IntoParallelRefIterator, ParallelIterator},
-        ThreadPool,
-    },
     solana_sdk::{
         account::{AccountSharedData, ReadableAccount},
         clock::{Epoch, Slot},
         pubkey::Pubkey,
         stake::{
             self,
-            state::{Delegation, StakeActivationStatus, StakeState},
+            state::{Delegation, StakeState},
         },
     },
     solana_stake_program::stake_state,
     solana_vote_program::vote_state::VoteState,
     std::{
         collections::HashMap,
-        ops::Add,
         sync::{Arc, RwLock, RwLockReadGuard},
     },
 };
@@ -97,9 +92,9 @@ impl StakesCache {
         }
     }
 
-    pub fn activate_epoch(&self, next_epoch: Epoch, thread_pool: &ThreadPool) {
+    pub(crate) fn activate_epoch(&self, next_epoch: Epoch) {
         let mut stakes = self.0.write().unwrap();
-        stakes.activate_epoch(next_epoch, thread_pool)
+        stakes.activate_epoch(next_epoch)
     }
 
     pub fn handle_invalid_keys(
@@ -170,8 +165,7 @@ impl Stakes {
         &self.stake_history
     }
 
-    pub fn activate_epoch(&mut self, next_epoch: Epoch, thread_pool: &ThreadPool) {
-        use std::time::Instant;
+    pub fn activate_epoch(&mut self, next_epoch: Epoch) {
         // {
         //     let file = format!(
         //         "/tmp/stakes-epoch-{}-{}.bin",
@@ -181,46 +175,28 @@ impl Stakes {
         //     let mut file = std::fs::File::create(file).unwrap();
         //     bincode::serialize_into(&mut file, self).unwrap();
         // }
-        let now = Instant::now();
-        let stake_delegations: Vec<_> = self.stake_delegations.values().collect();
-        eprintln!("collect: {}us", now.elapsed().as_micros());
         // Wrap up the prev epoch by adding new stake history entry for the
         // prev epoch.
-        let now = Instant::now();
-        let stake_history_entry = thread_pool.install(|| {
-            stake_delegations
-                .par_iter()
-                .map(|delegation| {
-                    delegation
-                        .stake_activating_and_deactivating(self.epoch, Some(&self.stake_history))
-                })
-                .reduce(StakeActivationStatus::default, Add::add)
-        });
-        eprintln!("stake_history_entry: {}us", now.elapsed().as_micros());
+        let stake_history_entry = stake_state::new_stake_history_entry(
+            self.epoch,
+            self.stake_delegations.values(),
+            Some(&self.stake_history),
+        );
         self.stake_history.add(self.epoch, stake_history_entry);
         self.epoch = next_epoch;
         // Refresh the stake distribution of vote accounts for the next epoch,
         // using new stake history.
-        let now = Instant::now();
-        let delegated_stakes: Vec<(Pubkey, /*stake:*/ u64)> = thread_pool.install(|| {
-            stake_delegations
-                .par_iter()
-                .map(|delegation| {
-                    (
-                        delegation.voter_pubkey,
-                        delegation.stake(self.epoch, Some(&self.stake_history)),
-                    )
-                })
-                .collect()
-        });
-        eprintln!("delegated_stakes: {}us", now.elapsed().as_micros());
-        let now = Instant::now();
-        let delegated_stakes: HashMap<Pubkey, /*stake:*/ u64> = delegated_stakes
-            .into_iter()
+        let delegated_stakes = self
+            .stake_delegations
+            .values()
+            .map(|delegation| {
+                (
+                    delegation.voter_pubkey,
+                    delegation.stake(self.epoch, Some(&self.stake_history)),
+                )
+            })
             .into_grouping_map()
             .aggregate(|acc, _voter_pubkey, stake| Some(acc.unwrap_or_default() + stake));
-        eprintln!("delegated_stakes: {}us", now.elapsed().as_micros());
-        let now = Instant::now();
         self.vote_accounts = self
             .vote_accounts
             .iter()
@@ -232,7 +208,6 @@ impl Stakes {
                 (*vote_pubkey, (delegated_stake, vote_account.clone()))
             })
             .collect();
-        eprintln!("vote_accounts: {}us", now.elapsed().as_micros());
     }
 
     /// Sum the stakes that point to the given voter_pubkey
@@ -359,7 +334,6 @@ impl Stakes {
 pub mod tests {
     use {
         super::*,
-        rayon::ThreadPoolBuilder,
         solana_sdk::{account::WritableAccount, pubkey::Pubkey, rent::Rent},
         solana_stake_program::stake_state,
         solana_vote_program::vote_state::{self, VoteState, VoteStateVersions},
@@ -679,8 +653,7 @@ pub mod tests {
                 stake.stake(stakes.epoch, Some(&stakes.stake_history))
             );
         }
-        let thread_pool = ThreadPoolBuilder::new().num_threads(1).build().unwrap();
-        stakes_cache.activate_epoch(3, &thread_pool);
+        stakes_cache.activate_epoch(3);
         {
             let stakes = stakes_cache.stakes();
             let vote_accounts = stakes.vote_accounts();
@@ -754,9 +727,8 @@ pub mod tests {
             assert_eq!(stakes.vote_balance_and_warmed_staked(), 1);
         }
 
-        let thread_pool = ThreadPoolBuilder::new().num_threads(1).build().unwrap();
         for (epoch, expected_warmed_stake) in ((genesis_epoch + 1)..=3).zip(&[2, 3, 4]) {
-            stakes_cache.activate_epoch(epoch, &thread_pool);
+            stakes_cache.activate_epoch(epoch);
             // vote_balance_and_staked() always remain to return same lamports
             // while vote_balance_and_warmed_staked() gradually increases
             let stakes = stakes_cache.stakes();

@@ -1,4 +1,4 @@
-use {rayon::ThreadPoolBuilder, solana_runtime::stakes::Stakes, std::time::Instant};
+use {solana_runtime::stakes::Stakes, std::time::Instant};
 
 fn main() {
     let now = Instant::now();
@@ -8,7 +8,6 @@ fn main() {
         (292, "/tmp/stakes-epoch-292.bin"),
         (293, "/tmp/stakes-epoch-293.bin"),
     ];
-    let thread_pool = ThreadPoolBuilder::new().build().unwrap();
     let epoch_stakes: Vec<_> = files
         .iter()
         .map(|(epoch, file)| {
@@ -32,7 +31,7 @@ fn main() {
 
     for (epoch, mut stakes) in epoch_stakes {
         let now = Instant::now();
-        stakes.activate_epoch(epoch, &thread_pool);
+        stakes.activate_epoch(epoch);
         eprintln!("elapsed: {}us", now.elapsed().as_micros());
     }
 }

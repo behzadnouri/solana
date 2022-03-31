@@ -1756,7 +1756,7 @@ impl Bank {
                     // update vote accounts with warmed up stakes before saving a
                     // snapshot of stakes in epoch stakes
                     let (_, activate_epoch_time) = Measure::this(
-                        |_| new.stakes_cache.activate_epoch(epoch, &thread_pool),
+                        |_| new.stakes_cache.activate_epoch(epoch),
                         (),
                         "activate_epoch",
                     );
