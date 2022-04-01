@@ -2569,6 +2569,8 @@ impl Bank {
         let invalid_vote_keys: DashMap<Pubkey, InvalidCacheEntryReason> = DashMap::new();
 
         let stake_delegations: Vec<_> = stakes.stake_delegations().iter().collect();
+        let get_stake_account = AtomicU64::default();
+        let get_vote_account = AtomicU64::default();
         thread_pool.install(|| {
             stake_delegations
                 .into_par_iter()
@@ -2577,8 +2579,13 @@ impl Bank {
                     if invalid_vote_keys.contains_key(vote_pubkey) {
                         return;
                     }
-
-                    let stake_delegation = match self.get_account_with_fixed_root(stake_pubkey) {
+                    let stake_account = {
+                        let now = Instant::now();
+                        let stake_account = self.get_account_with_fixed_root(stake_pubkey);
+                        get_stake_account.fetch_add(now.elapsed().as_micros() as u64, Relaxed);
+                        stake_account
+                    };
+                    let stake_delegation = match stake_account {
                         Some(stake_account) => {
                             if stake_account.owner() != &solana_stake_program::id() {
                                 invalid_stake_keys
@@ -2607,7 +2614,13 @@ impl Bank {
                     {
                         vote_delegations
                     } else {
-                        let vote_account = match self.get_account_with_fixed_root(vote_pubkey) {
+                        let vote_account = {
+                            let now = Instant::now();
+                            let vote_account = self.get_account_with_fixed_root(vote_pubkey);
+                            get_vote_account.fetch_add(now.elapsed().as_micros() as u64, Relaxed);
+                            vote_account
+                        };
+                        let vote_account = match vote_account {
                             Some(vote_account) => {
                                 if vote_account.owner() != &solana_vote_program::id() {
                                     invalid_vote_keys
@@ -2655,6 +2668,15 @@ impl Bank {
                     vote_delegations.delegations.push(stake_delegation);
                 });
         });
+
+        eprintln!(
+            "get-stake-account: {}ms",
+            get_stake_account.load(Relaxed) / 1000
+        );
+        eprintln!(
+            "get-vote-account:  {}ms",
+            get_vote_account.load(Relaxed) / 1000
+        );
 
         LoadVoteAndStakeAccountsResult {
             vote_with_stake_delegations_map,
@@ -2746,6 +2768,7 @@ impl Bank {
             },
         );
 
+        let store_stake_account = AtomicU64::default();
         let mut stake_rewards = thread_pool.install(|| {
             stake_delegation_iterator
                 .filter_map(
@@ -2786,8 +2809,12 @@ impl Bank {
 
                             // store stake account even if stakers_reward is 0
                             // because credits observed has changed
-                            self.store_account(&stake_pubkey, &stake_account);
-
+                            {
+                                let now = Instant::now();
+                                self.store_account(&stake_pubkey, &stake_account);
+                                store_stake_account
+                                    .fetch_add(now.elapsed().as_micros() as u64, Relaxed);
+                            }
                             if stakers_reward > 0 {
                                 return Some((
                                     stake_pubkey,
@@ -2811,6 +2838,7 @@ impl Bank {
                 .collect()
         });
 
+        let store_vote_account = AtomicU64::default();
         let mut vote_rewards = vote_account_rewards
             .into_iter()
             .filter_map(
@@ -2821,7 +2849,9 @@ impl Bank {
                     }
 
                     if vote_needs_store {
+                        let now = Instant::now();
                         self.store_account(&vote_pubkey, &vote_account);
+                        store_vote_account.fetch_add(now.elapsed().as_micros() as u64, Relaxed);
                     }
 
                     if vote_rewards > 0 {
@@ -2841,6 +2871,14 @@ impl Bank {
             )
             .collect();
 
+        eprintln!(
+            "store-stake-account: {}ms",
+            store_stake_account.load(Relaxed) / 1000
+        );
+        eprintln!(
+            "store-vote-account:  {}ms",
+            store_vote_account.load(Relaxed) / 1000
+        );
         {
             let mut rewards = self.rewards.write().unwrap();
             rewards.append(&mut vote_rewards);
