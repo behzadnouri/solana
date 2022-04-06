@@ -144,12 +144,12 @@ impl StakesCache {
 }
 
 #[derive(Default, Clone, PartialEq, Debug, Deserialize, Serialize, AbiExample)]
-pub struct Stakes {
+pub struct Stakes<T: Clone = Delegation> {
     /// vote accounts
     vote_accounts: VoteAccounts,
 
     /// stake_delegations
-    stake_delegations: ImHashMap<Pubkey, Delegation>,
+    stake_delegations: ImHashMap<Pubkey, T>,
 
     /// unused
     unused: u64,
