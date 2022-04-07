@@ -4,10 +4,10 @@ use {
         utils::{serialize_iter_as_map, serialize_iter_as_seq},
         *,
     },
-    crate::{ancestors::AncestorsForSerialization, stakes::StakesCache},
+    crate::ancestors::AncestorsForSerialization,
     solana_measure::measure::Measure,
-    std::{cell::RefCell, collections::HashSet, sync::RwLock},
     solana_sdk::stake::state::Delegation,
+    std::{cell::RefCell, collections::HashSet, sync::RwLock},
 };
 
 type AccountsDbFields = super::AccountsDbFields<SerializableAccountStorageEntry>;
@@ -129,7 +129,7 @@ struct SerializableVersionedBank<'a> {
     rent_collector: RentCollector,
     epoch_schedule: EpochSchedule,
     inflation: Inflation,
-    stakes: &'a StakesCache,
+    stakes: Stakes<Delegation>,
     unused_accounts: UnusedAccounts,
     epoch_stakes: &'a HashMap<Epoch, EpochStakes>,
     is_delta: bool,
