@@ -160,20 +160,24 @@ pub struct Stakes<T: Clone> {
     stake_history: StakeHistory,
 }
 
-impl From<Stakes<StakeAccount>> for Stakes<Delegation> {
-    fn from(stakes: Stakes<StakeAccount>) -> Self {
+impl TryFrom<Stakes<StakeAccount>> for Stakes<Delegation> {
+    type Error = Error;
+    fn try_from(stakes: Stakes<StakeAccount>) -> Result<Self, Self::Error> {
         let stake_delegations = stakes
             .stake_delegations
             .into_iter()
-            .map(|(pubkey, stake_account)| (pubkey, stake_account.delegation().unwrap()))
-            .collect();
-        Self {
+            .map(|(pubkey, stake_account)| match stake_account.delegation() {
+                None => Err(Error::InvalidDelegation(pubkey)),
+                Some(delegation) => Ok((pubkey, delegation)),
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Self {
             vote_accounts: stakes.vote_accounts,
             stake_delegations,
             unused: stakes.unused,
             epoch: stakes.epoch,
             stake_history: stakes.stake_history,
-        }
+        })
     }
 }
 

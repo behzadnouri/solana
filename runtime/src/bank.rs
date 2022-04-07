@@ -1493,7 +1493,8 @@ impl Bank {
         // genesis needs stakes for all epochs up to the epoch implied by
         //  slot = 0 and genesis configuration
         {
-            let stakes = Stakes::<Delegation>::from(bank.stakes_cache.stakes().clone());
+            let stakes = bank.stakes_cache.stakes().clone();
+            let stakes = Stakes::<Delegation>::try_from(stakes).unwrap();
             let stakes = Arc::new(stakes);
             for epoch in 0..=bank.get_leader_schedule_epoch(bank.slot) {
                 bank.epoch_stakes
@@ -2144,7 +2145,10 @@ impl Bank {
             rent_collector: self.rent_collector.clone(),
             epoch_schedule: self.epoch_schedule,
             inflation: *self.inflation.read().unwrap(),
-            stakes: Stakes::<Delegation>::from(self.stakes_cache.stakes().clone()),
+            stakes: {
+                let stakes = self.stakes_cache.stakes().clone();
+                Stakes::<Delegation>::try_from(stakes).unwrap()
+            },
             epoch_stakes: &self.epoch_stakes,
             is_delta: self.is_delta.load(Relaxed),
             accounts_data_len: self.load_accounts_data_len(),
@@ -2379,7 +2383,8 @@ impl Bank {
             self.epoch_stakes.retain(|&epoch, _| {
                 epoch >= leader_schedule_epoch.saturating_sub(MAX_LEADER_SCHEDULE_STAKES)
             });
-            let stakes = Stakes::<Delegation>::from(self.stakes_cache.stakes().clone());
+            let stakes = self.stakes_cache.stakes().clone();
+            let stakes = Stakes::<Delegation>::try_from(stakes).unwrap();
             let new_epoch_stakes = EpochStakes::new(Arc::new(stakes), leader_schedule_epoch);
             {
                 let vote_stakes: HashMap<_, _> = self
