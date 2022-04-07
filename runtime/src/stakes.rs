@@ -143,7 +143,7 @@ impl StakesCache {
 }
 
 #[derive(Default, Clone, PartialEq, Debug, Deserialize, Serialize, AbiExample)]
-pub struct Stakes<T: Clone = Delegation> {
+pub struct Stakes<T: Clone> {
     /// vote accounts
     vote_accounts: VoteAccounts,
 

@@ -7,6 +7,7 @@ use {
     crate::{ancestors::AncestorsForSerialization, stakes::StakesCache},
     solana_measure::measure::Measure,
     std::{cell::RefCell, collections::HashSet, sync::RwLock},
+    solana_sdk::stake::state::Delegation,
 };
 
 type AccountsDbFields = super::AccountsDbFields<SerializableAccountStorageEntry>;
@@ -51,7 +52,7 @@ struct DeserializableVersionedBank {
     rent_collector: RentCollector,
     epoch_schedule: EpochSchedule,
     inflation: Inflation,
-    stakes: Stakes,
+    stakes: Stakes<Delegation>,
     #[allow(dead_code)]
     unused_accounts: UnusedAccounts,
     epoch_stakes: HashMap<Epoch, EpochStakes>,

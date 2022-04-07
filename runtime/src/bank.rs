@@ -933,7 +933,7 @@ pub(crate) struct BankFieldsToDeserialize {
     pub(crate) rent_collector: RentCollector,
     pub(crate) epoch_schedule: EpochSchedule,
     pub(crate) inflation: Inflation,
-    pub(crate) stakes: Stakes,
+    pub(crate) stakes: Stakes<Delegation>,
     pub(crate) epoch_stakes: HashMap<Epoch, EpochStakes>,
     pub(crate) is_delta: bool,
     pub(crate) accounts_data_len: u64,
