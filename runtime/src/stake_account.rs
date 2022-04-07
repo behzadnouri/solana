@@ -1,6 +1,7 @@
 use {
+    solana_frozen_abi::abi_example::AbiExample,
     solana_sdk::{
-        account::{AccountSharedData, ReadableAccount},
+        account::{Account, AccountSharedData, ReadableAccount},
         account_utils::StateMut,
         instruction::InstructionError,
         pubkey::Pubkey,
@@ -9,7 +10,7 @@ use {
     thiserror::Error,
 };
 
-#[derive(Clone, Debug, Default, PartialEq, AbiExample)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct StakeAccount(AccountSharedData, StakeState);
 
 #[derive(Debug, Error)]
@@ -50,5 +51,17 @@ impl TryFrom<AccountSharedData> for StakeAccount {
 impl From<StakeAccount> for (AccountSharedData, StakeState) {
     fn from(stake_account: StakeAccount) -> Self {
         (stake_account.0, stake_account.1)
+    }
+}
+
+impl AbiExample for StakeAccount {
+    fn example() -> Self {
+        use solana_sdk::stake::state::{Meta, Stake};
+        let stake_state = StakeState::Stake(Meta::example(), Stake::example());
+        let mut account = Account::example();
+        account.data.resize(256, 0u8);
+        account.owner = solana_stake_program::id();
+        let _ = account.set_state(&stake_state).unwrap();
+        Self::try_from(AccountSharedData::from(account)).unwrap()
     }
 }
