@@ -9,6 +9,7 @@ use {
     thiserror::Error,
 };
 
+#[derive(Clone, Default)]
 pub(crate) struct StakeAccount(AccountSharedData, StakeState);
 
 #[derive(Debug, Error)]
@@ -20,6 +21,10 @@ pub(crate) enum Error {
 }
 
 impl StakeAccount {
+    pub(crate) fn lamports(&self) -> u64 {
+        self.0.lamports()
+    }
+
     pub(crate) fn delegation(&self) -> Option<Delegation> {
         self.1.delegation()
     }
