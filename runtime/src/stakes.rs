@@ -149,6 +149,8 @@ pub struct Stakes<T: Clone = Delegation> {
     vote_accounts: VoteAccounts,
 
     /// stake_delegations
+    #[serde(bound(serialize = "ImHashMap<Pubkey, T>: serde_compat::StakeDelegations"))]
+    #[serde(serialize_with = "serde_compat::serialize_stake_delegations")]
     stake_delegations: ImHashMap<Pubkey, T>,
 
     /// unused
@@ -159,6 +161,46 @@ pub struct Stakes<T: Clone = Delegation> {
 
     /// history of staking levels
     stake_history: StakeHistory,
+}
+
+mod serde_compat {
+    use {
+        super::*,
+        crate::stake_account::StakeAccount,
+        serde::ser::{Serialize, Serializer},
+        std::borrow::Cow,
+    };
+
+    pub(super) trait StakeDelegations {
+        fn stake_delegations<'a>(&'a self) -> Cow<'a, ImHashMap<Pubkey, Delegation>>;
+    }
+
+    impl StakeDelegations for ImHashMap<Pubkey, Delegation> {
+        fn stake_delegations<'a>(&'a self) -> Cow<'a, ImHashMap<Pubkey, Delegation>> {
+            Cow::Borrowed(self)
+        }
+    }
+
+    impl StakeDelegations for ImHashMap<Pubkey, StakeAccount> {
+        fn stake_delegations<'a>(&'a self) -> Cow<'a, ImHashMap<Pubkey, Delegation>> {
+            Cow::Owned(
+                self.iter()
+                    .map(|(&pubkey, stake_account)| (pubkey, stake_account.delegation().unwrap()))
+                    .collect(),
+            )
+        }
+    }
+
+    pub(super) fn serialize_stake_delegations<S, T>(
+        stake_delegations: &T,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: StakeDelegations,
+    {
+        stake_delegations.stake_delegations().serialize(serializer)
+    }
 }
 
 impl Stakes {
