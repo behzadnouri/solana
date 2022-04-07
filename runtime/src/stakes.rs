@@ -350,8 +350,8 @@ impl Stakes<StakeAccount> {
         stake_pubkey: &Pubkey,
         stake_account: Option<StakeAccount>,
     ) {
-        let new_stake = stake_account.as_ref().map(|stake_account| {
-            let delegation = stake_account.delegation().unwrap();
+        let new_stake = stake_account.as_ref().and_then(|stake_account| {
+            let delegation = stake_account.delegation()?;
             // When account is removed (lamports == 0), this check ensures
             // resetting cached stake value below, even if the account happens
             // to be still staked for some (odd) reason.
@@ -360,7 +360,7 @@ impl Stakes<StakeAccount> {
             } else {
                 delegation.stake(self.epoch, Some(&self.stake_history))
             };
-            (delegation.voter_pubkey, stake)
+            Some((delegation.voter_pubkey, stake))
         });
         //  old_stake is stake lamports and voter_pubkey from the pre-store() version
         let old_stake = self
@@ -383,8 +383,13 @@ impl Stakes<StakeAccount> {
             }
         }
 
-        if let Some(stake_account) = stake_account {
-            self.stake_delegations.insert(*stake_pubkey, stake_account);
+        if stake_account
+            .as_ref()
+            .and_then(StakeAccount::delegation)
+            .is_some()
+        {
+            self.stake_delegations
+                .insert(*stake_pubkey, stake_account.unwrap());
         } else {
             // when stake is no longer delegated, remove it from Stakes so that
             // given `pubkey` can be used for any owner in the future, while not
