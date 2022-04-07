@@ -23,12 +23,12 @@ pub struct EpochStakes {
 }
 
 impl EpochStakes {
-    pub fn new(stakes: &Stakes, leader_schedule_epoch: Epoch) -> Self {
+    pub fn new(stakes: Arc<Stakes>, leader_schedule_epoch: Epoch) -> Self {
         let epoch_vote_accounts = stakes.vote_accounts();
         let (total_stake, node_id_to_vote_accounts, epoch_authorized_voters) =
             Self::parse_epoch_vote_accounts(epoch_vote_accounts.as_ref(), leader_schedule_epoch);
         Self {
-            stakes: Arc::new(stakes.clone()),
+            stakes,
             total_stake,
             node_id_to_vote_accounts: Arc::new(node_id_to_vote_accounts),
             epoch_authorized_voters: Arc::new(epoch_authorized_voters),

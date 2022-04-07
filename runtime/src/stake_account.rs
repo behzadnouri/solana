@@ -9,7 +9,7 @@ use {
     thiserror::Error,
 };
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct StakeAccount(AccountSharedData, StakeState);
 
 #[derive(Debug, Error)]
