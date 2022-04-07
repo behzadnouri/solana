@@ -1268,8 +1268,6 @@ struct LoadVoteAndStakeAccountsResult {
     vote_with_stake_delegations_map: DashMap<Pubkey, VoteWithStakeDelegations>,
     invalid_stake_keys: DashMap<Pubkey, InvalidCacheEntryReason>,
     invalid_vote_keys: DashMap<Pubkey, InvalidCacheEntryReason>,
-    // Number of valid vote accounts which are not cached in Bank.stakes but
-    // exist in accounts-db and have valid payload.
     vote_accounts_miss_count: usize,
 }
 
@@ -2735,7 +2733,7 @@ impl Bank {
         let invalid_vote_keys: DashMap<Pubkey, InvalidCacheEntryReason> = DashMap::new();
         let vote_accounts_miss_count = AtomicUsize::default();
         let get_vote_account = |vote_pubkey: &Pubkey| -> Option<VoteAccount> {
-            if let Some((_, vote_account)) = vote_accounts.get(vote_pubkey) {
+            if let Some((_stake, vote_account)) = vote_accounts.get(vote_pubkey) {
                 return Some(vote_account.clone());
             }
             let account = self.get_account_with_fixed_root(vote_pubkey)?;
@@ -2746,68 +2744,60 @@ impl Bank {
             }
             Some(VoteAccount::from(account))
         };
-        let stake_delegations: Vec<_> = stakes.stake_delegations().iter().collect();
-        thread_pool.install(|| {
-            stake_delegations
-                .into_par_iter()
-                .for_each(|(stake_pubkey, stake_account)| {
-                    let delegation = stake_account.delegation().unwrap();
-                    let vote_pubkey = &delegation.voter_pubkey;
-                    if invalid_vote_keys.contains_key(vote_pubkey) {
+        let get_accounts = |(stake_pubkey, stake_account): (&Pubkey, &StakeAccount)| {
+            let delegation = stake_account.delegation().unwrap();
+            let vote_pubkey = &delegation.voter_pubkey;
+            if invalid_vote_keys.contains_key(vote_pubkey) {
+                return;
+            }
+            let stake_delegation = (*stake_pubkey, stake_account.clone());
+            let mut vote_delegations = if let Some(vote_delegations) =
+                vote_with_stake_delegations_map.get_mut(vote_pubkey)
+            {
+                vote_delegations
+            } else {
+                let vote_account = match get_vote_account(vote_pubkey) {
+                    Some(vote_account) => vote_account,
+                    None => {
+                        invalid_vote_keys.insert(*vote_pubkey, InvalidCacheEntryReason::Missing);
                         return;
                     }
-                    let stake_delegation = (*stake_pubkey, stake_account.clone());
-                    let mut vote_delegations = if let Some(vote_delegations) =
-                        vote_with_stake_delegations_map.get_mut(vote_pubkey)
-                    {
-                        vote_delegations
-                    } else {
-                        let vote_account = match get_vote_account(vote_pubkey) {
-                            Some(vote_account) => {
-                                if vote_account.owner() != &solana_vote_program::id() {
-                                    invalid_vote_keys
-                                        .insert(*vote_pubkey, InvalidCacheEntryReason::WrongOwner);
-                                    return;
-                                }
-                                vote_account
-                            }
-                            None => {
-                                invalid_vote_keys
-                                    .insert(*vote_pubkey, InvalidCacheEntryReason::Missing);
-                                return;
-                            }
-                        };
-
-                        let vote_state = match vote_account.vote_state().deref() {
-                            Ok(vote_state) => vote_state.clone(),
-                            Err(_) => {
-                                invalid_vote_keys
-                                    .insert(*vote_pubkey, InvalidCacheEntryReason::BadState);
-                                return;
-                            }
-                        };
-
-                        vote_with_stake_delegations_map
-                            .entry(*vote_pubkey)
-                            .or_insert_with(|| VoteWithStakeDelegations {
-                                vote_state: Arc::new(vote_state),
-                                vote_account: AccountSharedData::from(vote_account),
-                                delegations: vec![],
-                            })
-                    };
-
-                    if let Some(reward_calc_tracer) = reward_calc_tracer.as_ref() {
-                        reward_calc_tracer(&RewardCalculationEvent::Staking(
-                            stake_pubkey,
-                            &InflationPointCalculationEvent::Delegation(
-                                delegation,
-                                solana_vote_program::id(),
-                            ),
-                        ));
+                };
+                if vote_account.owner() != &solana_vote_program::id() {
+                    invalid_vote_keys.insert(*vote_pubkey, InvalidCacheEntryReason::WrongOwner);
+                    return;
+                }
+                let vote_state = match vote_account.vote_state().deref() {
+                    Ok(vote_state) => vote_state.clone(),
+                    Err(_) => {
+                        invalid_vote_keys.insert(*vote_pubkey, InvalidCacheEntryReason::BadState);
+                        return;
                     }
+                };
+                vote_with_stake_delegations_map
+                    .entry(*vote_pubkey)
+                    .or_insert_with(|| VoteWithStakeDelegations {
+                        vote_state: Arc::new(vote_state),
+                        vote_account: AccountSharedData::from(vote_account),
+                        delegations: vec![],
+                    })
+            };
 
-                    vote_delegations.delegations.push(stake_delegation);
-                });
+            if let Some(reward_calc_tracer) = reward_calc_tracer.as_ref() {
+                reward_calc_tracer(&RewardCalculationEvent::Staking(
+                    stake_pubkey,
+                    &InflationPointCalculationEvent::Delegation(
+                        delegation,
+                        solana_vote_program::id(),
+                    ),
+                ));
+            }
+
+            vote_delegations.delegations.push(stake_delegation);
+        };
+        let stake_delegations: Vec<_> = stakes.stake_delegations().iter().collect();
+        thread_pool.install(|| {
+            stake_delegations.into_par_iter().for_each(get_accounts);
         });
 
         LoadVoteAndStakeAccountsResult {

@@ -15,10 +15,10 @@ pub(crate) struct StakeAccount(AccountSharedData, StakeState);
 
 #[derive(Debug, Error)]
 pub(crate) enum Error {
-    #[error("Invalid stake account owner: {owner:?}")]
-    InvalidOwner { owner: Pubkey },
     #[error(transparent)]
     InstructionError(#[from] InstructionError),
+    #[error("Invalid stake account owner: {owner:?}")]
+    InvalidOwner { owner: Pubkey },
 }
 
 impl StakeAccount {
