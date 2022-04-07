@@ -2597,6 +2597,16 @@ impl Bank {
         );
     }
 
+    fn load_vote_and_stake_accounts<F>(
+        &self,
+        thread_pool: &ThreadPool,
+        reward_cacl_tracer: Option<F>,
+    ) -> LoadVoteAndStakeAccountsResult
+    where
+        F: Fn(&RewardCalculationEvent) + Send + Sync,
+    {
+    }
+
     /// map stake delegations into resolved (pubkey, account) pairs
     ///  returns a map (has to be copied) of loaded
     ///   ( Vec<(staker info)> (voter account) ) keyed by voter pubkey
