@@ -2,7 +2,7 @@
 //! node stakes
 use {
     crate::{
-        stake_account::StakeAccount,
+        stake_account::{self, StakeAccount},
         stake_history::StakeHistory,
         vote_account::{VoteAccount, VoteAccounts},
     },
@@ -26,7 +26,18 @@ use {
         ops::Add,
         sync::{Arc, RwLock, RwLockReadGuard},
     },
+    thiserror::Error,
 };
+
+#[derive(Debug, Error)]
+pub(crate) enum Error {
+    #[error("Invalid delegation: {0}")]
+    InvalidDelegation(Pubkey),
+    #[error(transparent)]
+    InvalidStakeAccount(#[from] stake_account::Error),
+    #[error("Stake account not found: {0}")]
+    StakeAccountNotFound(Pubkey),
+}
 
 #[derive(Debug, Clone, PartialEq, ToPrimitive)]
 pub enum InvalidCacheEntryReason {
@@ -241,7 +252,7 @@ impl<T: Clone> Stakes<T> {
 }
 
 impl Stakes<StakeAccount> {
-    pub(crate) fn new<F>(stakes: &Stakes<Delegation>, get_account: F) -> Self
+    pub(crate) fn new<F>(stakes: &Stakes<Delegation>, get_account: F) -> Result<Self, Error>
     where
         F: Fn(&Pubkey) -> Option<AccountSharedData>,
     {
@@ -252,19 +263,25 @@ impl Stakes<StakeAccount> {
             epoch,
             stake_history,
         } = stakes;
-        // XXX check for errors here!
-        let stake_delegations = stake_delegations.iter().filter_map(|(pubkey, delegation)| {
-            let account = get_account(pubkey)?;
-            let stake_account = StakeAccount::try_from(account).ok()?;
-            (stake_account.delegation() == Some(*delegation)).then(|| (*pubkey, stake_account))
+        let stake_delegations = stake_delegations.iter().map(|(pubkey, delegation)| {
+            let stake_account = match get_account(pubkey) {
+                None => return Err(Error::StakeAccountNotFound(*pubkey)),
+                Some(account) => account,
+            };
+            let stake_account = StakeAccount::try_from(stake_account)?;
+            if stake_account.delegation() == Some(*delegation) {
+                Ok((*pubkey, stake_account))
+            } else {
+                Err(Error::InvalidDelegation(*pubkey))
+            }
         });
-        Self {
+        Ok(Self {
             vote_accounts: vote_accounts.clone(),
-            stake_delegations: stake_delegations.collect(),
+            stake_delegations: stake_delegations.collect::<Result<_, _>>()?,
             unused: *unused,
             epoch: *epoch,
             stake_history: stake_history.clone(),
-        }
+        })
     }
 
     fn activate_epoch(&mut self, next_epoch: Epoch, thread_pool: &ThreadPool) {
