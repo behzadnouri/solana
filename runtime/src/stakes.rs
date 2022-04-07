@@ -203,11 +203,34 @@ mod serde_compat {
     }
 }
 
-impl Stakes {
-    pub fn history(&self) -> &StakeHistory {
+impl<T: Clone> Stakes<T> {
+    pub(crate) fn history(&self) -> &StakeHistory {
         &self.stake_history
     }
 
+    fn remove_vote_account(&mut self, vote_pubkey: &Pubkey) {
+        self.vote_accounts.remove(vote_pubkey);
+    }
+
+    pub fn vote_accounts(&self) -> &VoteAccounts {
+        &self.vote_accounts
+    }
+
+    pub(crate) fn staked_nodes(&self) -> Arc<HashMap<Pubkey, u64>> {
+        self.vote_accounts.staked_nodes()
+    }
+
+    pub(crate) fn highest_staked_node(&self) -> Option<Pubkey> {
+        let (_pubkey, (_stake, vote_account)) = self
+            .vote_accounts
+            .iter()
+            .max_by(|(_ak, av), (_bk, bv)| av.0.cmp(&bv.0))?;
+        let node_pubkey = vote_account.vote_state().as_ref().ok()?.node_pubkey;
+        Some(node_pubkey)
+    }
+}
+
+impl Stakes<Delegation> {
     fn activate_epoch(&mut self, next_epoch: Epoch, thread_pool: &ThreadPool) {
         type StakesHashMap = HashMap</*voter:*/ Pubkey, /*stake:*/ u64>;
         fn merge(mut acc: StakesHashMap, other: StakesHashMap) -> StakesHashMap {
@@ -280,7 +303,7 @@ impl Stakes {
     }
 
     /// Sum the lamports of the vote accounts and the delegated stake
-    pub fn vote_balance_and_staked(&self) -> u64 {
+    pub(crate) fn vote_balance_and_staked(&self) -> u64 {
         let get_stake = |(_, stake_delegation): (_, &Delegation)| stake_delegation.stake;
         let get_lamports = |(_, (_, vote_account)): (_, &(_, VoteAccount))| vote_account.lamports();
 
@@ -288,11 +311,7 @@ impl Stakes {
             + self.vote_accounts.iter().map(get_lamports).sum::<u64>()
     }
 
-    pub fn remove_vote_account(&mut self, vote_pubkey: &Pubkey) {
-        self.vote_accounts.remove(vote_pubkey);
-    }
-
-    pub fn remove_stake_delegation(&mut self, stake_pubkey: &Pubkey) {
+    fn remove_stake_delegation(&mut self, stake_pubkey: &Pubkey) {
         if let Some(removed_delegation) = self.stake_delegations.remove(stake_pubkey) {
             let removed_stake = removed_delegation.stake(self.epoch, Some(&self.stake_history));
             self.vote_accounts
@@ -300,7 +319,7 @@ impl Stakes {
         }
     }
 
-    pub fn update_vote_account(
+    fn update_vote_account(
         &mut self,
         vote_pubkey: &Pubkey,
         new_vote_account: Option<VoteAccount>,
@@ -321,7 +340,7 @@ impl Stakes {
         }
     }
 
-    pub fn update_stake_delegation(
+    fn update_stake_delegation(
         &mut self,
         stake_pubkey: &Pubkey,
         new_delegation: Option<(u64, Delegation)>,
@@ -356,25 +375,8 @@ impl Stakes {
         }
     }
 
-    pub fn vote_accounts(&self) -> &VoteAccounts {
-        &self.vote_accounts
-    }
-
     pub(crate) fn stake_delegations(&self) -> &ImHashMap<Pubkey, Delegation> {
         &self.stake_delegations
-    }
-
-    pub fn staked_nodes(&self) -> Arc<HashMap<Pubkey, u64>> {
-        self.vote_accounts.staked_nodes()
-    }
-
-    pub fn highest_staked_node(&self) -> Option<Pubkey> {
-        let (_pubkey, (_stake, vote_account)) = self
-            .vote_accounts
-            .iter()
-            .max_by(|(_ak, av), (_bk, bv)| av.0.cmp(&bv.0))?;
-        let node_pubkey = vote_account.vote_state().as_ref().ok()?.node_pubkey;
-        Some(node_pubkey)
     }
 }
 
