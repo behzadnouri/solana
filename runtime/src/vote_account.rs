@@ -56,6 +56,10 @@ impl VoteAccount {
         self.0.account.lamports()
     }
 
+    pub(crate) fn owner(&self) -> &Pubkey {
+        self.0.account.owner()
+    }
+
     pub fn vote_state(&self) -> RwLockReadGuard<Result<VoteState, InstructionError>> {
         let inner = &self.0;
         inner.vote_state_once.call_once(|| {
@@ -193,6 +197,12 @@ impl<'de> Deserialize<'de> for VoteAccount {
 impl From<AccountSharedData> for VoteAccount {
     fn from(account: AccountSharedData) -> Self {
         Self::from(Account::from(account))
+    }
+}
+
+impl From<VoteAccount> for AccountSharedData {
+    fn from(account: VoteAccount) -> Self {
+        Self::from(account.0.account.clone())
     }
 }
 

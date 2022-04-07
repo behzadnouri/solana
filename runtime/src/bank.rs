@@ -148,13 +148,13 @@ use {
         collections::{HashMap, HashSet},
         convert::{TryFrom, TryInto},
         fmt, mem,
-        ops::{Div, RangeInclusive},
+        ops::{Deref, Div, RangeInclusive},
         path::PathBuf,
         ptr,
         rc::Rc,
         sync::{
             atomic::{
-                AtomicBool, AtomicU64,
+                AtomicBool, AtomicU64, AtomicUsize,
                 Ordering::{AcqRel, Acquire, Relaxed, Release},
             },
             Arc, LockResult, RwLock, RwLockReadGuard, RwLockWriteGuard,
@@ -169,6 +169,7 @@ struct RewardsMetrics {
     calculate_points_us: AtomicU64,
     store_stake_accounts_us: AtomicU64,
     store_vote_accounts_us: AtomicU64,
+    vote_accounts_miss_count: usize,
 }
 
 mod address_lookup_table;
@@ -1267,6 +1268,9 @@ struct LoadVoteAndStakeAccountsResult {
     vote_with_stake_delegations_map: DashMap<Pubkey, VoteWithStakeDelegations>,
     invalid_stake_keys: DashMap<Pubkey, InvalidCacheEntryReason>,
     invalid_vote_keys: DashMap<Pubkey, InvalidCacheEntryReason>,
+    // Number of valid vote accounts which are not cached in Bank.stakes but
+    // exist in accounts-db and have valid payload.
+    vote_accounts_miss_count: usize,
 }
 
 #[derive(Debug, Default)]
@@ -1781,7 +1785,7 @@ impl Bank {
                         "update_epoch_stakes",
                     );
 
-                    let metrics = RewardsMetrics::default();
+                    let mut metrics = RewardsMetrics::default();
                     // After saving a snapshot of stakes, apply stake rewards and commission
                     let (_, update_rewards_with_thread_pool_time) = Measure::this(
                         |_| {
@@ -1789,7 +1793,7 @@ impl Bank {
                                 parent_epoch,
                                 reward_calc_tracer,
                                 &thread_pool,
-                                &metrics,
+                                &mut metrics,
                             )
                         },
                         (),
@@ -1836,6 +1840,11 @@ impl Bank {
                         (
                             "store_vote_accounts_us",
                             metrics.store_vote_accounts_us.load(Relaxed),
+                            i64
+                        ),
+                        (
+                            "vote_accounts_miss_count",
+                            metrics.vote_accounts_miss_count,
                             i64
                         ),
                     );
@@ -2503,7 +2512,7 @@ impl Bank {
         prev_epoch: Epoch,
         reward_calc_tracer: Option<impl Fn(&RewardCalculationEvent) + Send + Sync>,
         thread_pool: &ThreadPool,
-        metrics: &RewardsMetrics,
+        metrics: &mut RewardsMetrics,
     ) {
         let slot_in_year = self.slot_in_year_for_inflation();
         let epoch_duration_in_years = self.epoch_duration_in_years(prev_epoch);
@@ -2529,6 +2538,7 @@ impl Bank {
             self.stake_program_advance_activating_credits_observed(),
             thread_pool,
             metrics,
+            false, // XXX
         );
 
         if !self
@@ -2595,16 +2605,6 @@ impl Bank {
             ("pre_capitalization", capitalization, i64),
             ("post_capitalization", self.capitalization(), i64)
         );
-    }
-
-    fn load_vote_and_stake_accounts<F>(
-        &self,
-        thread_pool: &ThreadPool,
-        reward_cacl_tracer: Option<F>,
-    ) -> LoadVoteAndStakeAccountsResult
-    where
-        F: Fn(&RewardCalculationEvent) + Send + Sync,
-    {
     }
 
     /// map stake delegations into resolved (pubkey, account) pairs
@@ -2713,6 +2713,105 @@ impl Bank {
             vote_with_stake_delegations_map,
             invalid_vote_keys,
             invalid_stake_keys,
+            vote_accounts_miss_count: 0,
+        }
+    }
+
+    fn load_vote_and_stake_accounts<F>(
+        &self,
+        thread_pool: &ThreadPool,
+        reward_calc_tracer: Option<F>,
+    ) -> LoadVoteAndStakeAccountsResult
+    where
+        F: Fn(&RewardCalculationEvent) + Send + Sync,
+    {
+        let stakes = self.stakes_cache.stakes();
+        let vote_accounts = stakes.vote_accounts();
+        let vote_with_stake_delegations_map = DashMap::with_capacity(vote_accounts.as_ref().len());
+        let invalid_stake_keys: DashMap<Pubkey, InvalidCacheEntryReason> = DashMap::new();
+        let invalid_vote_keys: DashMap<Pubkey, InvalidCacheEntryReason> = DashMap::new();
+        let vote_accounts_miss_count = AtomicUsize::default();
+        let get_vote_account = |vote_pubkey: &Pubkey| -> Option<VoteAccount> {
+            if let Some((_, vote_account)) = vote_accounts.get(vote_pubkey) {
+                return Some(vote_account.clone());
+            }
+            let account = self.get_account_with_fixed_root(vote_pubkey)?;
+            if account.owner() == &solana_vote_program::id()
+                && VoteState::deserialize(account.data()).is_ok()
+            {
+                vote_accounts_miss_count.fetch_add(1, Relaxed);
+            }
+            Some(VoteAccount::from(account))
+        };
+        let stake_delegations: Vec<_> = stakes.stake_delegations().iter().collect();
+        thread_pool.install(|| {
+            stake_delegations
+                .into_par_iter()
+                .for_each(|(stake_pubkey, stake_account)| {
+                    let delegation = stake_account.delegation().unwrap();
+                    let vote_pubkey = &delegation.voter_pubkey;
+                    if invalid_vote_keys.contains_key(vote_pubkey) {
+                        return;
+                    }
+                    let stake_delegation = (*stake_pubkey, stake_account.clone());
+                    let mut vote_delegations = if let Some(vote_delegations) =
+                        vote_with_stake_delegations_map.get_mut(vote_pubkey)
+                    {
+                        vote_delegations
+                    } else {
+                        let vote_account = match get_vote_account(vote_pubkey) {
+                            Some(vote_account) => {
+                                if vote_account.owner() != &solana_vote_program::id() {
+                                    invalid_vote_keys
+                                        .insert(*vote_pubkey, InvalidCacheEntryReason::WrongOwner);
+                                    return;
+                                }
+                                vote_account
+                            }
+                            None => {
+                                invalid_vote_keys
+                                    .insert(*vote_pubkey, InvalidCacheEntryReason::Missing);
+                                return;
+                            }
+                        };
+
+                        let vote_state = match vote_account.vote_state().deref() {
+                            Ok(vote_state) => vote_state.clone(),
+                            Err(_) => {
+                                invalid_vote_keys
+                                    .insert(*vote_pubkey, InvalidCacheEntryReason::BadState);
+                                return;
+                            }
+                        };
+
+                        vote_with_stake_delegations_map
+                            .entry(*vote_pubkey)
+                            .or_insert_with(|| VoteWithStakeDelegations {
+                                vote_state: Arc::new(vote_state),
+                                vote_account: AccountSharedData::from(vote_account),
+                                delegations: vec![],
+                            })
+                    };
+
+                    if let Some(reward_calc_tracer) = reward_calc_tracer.as_ref() {
+                        reward_calc_tracer(&RewardCalculationEvent::Staking(
+                            stake_pubkey,
+                            &InflationPointCalculationEvent::Delegation(
+                                delegation,
+                                solana_vote_program::id(),
+                            ),
+                        ));
+                    }
+
+                    vote_delegations.delegations.push(stake_delegation);
+                });
+        });
+
+        LoadVoteAndStakeAccountsResult {
+            vote_with_stake_delegations_map,
+            invalid_vote_keys,
+            invalid_stake_keys,
+            vote_accounts_miss_count: vote_accounts_miss_count.into_inner(),
         }
     }
 
@@ -2725,7 +2824,8 @@ impl Bank {
         reward_calc_tracer: Option<impl Fn(&RewardCalculationEvent) + Send + Sync>,
         fix_activating_credits_observed: bool,
         thread_pool: &ThreadPool,
-        metrics: &RewardsMetrics,
+        metrics: &mut RewardsMetrics,
+        update_rewards_from_cached_accounts: bool,
     ) -> f64 {
         let stake_history = self.stakes_cache.stakes().history().clone();
         let vote_with_stake_delegations_map = {
@@ -2734,15 +2834,20 @@ impl Bank {
                 vote_with_stake_delegations_map,
                 invalid_stake_keys,
                 invalid_vote_keys,
-            } = self.load_vote_and_stake_accounts_with_thread_pool(
-                thread_pool,
-                reward_calc_tracer.as_ref(),
-            );
+                vote_accounts_miss_count,
+            } = if update_rewards_from_cached_accounts {
+                self.load_vote_and_stake_accounts(thread_pool, reward_calc_tracer.as_ref())
+            } else {
+                self.load_vote_and_stake_accounts_with_thread_pool(
+                    thread_pool,
+                    reward_calc_tracer.as_ref(),
+                )
+            };
             m.stop();
             metrics
                 .load_vote_and_stake_accounts_us
                 .fetch_add(m.as_us(), Relaxed);
-
+            metrics.vote_accounts_miss_count += vote_accounts_miss_count;
             let evict_invalid_stakes_cache_entries = self
                 .feature_set
                 .is_active(&feature_set::evict_invalid_stakes_cache_entries::id());
