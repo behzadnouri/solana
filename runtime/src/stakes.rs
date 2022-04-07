@@ -203,23 +203,16 @@ mod serde_compat {
 
 impl From<Stakes<StakeAccount>> for Stakes<Delegation> {
     fn from(stakes: Stakes<StakeAccount>) -> Self {
-        let Stakes {
-            vote_accounts,
-            stake_delegations,
-            unused,
-            epoch,
-            stake_history,
-        } = stakes;
-        let stake_delegations = stake_delegations
+        let stake_delegations = stakes.stake_delegations
             .into_iter()
             .map(|(pubkey, stake_account)| (pubkey, stake_account.delegation().unwrap()))
             .collect();
         Self {
-            vote_accounts,
+            vote_accounts: stakes.vote_accounts,
             stake_delegations,
-            unused,
-            epoch,
-            stake_history,
+            unused: stakes.unused,
+            epoch: stakes.epoch,
+            stake_history: stakes.stake_history,
         }
     }
 }
@@ -256,14 +249,7 @@ impl Stakes<StakeAccount> {
     where
         F: Fn(&Pubkey) -> Option<AccountSharedData>,
     {
-        let Stakes {
-            vote_accounts,
-            stake_delegations,
-            unused,
-            epoch,
-            stake_history,
-        } = stakes;
-        let stake_delegations = stake_delegations.iter().map(|(pubkey, delegation)| {
+        let stake_delegations = stakes.stake_delegations.iter().map(|(pubkey, delegation)| {
             let stake_account = match get_account(pubkey) {
                 None => return Err(Error::StakeAccountNotFound(*pubkey)),
                 Some(account) => account,
@@ -276,11 +262,11 @@ impl Stakes<StakeAccount> {
             }
         });
         Ok(Self {
-            vote_accounts: vote_accounts.clone(),
+            vote_accounts: stakes.vote_accounts.clone(),
             stake_delegations: stake_delegations.collect::<Result<_, _>>()?,
-            unused: *unused,
-            epoch: *epoch,
-            stake_history: stake_history.clone(),
+            unused: stakes.unused,
+            epoch: stakes.epoch,
+            stake_history: stakes.stake_history.clone(),
         })
     }
 
@@ -826,7 +812,7 @@ pub mod tests {
     #[test]
     fn test_vote_balance_and_staked_normal() {
         let stakes_cache = StakesCache::default();
-        impl Stakes {
+        impl Stakes<StakeAccount> {
             pub fn vote_balance_and_warmed_staked(&self) -> u64 {
                 self.vote_accounts
                     .iter()
