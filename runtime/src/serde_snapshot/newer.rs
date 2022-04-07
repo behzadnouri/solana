@@ -307,7 +307,6 @@ impl<'a> TypeContext<'a> for Context {
         let rhs = bank_fields;
         let blockhash_queue = RwLock::new(rhs.blockhash_queue.clone());
         let hard_forks = RwLock::new(rhs.hard_forks.clone());
-        let stakes_cache = StakesCache::new(rhs.stakes.clone());
         let bank = SerializableVersionedBank {
             blockhash_queue: &blockhash_queue,
             ancestors: &rhs.ancestors,
@@ -337,7 +336,7 @@ impl<'a> TypeContext<'a> for Context {
             rent_collector: rhs.rent_collector,
             epoch_schedule: rhs.epoch_schedule,
             inflation: rhs.inflation,
-            stakes: &stakes_cache,
+            stakes: rhs.stakes,
             unused_accounts: UnusedAccounts::default(),
             epoch_stakes: &rhs.epoch_stakes,
             is_delta: rhs.is_delta,
