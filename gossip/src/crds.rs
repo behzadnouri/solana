@@ -33,7 +33,7 @@ use {
     },
     bincode::serialize,
     indexmap::{
-        map::{rayon::ParValues, Entry, IndexMap},
+        map::{Entry, IndexMap},
         set::IndexSet,
     },
     lru::LruCache,
@@ -117,7 +117,7 @@ pub struct VersionedCrdsValue {
     pub(crate) value_hash: Hash,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Cursor(u64);
 
 impl Cursor {
@@ -133,7 +133,7 @@ impl Cursor {
 }
 
 impl VersionedCrdsValue {
-    fn new(value: CrdsValue, cursor: Cursor, local_timestamp: u64) -> Self {
+    fn new(value: CrdsValue, cursor: &Cursor, local_timestamp: u64) -> Self {
         let value_hash = hash(&serialize(&value).unwrap());
         VersionedCrdsValue {
             ordinal: cursor.ordinal(),
@@ -206,7 +206,7 @@ impl Crds {
     ) -> Result<(), CrdsError> {
         let label = value.label();
         let pubkey = value.pubkey();
-        let value = VersionedCrdsValue::new(value, self.cursor, now);
+        let value = VersionedCrdsValue::new(value, &self.cursor, now);
         match self.table.entry(label) {
             Entry::Vacant(entry) => {
                 self.stats.lock().unwrap().record_insert(&value, route);
@@ -359,29 +359,24 @@ impl Crds {
         self.records.len()
     }
 
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.table.len()
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.table.is_empty()
     }
 
-    #[cfg(test)]
     pub(crate) fn values(&self) -> impl Iterator<Item = &VersionedCrdsValue> {
         self.table.values()
-    }
-
-    pub(crate) fn par_values(&self) -> ParValues<'_, CrdsValueLabel, VersionedCrdsValue> {
-        self.table.par_values()
     }
 
     pub(crate) fn num_purged(&self) -> usize {
         self.purged.len()
     }
 
-    pub(crate) fn purged(&self) -> impl IndexedParallelIterator<Item = Hash> + '_ {
-        self.purged.par_iter().map(|(hash, _)| *hash)
+    pub(crate) fn purged(&self) -> impl Iterator<Item = Hash> + '_ {
+        self.purged.iter().map(|(hash, _)| *hash)
     }
 
     /// Drops purged value hashes with timestamp less than the given one.
@@ -470,7 +465,7 @@ impl Crds {
         })
     }
 
-    pub fn remove(&mut self, key: &CrdsValueLabel, now: u64) {
+    pub(crate) fn remove(&mut self, key: &CrdsValueLabel, now: u64) {
         let (index, _ /*label*/, value) = match self.table.swap_remove_full(key) {
             Some(entry) => entry,
             None => return,
@@ -601,7 +596,7 @@ impl Crds {
     pub(crate) fn mock_clone(&self) -> Self {
         Self {
             table: self.table.clone(),
-            cursor: self.cursor,
+            cursor: self.cursor.clone(),
             shards: self.shards.clone(),
             nodes: self.nodes.clone(),
             votes: self.votes.clone(),
@@ -674,6 +669,32 @@ impl CrdsStats {
             GossipRoute::PushMessage => self.push.record_fail(entry),
             GossipRoute::PullResponse => self.pull.record_fail(entry),
         }
+    }
+}
+
+impl std::iter::Sum for CrdsStats {
+    fn sum<I>(iter: I) -> Self
+    where
+        I: Iterator<Item = CrdsStats>,
+    {
+        iter.reduce(|mut stats, other| {
+            for i in 0..11 {
+                stats.pull.counts[i] += other.pull.counts[i];
+                stats.pull.fails[i] += other.pull.fails[i];
+                stats.push.counts[i] += other.push.counts[i];
+                stats.push.fails[i] += other.push.fails[i];
+            }
+            for (slot, mut count) in other.pull.votes {
+                count += stats.pull.votes.get(&slot).copied().unwrap_or_default();
+                stats.pull.votes.put(slot, count);
+            }
+            for (slot, mut count) in other.push.votes {
+                count += stats.push.votes.get(&slot).copied().unwrap_or_default();
+                stats.push.votes.put(slot, count);
+            }
+            stats
+        })
+        .unwrap_or_default()
     }
 }
 
@@ -1332,8 +1353,8 @@ mod tests {
     #[allow(clippy::neg_cmp_op_on_partial_ord)]
     fn test_equal() {
         let val = CrdsValue::new_unsigned(CrdsData::ContactInfo(ContactInfo::default()));
-        let v1 = VersionedCrdsValue::new(val.clone(), Cursor::default(), 1);
-        let v2 = VersionedCrdsValue::new(val, Cursor::default(), 1);
+        let v1 = VersionedCrdsValue::new(val.clone(), &Cursor::default(), 1);
+        let v2 = VersionedCrdsValue::new(val, &Cursor::default(), 1);
         assert_eq!(v1, v2);
         assert!(!(v1 != v2));
         assert!(!overrides(&v1.value, &v2));
@@ -1347,7 +1368,7 @@ mod tests {
                 &Pubkey::default(),
                 0,
             ))),
-            Cursor::default(),
+            &Cursor::default(),
             1, // local_timestamp
         );
         let v2 = VersionedCrdsValue::new(
@@ -1356,7 +1377,7 @@ mod tests {
                 contact_info.rpc = socketaddr!("0.0.0.0:0");
                 CrdsValue::new_unsigned(CrdsData::ContactInfo(contact_info))
             },
-            Cursor::default(),
+            &Cursor::default(),
             1, // local_timestamp
         );
 
@@ -1381,7 +1402,7 @@ mod tests {
                 &Pubkey::default(),
                 1,
             ))),
-            Cursor::default(),
+            &Cursor::default(),
             1, // local_timestamp
         );
         let v2 = VersionedCrdsValue::new(
@@ -1389,7 +1410,7 @@ mod tests {
                 &Pubkey::default(),
                 0,
             ))),
-            Cursor::default(),
+            &Cursor::default(),
             1, // local_timestamp
         );
         assert_eq!(v1.value.label(), v2.value.label());
@@ -1407,7 +1428,7 @@ mod tests {
                 &solana_sdk::pubkey::new_rand(),
                 0,
             ))),
-            Cursor::default(),
+            &Cursor::default(),
             1, // local_timestamp
         );
         let v2 = VersionedCrdsValue::new(
@@ -1415,7 +1436,7 @@ mod tests {
                 &solana_sdk::pubkey::new_rand(),
                 0,
             ))),
-            Cursor::default(),
+            &Cursor::default(),
             1, // local_timestamp
         );
         assert_ne!(v1, v2);

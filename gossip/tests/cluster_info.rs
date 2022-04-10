@@ -16,7 +16,7 @@ use {
     std::{
         collections::{HashMap, HashSet},
         sync::{Arc, Mutex},
-        time::Instant,
+        time::{Duration, Instant},
     },
 };
 
@@ -147,8 +147,7 @@ fn retransmit(
 #[allow(clippy::type_complexity)]
 fn run_simulation(stakes: &[u64], fanout: usize) {
     let num_threads = num_threads();
-    // set timeout to 5 minutes
-    let timeout = 60 * 5;
+    const TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
     // describe the leader
     let leader_info = ContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), 0);
@@ -226,7 +225,7 @@ fn run_simulation(stakes: &[u64], fanout: usize) {
         while remaining > 0 {
             for (id, (layer1_done, recv, r)) in batch.iter_mut() {
                 assert!(
-                    now.elapsed().as_secs() < timeout,
+                    now.elapsed() < TIMEOUT,
                     "Timed out with {:?} remaining nodes",
                     remaining
                 );
