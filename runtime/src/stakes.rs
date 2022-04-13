@@ -121,7 +121,7 @@ impl StakesCache {
             if let Some(stakes) = maybe_stakes.as_mut() {
                 stakes.remove_stake_delegation(&stake_pubkey);
             }
-            datapoint_warn!(
+            datapoint_error!(
                 "bank-stake_delegation_accounts-invalid-account",
                 ("slot", current_slot as i64, i64),
                 ("stake-address", format!("{:?}", stake_pubkey), String),
@@ -133,7 +133,7 @@ impl StakesCache {
             if let Some(stakes) = maybe_stakes.as_mut() {
                 stakes.remove_vote_account(&vote_pubkey);
             }
-            datapoint_warn!(
+            datapoint_error!(
                 "bank-stake_delegation_accounts-invalid-account",
                 ("slot", current_slot as i64, i64),
                 ("vote-address", format!("{:?}", vote_pubkey), String),
