@@ -4,43 +4,38 @@ use {
     solana_sdk::{
         account::{AccountSharedData, ReadableAccount},
         account_utils::StateMut,
-        instruction::InstructionError,
         pubkey::Pubkey,
         stake::state::{Delegation, StakeState},
     },
+    solana_stake_program::stake_state::{Meta, Stake},
     thiserror::Error,
 };
 
-/// An account and a state state deserialized from the account.
+/// A stake delegation account and its state deserialized from the account.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct StakeAccount(AccountSharedData, StakeState);
+pub struct StakeDelegationAccount(AccountSharedData, Meta, Stake);
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error(transparent)]
-    InstructionError(#[from] InstructionError),
+    #[error("invalid account data for active stake")]
+    InvalidAccountData,
     #[error("Invalid stake account owner: {owner:?}")]
     InvalidOwner { owner: Pubkey },
 }
 
-impl StakeAccount {
+impl StakeDelegationAccount {
     #[inline]
     pub(crate) fn lamports(&self) -> u64 {
         self.0.lamports()
     }
 
     #[inline]
-    pub(crate) fn delegation(&self) -> Option<Delegation> {
-        self.1.delegation()
-    }
-
-    #[inline]
-    pub(crate) fn stake_state(&self) -> &StakeState {
-        &self.1
+    pub(crate) fn delegation(&self) -> &Delegation {
+        &self.2.delegation
     }
 }
 
-impl TryFrom<AccountSharedData> for StakeAccount {
+impl TryFrom<AccountSharedData> for StakeDelegationAccount {
     type Error = Error;
     fn try_from(account: AccountSharedData) -> Result<Self, Self::Error> {
         if account.owner() != &solana_stake_program::id() {
@@ -48,19 +43,25 @@ impl TryFrom<AccountSharedData> for StakeAccount {
                 owner: *account.owner(),
             });
         }
-        let stake_state = account.state()?;
-        Ok(Self(account, stake_state))
+        if let Ok(StakeState::Stake(meta, stake)) = account.state() {
+            Ok(Self(account, meta, stake))
+        } else {
+            Err(Error::InvalidAccountData)
+        }
     }
 }
 
-impl From<StakeAccount> for (AccountSharedData, StakeState) {
-    fn from(stake_account: StakeAccount) -> Self {
-        (stake_account.0, stake_account.1)
+impl From<StakeDelegationAccount> for (StakeState, AccountSharedData) {
+    fn from(stake_account: StakeDelegationAccount) -> Self {
+        (
+            StakeState::Stake(stake_account.1, stake_account.2),
+            stake_account.0,
+        )
     }
 }
 
 #[cfg(RUSTC_WITH_SPECIALIZATION)]
-impl AbiExample for StakeAccount {
+impl AbiExample for StakeDelegationAccount {
     fn example() -> Self {
         use solana_sdk::{
             account::Account,
