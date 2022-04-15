@@ -1258,7 +1258,8 @@ pub struct Bank {
 struct VoteWithStakeDelegations {
     vote_state: Arc<VoteState>,
     vote_account: AccountSharedData,
-    delegations: Vec<(Pubkey, StakeAccount)>,
+    // TODO: use StakeAccount<Delegation> once the old code is deleted.
+    delegations: Vec<(Pubkey, StakeAccount<()>)>,
 }
 
 struct LoadVoteAndStakeAccountsResult {
@@ -1991,7 +1992,7 @@ impl Bank {
         // from Stakes<Delegation> by reading the full account state from
         // accounts-db. Note that it is crucial that these accounts are loaded
         // at the right slot and match precisely with serialized Delegations.
-        let stakes = Stakes::<StakeAccount>::new(&fields.stakes, |pubkey| {
+        let stakes = Stakes::new(&fields.stakes, |pubkey| {
             let (account, _slot) = bank_rc.accounts.load_with_fixed_root(&ancestors, pubkey)?;
             Some(account)
         })
@@ -2636,7 +2637,7 @@ impl Bank {
             stake_delegations
                 .into_par_iter()
                 .for_each(|(stake_pubkey, stake_account)| {
-                    let delegation = stake_account.delegation().unwrap();
+                    let delegation = stake_account.delegation();
                     let vote_pubkey = &delegation.voter_pubkey;
                     if invalid_vote_keys.contains_key(vote_pubkey) {
                         return;
@@ -2649,7 +2650,7 @@ impl Bank {
                             return;
                         }
                     };
-                    let stake_account = match StakeAccount::try_from(stake_account) {
+                    let stake_account = match StakeAccount::<()>::try_from(stake_account) {
                         Ok(stake_account) => stake_account,
                         Err(stake_account::Error::InvalidOwner { .. }) => {
                             invalid_stake_keys
@@ -2659,6 +2660,15 @@ impl Bank {
                         Err(stake_account::Error::InstructionError(_)) => {
                             invalid_stake_keys
                                 .insert(*stake_pubkey, InvalidCacheEntryReason::BadState);
+                            return;
+                        }
+                        Err(stake_account::Error::InvalidDelegation(_)) => {
+                            // This should not happen.
+                            error!(
+                                "Unexpected code path! StakeAccount<()> \
+                                should not check if stake-state is a \
+                                Delegation."
+                            );
                             return;
                         }
                     };
@@ -2749,7 +2759,7 @@ impl Bank {
                 .fold(
                     HashSet::default,
                     |mut voter_pubkeys, (_stake_pubkey, stake_account)| {
-                        let delegation = stake_account.delegation().unwrap();
+                        let delegation = stake_account.delegation();
                         voter_pubkeys.insert(delegation.voter_pubkey);
                         voter_pubkeys
                     },
@@ -2811,8 +2821,8 @@ impl Bank {
                     .collect()
             });
         // Join stake accounts with vote-accounts.
-        let push_stake_delegation = |(stake_pubkey, stake_account): (&Pubkey, &StakeAccount)| {
-            let delegation = stake_account.delegation().unwrap();
+        let push_stake_delegation = |(stake_pubkey, stake_account): (&Pubkey, &StakeAccount<_>)| {
+            let delegation = stake_account.delegation();
             let mut vote_delegations =
                 match vote_with_stake_delegations_map.get_mut(&delegation.voter_pubkey) {
                     Some(vote_delegations) => vote_delegations,
@@ -2824,7 +2834,8 @@ impl Bank {
                 let event = RewardCalculationEvent::Staking(stake_pubkey, &delegation);
                 reward_calc_tracer(&event);
             }
-            let stake_delegation = (*stake_pubkey, stake_account.clone());
+            let stake_account = StakeAccount::from(stake_account.clone());
+            let stake_delegation = (*stake_pubkey, stake_account);
             vote_delegations.delegations.push(stake_delegation);
         };
         thread_pool.install(|| {
