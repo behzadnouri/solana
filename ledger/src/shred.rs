@@ -423,8 +423,16 @@ impl Shred {
         }
     }
 
+    pub(crate) fn resize_stored_shred(shred: Vec<u8>) -> Result<Vec<u8>, Error> {
+        let out = Self::resize_stored_shred_(shred);
+        if let Err(ref err) = out {
+            error!("resize-stored-shred-error: {}", err);
+        }
+        out
+    }
+
     // Possibly zero pads bytes stored in blockstore.
-    pub(crate) fn resize_stored_shred(mut shred: Vec<u8>) -> Result<Vec<u8>, Error> {
+    fn resize_stored_shred_(mut shred: Vec<u8>) -> Result<Vec<u8>, Error> {
         let shred_type = match shred.get(OFFSET_OF_SHRED_TYPE) {
             None => return Err(Error::InvalidPayloadSize(shred.len())),
             Some(shred_type) => match ShredType::try_from(*shred_type) {
@@ -467,8 +475,16 @@ impl Shred {
         }
     }
 
-    // Returns true if the shred passes sanity checks.
     pub fn sanitize(&self) -> Result<(), Error> {
+        let out = self.sanitize_();
+        if let Err(ref err) = out {
+            error!("sanitize-shred-error: {}", err);
+        }
+        out
+    }
+
+    // Returns true if the shred passes sanity checks.
+    fn sanitize_(&self) -> Result<(), Error> {
         if self.payload().len() != SHRED_PAYLOAD_SIZE {
             return Err(Error::InvalidPayloadSize(self.payload.len()));
         }
