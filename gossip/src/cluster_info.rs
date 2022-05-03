@@ -744,6 +744,41 @@ impl ClusterInfo {
         let mut different_shred_nodes = 0usize;
         let my_pubkey = self.id();
         let my_shred_version = self.my_shred_version();
+        if let Some((node, _)) = self.all_peers().first() {
+            error!("contact-info: {:?}", node);
+            assert!(ContactInfo::is_valid_address(
+                &node.gossip,
+                &self.socket_addr_space
+            ));
+            assert!(ContactInfo::is_valid_address(
+                &node.tpu_vote,
+                &self.socket_addr_space
+            ));
+            assert!(ContactInfo::is_valid_address(
+                &node.tpu,
+                &self.socket_addr_space
+            ));
+            assert!(ContactInfo::is_valid_address(
+                &node.tpu_forwards,
+                &self.socket_addr_space
+            ));
+            assert!(ContactInfo::is_valid_address(
+                &node.tvu,
+                &self.socket_addr_space
+            ));
+            assert!(ContactInfo::is_valid_address(
+                &node.tvu_forwards,
+                &self.socket_addr_space
+            ));
+            assert!(ContactInfo::is_valid_address(
+                &node.repair,
+                &self.socket_addr_space
+            ));
+            assert!(ContactInfo::is_valid_address(
+                &node.serve_repair,
+                &self.socket_addr_space
+            ));
+        }
         let nodes: Vec<_> = self
             .all_peers()
             .into_iter()

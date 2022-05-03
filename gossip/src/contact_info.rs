@@ -230,6 +230,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_valid_address() {
+        let node = ContactInfo::default();
+        println!("addr: {}", node.serve_repair);
+        let socket_addr_space = SocketAddrSpace::new(false);
+        assert!(!ContactInfo::is_valid_address(
+            &node.serve_repair,
+            &socket_addr_space
+        ));
+        let addr = socketaddr!("34.127.112.97:8007");
+        println!("addr: {}", addr);
+        assert!(ContactInfo::is_valid_address(&addr, &socket_addr_space));
+    }
+
+    #[test]
     fn test_is_valid_address() {
         let bad_address_port = socketaddr!("127.0.0.1:0");
         assert!(!ContactInfo::is_valid_address(

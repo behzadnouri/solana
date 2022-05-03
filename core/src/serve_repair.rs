@@ -164,9 +164,10 @@ pub enum RepairProtocol {
     AncestorHashes(ContactInfo, Slot, Nonce),
 }
 
-#[derive(Clone)]
+// #[derive(Clone)]
 pub struct ServeRepair {
     cluster_info: Arc<ClusterInfo>,
+    peers: RwLock<HashSet<SocketAddr>>,
 }
 
 // Cache entry for repair peers for a slot.
@@ -204,7 +205,10 @@ impl RepairPeers {
 
 impl ServeRepair {
     pub fn new(cluster_info: Arc<ClusterInfo>) -> Self {
-        Self { cluster_info }
+        Self {
+            cluster_info,
+            peers: RwLock::default(),
+        }
     }
 
     fn my_info(&self) -> ContactInfo {
@@ -241,6 +245,8 @@ impl ServeRepair {
         //TODO: verify `from` is signed
         let from = Self::get_repair_sender(&request);
         if from.id == my_id {
+            error!("self-repair-error: {}, {:?}", from_addr, request);
+            // XXX
             stats.self_repair += 1;
             return None;
         }
@@ -354,6 +360,7 @@ impl ServeRepair {
         if stats.self_repair > 0 {
             let my_id = me.read().unwrap().cluster_info.id();
             warn!(
+                // XXX
                 "{}: Ignored received repair requests from ME: {}",
                 my_id, stats.self_repair,
             );
@@ -508,7 +515,11 @@ impl ServeRepair {
                 peers_cache.get(&slot).unwrap()
             }
         };
+        // XXX
         let (peer, addr) = repair_peers.sample(&mut rand::thread_rng());
+        if self.peers.write().unwrap().insert(addr) {
+            error!("repair-peer: {}, {}", addr, peer);
+        }
         let nonce =
             outstanding_requests.add_request(repair_request, solana_sdk::timing::timestamp());
         let out = self.map_repair_request(&repair_request, &peer, repair_stats, nonce)?;
@@ -569,6 +580,7 @@ impl ServeRepair {
                 repair_stats
                     .shred
                     .update(repair_peer_id, *slot, *shred_index);
+                // XXX
                 Ok(self.window_index_request_bytes(*slot, *shred_index, nonce)?)
             }
             ShredRepairType::HighestShred(slot, shred_index) => {
