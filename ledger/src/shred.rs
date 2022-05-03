@@ -71,6 +71,9 @@ use {
     thiserror::Error,
 };
 
+#[path = "shred/compat.rs"]
+mod shred_compat;
+
 pub type Nonce = u32;
 
 /// The following constants are computed by hand, and hardcoded.
