@@ -1,7 +1,7 @@
 use {
     crate::{accounts_db::SnapshotStorages, ancestors::Ancestors, rent_collector::RentCollector},
     log::*,
-    rayon::prelude::*,
+    rayon::{prelude::*, ThreadPool},
     solana_measure::measure::Measure,
     solana_sdk::{
         hash::{Hash, Hasher},
@@ -357,11 +357,12 @@ impl AccountsHash {
         self.filler_account_suffix.is_some()
     }
 
-    pub fn calculate_hash(hashes: Vec<Vec<Hash>>) -> (Hash, usize) {
+    pub fn calculate_hash(thread_pool: &ThreadPool, hashes: Vec<Vec<Hash>>) -> (Hash, usize) {
         let cumulative_offsets = CumulativeOffsets::from_raw(&hashes);
 
         let hash_total = cumulative_offsets.total_count;
         let result = AccountsHash::compute_merkle_root_from_slices(
+            thread_pool,
             hash_total,
             MERKLE_FANOUT,
             None,
@@ -371,13 +372,21 @@ impl AccountsHash {
         (result.0, hash_total)
     }
 
-    pub fn compute_merkle_root(hashes: Vec<(Pubkey, Hash)>, fanout: usize) -> Hash {
-        Self::compute_merkle_root_loop(hashes, fanout, |t| t.1)
+    pub fn compute_merkle_root(
+        thread_pool: &ThreadPool,
+        hashes: Vec<(Pubkey, Hash)>,
+        fanout: usize,
+    ) -> Hash {
+        Self::compute_merkle_root_loop(thread_pool, hashes, fanout, |t| t.1)
     }
 
     // this function avoids an infinite recursion compiler error
-    pub fn compute_merkle_root_recurse(hashes: Vec<Hash>, fanout: usize) -> Hash {
-        Self::compute_merkle_root_loop(hashes, fanout, |t: &Hash| *t)
+    pub fn compute_merkle_root_recurse(
+        thread_pool: &ThreadPool,
+        hashes: Vec<Hash>,
+        fanout: usize,
+    ) -> Hash {
+        Self::compute_merkle_root_loop(thread_pool, hashes, fanout, |t: &Hash| *t)
     }
 
     pub fn div_ceil(x: usize, y: usize) -> usize {
@@ -390,7 +399,12 @@ impl AccountsHash {
 
     // For the first iteration, there could be more items in the tuple than just hash and lamports.
     // Using extractor allows us to avoid an unnecessary array copy on the first iteration.
-    pub fn compute_merkle_root_loop<T, F>(hashes: Vec<T>, fanout: usize, extractor: F) -> Hash
+    pub fn compute_merkle_root_loop<T, F>(
+        thread_pool: &ThreadPool,
+        hashes: Vec<T>,
+        fanout: usize,
+        extractor: F,
+    ) -> Hash
     where
         F: Fn(&T) -> Hash + std::marker::Sync,
         T: std::marker::Sync,
@@ -404,28 +418,30 @@ impl AccountsHash {
         let total_hashes = hashes.len();
         let chunks = Self::div_ceil(total_hashes, fanout);
 
-        let result: Vec<_> = (0..chunks)
-            .into_par_iter()
-            .map(|i| {
-                let start_index = i * fanout;
-                let end_index = std::cmp::min(start_index + fanout, total_hashes);
+        let result: Vec<_> = thread_pool.install(|| {
+            (0..chunks)
+                .into_par_iter()
+                .map(|i| {
+                    let start_index = i * fanout;
+                    let end_index = std::cmp::min(start_index + fanout, total_hashes);
 
-                let mut hasher = Hasher::default();
-                for item in hashes.iter().take(end_index).skip(start_index) {
-                    let h = extractor(item);
-                    hasher.hash(h.as_ref());
-                }
+                    let mut hasher = Hasher::default();
+                    for item in hashes.iter().take(end_index).skip(start_index) {
+                        let h = extractor(item);
+                        hasher.hash(h.as_ref());
+                    }
 
-                hasher.result()
-            })
-            .collect();
+                    hasher.result()
+                })
+                .collect()
+        });
         time.stop();
         debug!("hashing {} {}", total_hashes, time);
 
         if result.len() == 1 {
             result[0]
         } else {
-            Self::compute_merkle_root_recurse(result, fanout)
+            Self::compute_merkle_root_recurse(thread_pool, result, fanout)
         }
     }
 
@@ -459,6 +475,7 @@ impl AccountsHash {
     // This function is designed to allow hashes to be located in multiple, perhaps multiply deep vecs.
     // The caller provides a function to return a slice from the source data.
     pub fn compute_merkle_root_from_slices<'a, F, T>(
+        thread_pool: &ThreadPool,
         total_hashes: usize,
         fanout: usize,
         max_levels_per_pass: Option<usize>,
@@ -488,110 +505,112 @@ impl AccountsHash {
         let data = get_hash_slice_starting_at_index(0);
         let data_len = data.len();
 
-        let result: Vec<_> = (0..chunks)
-            .into_par_iter()
-            .map(|i| {
-                // summary:
-                // this closure computes 1 or 3 levels of merkle tree (all chunks will be 1 or all will be 3)
-                // for a subset (our chunk) of the input data [start_index..end_index]
+        let result: Vec<_> = thread_pool.install(|| {
+            (0..chunks)
+                .into_par_iter()
+                .map(|i| {
+                    // summary:
+                    // this closure computes 1 or 3 levels of merkle tree (all chunks will be 1 or all will be 3)
+                    // for a subset (our chunk) of the input data [start_index..end_index]
 
-                // index into get_hash_slice_starting_at_index where this chunk's range begins
-                let start_index = i * num_hashes_per_chunk;
-                // index into get_hash_slice_starting_at_index where this chunk's range ends
-                let end_index = std::cmp::min(start_index + num_hashes_per_chunk, total_hashes);
+                    // index into get_hash_slice_starting_at_index where this chunk's range begins
+                    let start_index = i * num_hashes_per_chunk;
+                    // index into get_hash_slice_starting_at_index where this chunk's range ends
+                    let end_index = std::cmp::min(start_index + num_hashes_per_chunk, total_hashes);
 
-                // will compute the final result for this closure
-                let mut hasher = Hasher::default();
+                    // will compute the final result for this closure
+                    let mut hasher = Hasher::default();
 
-                // index into 'data' where we are currently pulling data
-                // if we exhaust our data, then we will request a new slice, and data_index resets to 0, the beginning of the new slice
-                let mut data_index = start_index;
-                // source data, which we may refresh when we exhaust
-                let mut data = data;
-                // len of the source data
-                let mut data_len = data_len;
+                    // index into 'data' where we are currently pulling data
+                    // if we exhaust our data, then we will request a new slice, and data_index resets to 0, the beginning of the new slice
+                    let mut data_index = start_index;
+                    // source data, which we may refresh when we exhaust
+                    let mut data = data;
+                    // len of the source data
+                    let mut data_len = data_len;
 
-                if !three_level {
-                    // 1 group of fanout
-                    // The result of this loop is a single hash value from fanout input hashes.
-                    for i in start_index..end_index {
-                        if data_index >= data_len {
-                            // we exhausted our data, fetch next slice starting at i
-                            data = get_hash_slice_starting_at_index(i);
-                            data_len = data.len();
-                            data_index = 0;
+                    if !three_level {
+                        // 1 group of fanout
+                        // The result of this loop is a single hash value from fanout input hashes.
+                        for i in start_index..end_index {
+                            if data_index >= data_len {
+                                // we exhausted our data, fetch next slice starting at i
+                                data = get_hash_slice_starting_at_index(i);
+                                data_len = data.len();
+                                data_index = 0;
+                            }
+                            hasher.hash(data[data_index].borrow().as_ref());
+                            data_index += 1;
                         }
-                        hasher.hash(data[data_index].borrow().as_ref());
-                        data_index += 1;
-                    }
-                } else {
-                    // hash 3 levels of fanout simultaneously.
-                    // This codepath produces 1 hash value for between 1..=fanout^3 input hashes.
-                    // It is equivalent to running the normal merkle tree calculation 3 iterations on the input.
-                    //
-                    // big idea:
-                    //  merkle trees usually reduce the input vector by a factor of fanout with each iteration
-                    //  example with fanout 2:
-                    //   start:     [0,1,2,3,4,5,6,7]      in our case: [...16M...] or really, 1B
-                    //   iteration0 [.5, 2.5, 4.5, 6.5]                 [... 1M...]
-                    //   iteration1 [1.5, 5.5]                          [...65k...]
-                    //   iteration2 3.5                                 [...4k... ]
-                    //  So iteration 0 consumes N elements, hashes them in groups of 'fanout' and produces a vector of N/fanout elements
-                    //   and the process repeats until there is only 1 hash left.
-                    //
-                    //  With the three_level code path, we make each chunk we iterate of size fanout^3 (4096)
-                    //  So, the input could be 16M hashes and the output will be 4k hashes, or N/fanout^3
-                    //  The goal is to reduce the amount of data that has to be constructed and held in memory.
-                    //  When we know we have enough hashes, then, in 1 pass, we hash 3 levels simultaneously, storing far fewer intermediate hashes.
-                    //
-                    // Now, some details:
-                    // The result of this loop is a single hash value from fanout^3 input hashes.
-                    // concepts:
-                    //  what we're conceptually hashing: "raw_hashes"[start_index..end_index]
-                    //   example: [a,b,c,d,e,f]
-                    //   but... hashes[] may really be multiple vectors that are pieced together.
-                    //   example: [[a,b],[c],[d,e,f]]
-                    //   get_hash_slice_starting_at_index(any_index) abstracts that and returns a slice starting at raw_hashes[any_index..]
-                    //   such that the end of get_hash_slice_starting_at_index may be <, >, or = end_index
-                    //   example: get_hash_slice_starting_at_index(1) returns [b]
-                    //            get_hash_slice_starting_at_index(3) returns [d,e,f]
-                    // This code is basically 3 iterations of merkle tree hashing occurring simultaneously.
-                    // The first fanout raw hashes are hashed in hasher_k. This is iteration0
-                    // Once hasher_k has hashed fanout hashes, hasher_k's result hash is hashed in hasher_j and then discarded
-                    // hasher_k then starts over fresh and hashes the next fanout raw hashes. This is iteration0 again for a new set of data.
-                    // Once hasher_j has hashed fanout hashes (from k), hasher_j's result hash is hashed in hasher and then discarded
-                    // Once hasher has hashed fanout hashes (from j), then the result of hasher is the hash for fanout^3 raw hashes.
-                    // If there are < fanout^3 hashes, then this code stops when it runs out of raw hashes and returns whatever it hashed.
-                    // This is always how the very last elements work in a merkle tree.
-                    let mut i = start_index;
-                    while i < end_index {
-                        let mut hasher_j = Hasher::default();
-                        for _j in 0..fanout {
-                            let mut hasher_k = Hasher::default();
-                            let end = std::cmp::min(end_index - i, fanout);
-                            for _k in 0..end {
-                                if data_index >= data_len {
-                                    // we exhausted our data, fetch next slice starting at i
-                                    data = get_hash_slice_starting_at_index(i);
-                                    data_len = data.len();
-                                    data_index = 0;
+                    } else {
+                        // hash 3 levels of fanout simultaneously.
+                        // This codepath produces 1 hash value for between 1..=fanout^3 input hashes.
+                        // It is equivalent to running the normal merkle tree calculation 3 iterations on the input.
+                        //
+                        // big idea:
+                        //  merkle trees usually reduce the input vector by a factor of fanout with each iteration
+                        //  example with fanout 2:
+                        //   start:     [0,1,2,3,4,5,6,7]      in our case: [...16M...] or really, 1B
+                        //   iteration0 [.5, 2.5, 4.5, 6.5]                 [... 1M...]
+                        //   iteration1 [1.5, 5.5]                          [...65k...]
+                        //   iteration2 3.5                                 [...4k... ]
+                        //  So iteration 0 consumes N elements, hashes them in groups of 'fanout' and produces a vector of N/fanout elements
+                        //   and the process repeats until there is only 1 hash left.
+                        //
+                        //  With the three_level code path, we make each chunk we iterate of size fanout^3 (4096)
+                        //  So, the input could be 16M hashes and the output will be 4k hashes, or N/fanout^3
+                        //  The goal is to reduce the amount of data that has to be constructed and held in memory.
+                        //  When we know we have enough hashes, then, in 1 pass, we hash 3 levels simultaneously, storing far fewer intermediate hashes.
+                        //
+                        // Now, some details:
+                        // The result of this loop is a single hash value from fanout^3 input hashes.
+                        // concepts:
+                        //  what we're conceptually hashing: "raw_hashes"[start_index..end_index]
+                        //   example: [a,b,c,d,e,f]
+                        //   but... hashes[] may really be multiple vectors that are pieced together.
+                        //   example: [[a,b],[c],[d,e,f]]
+                        //   get_hash_slice_starting_at_index(any_index) abstracts that and returns a slice starting at raw_hashes[any_index..]
+                        //   such that the end of get_hash_slice_starting_at_index may be <, >, or = end_index
+                        //   example: get_hash_slice_starting_at_index(1) returns [b]
+                        //            get_hash_slice_starting_at_index(3) returns [d,e,f]
+                        // This code is basically 3 iterations of merkle tree hashing occurring simultaneously.
+                        // The first fanout raw hashes are hashed in hasher_k. This is iteration0
+                        // Once hasher_k has hashed fanout hashes, hasher_k's result hash is hashed in hasher_j and then discarded
+                        // hasher_k then starts over fresh and hashes the next fanout raw hashes. This is iteration0 again for a new set of data.
+                        // Once hasher_j has hashed fanout hashes (from k), hasher_j's result hash is hashed in hasher and then discarded
+                        // Once hasher has hashed fanout hashes (from j), then the result of hasher is the hash for fanout^3 raw hashes.
+                        // If there are < fanout^3 hashes, then this code stops when it runs out of raw hashes and returns whatever it hashed.
+                        // This is always how the very last elements work in a merkle tree.
+                        let mut i = start_index;
+                        while i < end_index {
+                            let mut hasher_j = Hasher::default();
+                            for _j in 0..fanout {
+                                let mut hasher_k = Hasher::default();
+                                let end = std::cmp::min(end_index - i, fanout);
+                                for _k in 0..end {
+                                    if data_index >= data_len {
+                                        // we exhausted our data, fetch next slice starting at i
+                                        data = get_hash_slice_starting_at_index(i);
+                                        data_len = data.len();
+                                        data_index = 0;
+                                    }
+                                    hasher_k.hash(data[data_index].borrow().as_ref());
+                                    data_index += 1;
+                                    i += 1;
                                 }
-                                hasher_k.hash(data[data_index].borrow().as_ref());
-                                data_index += 1;
-                                i += 1;
+                                hasher_j.hash(hasher_k.result().as_ref());
+                                if i >= end_index {
+                                    break;
+                                }
                             }
-                            hasher_j.hash(hasher_k.result().as_ref());
-                            if i >= end_index {
-                                break;
-                            }
+                            hasher.hash(hasher_j.result().as_ref());
                         }
-                        hasher.hash(hasher_j.result().as_ref());
                     }
-                }
 
-                hasher.result()
-            })
-            .collect();
+                    hasher.result()
+                })
+                .collect()
+        });
         time.stop();
         debug!("hashing {} {}", total_hashes, time);
 
@@ -603,6 +622,7 @@ impl AccountsHash {
                 assert!(specific_level_count_value > 0);
                 // We did not hash the number of levels required by 'specific_level_count', so repeat
                 Self::compute_merkle_root_from_slices_recurse(
+                    thread_pool,
                     result,
                     fanout,
                     max_levels_per_pass,
@@ -614,7 +634,7 @@ impl AccountsHash {
                 if result.len() == 1 {
                     result[0]
                 } else {
-                    Self::compute_merkle_root_recurse(result, fanout)
+                    Self::compute_merkle_root_recurse(thread_pool, result, fanout)
                 },
                 vec![], // no intermediate results needed by caller
             )
@@ -622,12 +642,14 @@ impl AccountsHash {
     }
 
     pub fn compute_merkle_root_from_slices_recurse(
+        thread_pool: &ThreadPool,
         hashes: Vec<Hash>,
         fanout: usize,
         max_levels_per_pass: Option<usize>,
         specific_level_count: Option<usize>,
     ) -> (Hash, Vec<Hash>) {
         Self::compute_merkle_root_from_slices(
+            thread_pool,
             hashes.len(),
             fanout,
             max_levels_per_pass,
@@ -636,14 +658,17 @@ impl AccountsHash {
         )
     }
 
-    pub fn accumulate_account_hashes(mut hashes: Vec<(Pubkey, Hash)>) -> Hash {
-        Self::sort_hashes_by_pubkey(&mut hashes);
+    pub fn accumulate_account_hashes(
+        thread_pool: &ThreadPool,
+        mut hashes: Vec<(Pubkey, Hash)>,
+    ) -> Hash {
+        Self::sort_hashes_by_pubkey(thread_pool, &mut hashes);
 
-        Self::compute_merkle_root_loop(hashes, MERKLE_FANOUT, |i| i.1)
+        Self::compute_merkle_root_loop(thread_pool, hashes, MERKLE_FANOUT, |i| i.1)
     }
 
-    pub fn sort_hashes_by_pubkey(hashes: &mut Vec<(Pubkey, Hash)>) {
-        hashes.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    pub fn sort_hashes_by_pubkey(thread_pool: &ThreadPool, hashes: &mut Vec<(Pubkey, Hash)>) {
+        thread_pool.install(|| hashes.par_sort_unstable_by(|a, b| a.0.cmp(&b.0)));
     }
 
     pub fn compare_two_hash_entries(
@@ -662,6 +687,7 @@ impl AccountsHash {
 
     fn de_dup_and_eliminate_zeros<'a>(
         &self,
+        thread_pool: &ThreadPool,
         sorted_data_by_pubkey: &'a [Vec<Vec<CalculateHashIntermediate>>],
         stats: &mut HashStats,
         max_bin: usize,
@@ -674,26 +700,29 @@ impl AccountsHash {
         // b. lamports
         let mut zeros = Measure::start("eliminate zeros");
         let min_max_sum_entries_hashes = Mutex::new((usize::MAX, usize::MIN, 0u64, 0usize, 0usize));
-        let hashes: Vec<Vec<&Hash>> = (0..max_bin)
-            .into_par_iter()
-            .map(|bin| {
-                let (hashes, lamports_bin, unreduced_entries_count) =
-                    self.de_dup_accounts_in_parallel(sorted_data_by_pubkey, bin);
-                {
-                    let mut lock = min_max_sum_entries_hashes.lock().unwrap();
-                    let (mut min, mut max, mut lamports_sum, mut entries, mut hash_total) = *lock;
-                    min = std::cmp::min(min, unreduced_entries_count);
-                    max = std::cmp::max(max, unreduced_entries_count);
-                    lamports_sum = Self::checked_cast_for_capitalization(
-                        lamports_sum as u128 + lamports_bin as u128,
-                    );
-                    entries += unreduced_entries_count;
-                    hash_total += hashes.len();
-                    *lock = (min, max, lamports_sum, entries, hash_total);
-                }
-                hashes
-            })
-            .collect();
+        let hashes: Vec<Vec<&Hash>> = thread_pool.install(|| {
+            (0..max_bin)
+                .into_par_iter()
+                .map(|bin| {
+                    let (hashes, lamports_bin, unreduced_entries_count) =
+                        self.de_dup_accounts_in_parallel(sorted_data_by_pubkey, bin);
+                    {
+                        let mut lock = min_max_sum_entries_hashes.lock().unwrap();
+                        let (mut min, mut max, mut lamports_sum, mut entries, mut hash_total) =
+                            *lock;
+                        min = std::cmp::min(min, unreduced_entries_count);
+                        max = std::cmp::max(max, unreduced_entries_count);
+                        lamports_sum = Self::checked_cast_for_capitalization(
+                            lamports_sum as u128 + lamports_bin as u128,
+                        );
+                        entries += unreduced_entries_count;
+                        hash_total += hashes.len();
+                        *lock = (min, max, lamports_sum, entries, hash_total);
+                    }
+                    hashes
+                })
+                .collect()
+        });
         zeros.stop();
         stats.zeros_time_total_us += zeros.as_us();
         let (min, max, lamports_sum, entries, hash_total) =
@@ -862,6 +891,7 @@ impl AccountsHash {
     //     vec: [..] - items which fit in the containing bin. Sorted by: Pubkey, higher Slot, higher Write version (if pubkey =)
     pub fn rest_of_hash_calculation(
         &self,
+        thread_pool: &ThreadPool,
         data_sections_by_pubkey: Vec<Vec<Vec<CalculateHashIntermediate>>>,
         mut stats: &mut HashStats,
         is_last_pass: bool,
@@ -869,7 +899,7 @@ impl AccountsHash {
         max_bin: usize,
     ) -> (Hash, u64, PreviousPass) {
         let (mut hashes, mut total_lamports) =
-            self.de_dup_and_eliminate_zeros(&data_sections_by_pubkey, stats, max_bin);
+            self.de_dup_and_eliminate_zeros(thread_pool, &data_sections_by_pubkey, stats, max_bin);
 
         total_lamports += previous_state.lamports;
 
@@ -922,6 +952,7 @@ impl AccountsHash {
         if hash_total != 0 && (!is_last_pass || !next_pass.reduced_hashes.is_empty()) {
             let mut hash_time = Measure::start("hash");
             let partial_hashes = Self::compute_merkle_root_from_slices(
+                thread_pool,
                 hash_total, // note this does not include the ones that didn't divide evenly, unless we're in the last iteration
                 MERKLE_FANOUT,
                 Some(TARGET_FANOUT_LEVEL),
@@ -957,6 +988,7 @@ impl AccountsHash {
                 let mut hash_time = Measure::start("hash");
                 // hash all the rest and combine and hash until we have only 1 hash left
                 let (hash, _) = Self::compute_merkle_root_from_slices(
+                    thread_pool,
                     cumulative.total_count,
                     MERKLE_FANOUT,
                     None,
@@ -982,7 +1014,7 @@ impl AccountsHash {
 
 #[cfg(test)]
 pub mod tests {
-    use {super::*, std::str::FromStr};
+    use {super::*, rayon::ThreadPoolBuilder, std::str::FromStr};
 
     #[test]
     fn test_accountsdb_div_ceil() {
@@ -1008,7 +1040,7 @@ pub mod tests {
     #[test]
     fn test_accountsdb_rest_of_hash_calculation() {
         solana_logger::setup();
-
+        let thread_pool = ThreadPoolBuilder::new().build().unwrap();
         let mut account_maps = Vec::new();
 
         let key = Pubkey::new(&[11u8; 32]);
@@ -1024,6 +1056,7 @@ pub mod tests {
 
         let accounts_hash = AccountsHash::default();
         let result = accounts_hash.rest_of_hash_calculation(
+            &thread_pool,
             for_rest(account_maps.clone()),
             &mut HashStats::default(),
             true,
@@ -1040,6 +1073,7 @@ pub mod tests {
         account_maps.insert(0, val);
 
         let result = accounts_hash.rest_of_hash_calculation(
+            &thread_pool,
             for_rest(account_maps.clone()),
             &mut HashStats::default(),
             true,
@@ -1056,6 +1090,7 @@ pub mod tests {
         account_maps.insert(1, val);
 
         let result = accounts_hash.rest_of_hash_calculation(
+            &thread_pool,
             for_rest(account_maps),
             &mut HashStats::default(),
             true,
@@ -1077,7 +1112,7 @@ pub mod tests {
     #[test]
     fn test_accountsdb_multi_pass_rest_of_hash_calculation() {
         solana_logger::setup();
-
+        let thread_pool = ThreadPoolBuilder::new().build().unwrap();
         // passes:
         // 0: empty, NON-empty, empty, empty final
         // 1: NON-empty, empty final
@@ -1102,6 +1137,7 @@ pub mod tests {
             if pass == 0 {
                 // first pass that is not last and is empty
                 let result = accounts_index.rest_of_hash_calculation(
+                    &thread_pool,
                     vec![vec![vec![]]],
                     &mut HashStats::default(),
                     false, // not last pass
@@ -1117,6 +1153,7 @@ pub mod tests {
             }
 
             let result = accounts_index.rest_of_hash_calculation(
+                &thread_pool,
                 for_rest(account_maps.clone()),
                 &mut HashStats::default(),
                 false, // not last pass
@@ -1136,6 +1173,7 @@ pub mod tests {
             let accounts_index = AccountsHash::default();
             if pass == 2 {
                 let result = accounts_index.rest_of_hash_calculation(
+                    &thread_pool,
                     vec![vec![vec![]]],
                     &mut HashStats::default(),
                     false,
@@ -1150,6 +1188,7 @@ pub mod tests {
             }
 
             let result = accounts_index.rest_of_hash_calculation(
+                &thread_pool,
                 vec![vec![vec![]]],
                 &mut HashStats::default(),
                 true, // finally, last pass
@@ -1169,7 +1208,7 @@ pub mod tests {
     #[test]
     fn test_accountsdb_multi_pass_rest_of_hash_calculation_partial() {
         solana_logger::setup();
-
+        let thread_pool = ThreadPoolBuilder::new().build().unwrap();
         let mut account_maps = Vec::new();
 
         let key = Pubkey::new(&[11u8; 32]);
@@ -1183,6 +1222,7 @@ pub mod tests {
         account_maps.push(val);
         let accounts_hash = AccountsHash::default();
         let result = accounts_hash.rest_of_hash_calculation(
+            &thread_pool,
             for_rest(vec![account_maps[0].clone()]),
             &mut HashStats::default(),
             false, // not last pass
@@ -1198,6 +1238,7 @@ pub mod tests {
         assert_eq!(previous_pass.lamports, account_maps[0].lamports);
 
         let result = accounts_hash.rest_of_hash_calculation(
+            &thread_pool,
             for_rest(vec![account_maps[1].clone()]),
             &mut HashStats::default(),
             false, // not last pass
@@ -1217,6 +1258,7 @@ pub mod tests {
         assert_eq!(previous_pass.lamports, total_lamports_expected);
 
         let result = accounts_hash.rest_of_hash_calculation(
+            &thread_pool,
             vec![vec![vec![]]],
             &mut HashStats::default(),
             true,
@@ -1230,6 +1272,7 @@ pub mod tests {
         assert_eq!(previous_pass.lamports, 0);
 
         let expected_hash = AccountsHash::compute_merkle_root(
+            &thread_pool,
             account_maps
                 .iter()
                 .map(|a| (a.pubkey, a.hash))
@@ -1246,7 +1289,7 @@ pub mod tests {
     #[test]
     fn test_accountsdb_multi_pass_rest_of_hash_calculation_partial_hashes() {
         solana_logger::setup();
-
+        let thread_pool = ThreadPoolBuilder::new().build().unwrap();
         let mut account_maps = Vec::new();
         let accounts_hash = AccountsHash::default();
 
@@ -1269,6 +1312,7 @@ pub mod tests {
 
         // first 4097 hashes (1 left over)
         let result = accounts_hash.rest_of_hash_calculation(
+            &thread_pool,
             for_rest(chunk),
             &mut HashStats::default(),
             false, // not last pass
@@ -1283,6 +1327,7 @@ pub mod tests {
         assert_eq!(previous_pass.remaining_unhashed, vec![left_over_1]);
         assert_eq!(previous_pass.reduced_hashes.len(), 1);
         let expected_hash = AccountsHash::compute_merkle_root(
+            &thread_pool,
             sorted[0..target_fanout]
                 .iter()
                 .map(|a| (a.pubkey, a.hash))
@@ -1305,6 +1350,7 @@ pub mod tests {
         let mut with_left_over = vec![left_over_1];
         with_left_over.extend(sorted2[0..plus1 - 2].iter().cloned().map(|i| i.hash));
         let expected_hash2 = AccountsHash::compute_merkle_root(
+            &thread_pool,
             with_left_over[0..target_fanout]
                 .iter()
                 .map(|a| (Pubkey::default(), *a))
@@ -1314,6 +1360,7 @@ pub mod tests {
 
         // second 4097 hashes (2 left over)
         let result = accounts_hash.rest_of_hash_calculation(
+            &thread_pool,
             for_rest(chunk),
             &mut HashStats::default(),
             false, // not last pass
@@ -1342,6 +1389,7 @@ pub mod tests {
         );
 
         let result = accounts_hash.rest_of_hash_calculation(
+            &thread_pool,
             vec![vec![vec![]]],
             &mut HashStats::default(),
             true,
@@ -1357,6 +1405,7 @@ pub mod tests {
         let mut combined = sorted;
         combined.extend(sorted2);
         let expected_hash = AccountsHash::compute_merkle_root(
+            &thread_pool,
             combined
                 .iter()
                 .map(|a| (a.pubkey, a.hash))
@@ -1381,19 +1430,28 @@ pub mod tests {
     #[test]
     fn test_accountsdb_de_dup_accounts_empty() {
         solana_logger::setup();
+        let thread_pool = ThreadPoolBuilder::new().build().unwrap();
         let accounts_hash = AccountsHash::default();
 
         let vec = vec![vec![], vec![]];
-        let (hashes, lamports) =
-            accounts_hash.de_dup_and_eliminate_zeros(&vec, &mut HashStats::default(), one_range());
+        let (hashes, lamports) = accounts_hash.de_dup_and_eliminate_zeros(
+            &thread_pool,
+            &vec,
+            &mut HashStats::default(),
+            one_range(),
+        );
         assert_eq!(
             vec![&Hash::default(); 0],
             hashes.into_iter().flatten().collect::<Vec<_>>()
         );
         assert_eq!(lamports, 0);
         let vec = vec![];
-        let (hashes, lamports) =
-            accounts_hash.de_dup_and_eliminate_zeros(&vec, &mut HashStats::default(), zero_range());
+        let (hashes, lamports) = accounts_hash.de_dup_and_eliminate_zeros(
+            &thread_pool,
+            &vec,
+            &mut HashStats::default(),
+            zero_range(),
+        );
         let empty: Vec<Vec<&Hash>> = Vec::default();
         assert_eq!(empty, hashes);
         assert_eq!(lamports, 0);
@@ -1410,7 +1468,7 @@ pub mod tests {
     #[test]
     fn test_accountsdb_de_dup_accounts_from_stores() {
         solana_logger::setup();
-
+        let thread_pool = ThreadPoolBuilder::new().build().unwrap();
         let key_a = Pubkey::new(&[1u8; 32]);
         let key_b = Pubkey::new(&[2u8; 32]);
         let key_c = Pubkey::new(&[3u8; 32]);
@@ -1488,18 +1546,21 @@ pub mod tests {
                     let (hashes3, lamports3, _) = hash.de_dup_accounts_in_parallel(slice, 0);
                     let vec = slice.to_vec();
                     let (hashes4, lamports4) = hash.de_dup_and_eliminate_zeros(
+                        &thread_pool,
                         &vec,
                         &mut HashStats::default(),
                         end - start,
                     );
                     let vec = slice.to_vec();
                     let (hashes5, lamports5) = hash.de_dup_and_eliminate_zeros(
+                        &thread_pool,
                         &vec,
                         &mut HashStats::default(),
                         end - start,
                     );
                     let vec = slice.to_vec();
                     let (hashes6, lamports6) = hash.de_dup_and_eliminate_zeros(
+                        &thread_pool,
                         &vec,
                         &mut HashStats::default(),
                         end - start,
@@ -1835,7 +1896,8 @@ pub mod tests {
     }
 
     fn test_hashing_larger(hashes: Vec<(Pubkey, Hash)>, fanout: usize) -> Hash {
-        let result = AccountsHash::compute_merkle_root(hashes.clone(), fanout);
+        let thread_pool = ThreadPoolBuilder::new().build().unwrap();
+        let result = AccountsHash::compute_merkle_root(&thread_pool, hashes.clone(), fanout);
         let reduced: Vec<_> = hashes.iter().map(|x| x.1).collect();
         let result2 = test_hashing(reduced, fanout);
         assert_eq!(result, result2, "len: {}", hashes.len());
@@ -1843,10 +1905,12 @@ pub mod tests {
     }
 
     fn test_hashing(hashes: Vec<Hash>, fanout: usize) -> Hash {
+        let thread_pool = ThreadPoolBuilder::new().build().unwrap();
         let temp: Vec<_> = hashes.iter().map(|h| (Pubkey::default(), *h)).collect();
-        let result = AccountsHash::compute_merkle_root(temp, fanout);
+        let result = AccountsHash::compute_merkle_root(&thread_pool, temp, fanout);
         let reduced: Vec<_> = hashes.clone();
         let result2 = AccountsHash::compute_merkle_root_from_slices(
+            &thread_pool,
             hashes.len(),
             fanout,
             None,
@@ -1856,6 +1920,7 @@ pub mod tests {
         assert_eq!(result, result2.0, "len: {}", hashes.len());
 
         let result2 = AccountsHash::compute_merkle_root_from_slices(
+            &thread_pool,
             hashes.len(),
             fanout,
             Some(1),
@@ -1875,6 +1940,7 @@ pub mod tests {
 
                 let get_slice = |start: usize| -> &[Hash] { offsets.get_slice(&src, start) };
                 let result2 = AccountsHash::compute_merkle_root_from_slices(
+                    &thread_pool,
                     offsets.total_count,
                     fanout,
                     None,
@@ -1919,7 +1985,7 @@ pub mod tests {
     #[test]
     fn test_accountsdb_compute_merkle_root() {
         solana_logger::setup();
-
+        let thread_pool = ThreadPoolBuilder::new().build().unwrap();
         let expected_results = vec![
             (0, 0, "GKot5hBsd81kMupNCXHaqbhv3huEbxAFMLnpcX2hniwn", 0),
             (0, 1, "8unXKJYTxrR423HgQxbDmx29mFri1QNrzVKKDxEfc6bj", 0),
@@ -1968,10 +2034,12 @@ pub mod tests {
                 } else {
                     // this sorts inside
                     let early_result = AccountsHash::accumulate_account_hashes(
+                        &thread_pool,
                         input.iter().map(|i| (i.0, i.1)).collect::<Vec<_>>(),
                     );
-                    AccountsHash::sort_hashes_by_pubkey(&mut input);
-                    let result = AccountsHash::compute_merkle_root(input.clone(), fanout);
+                    AccountsHash::sort_hashes_by_pubkey(&thread_pool, &mut input);
+                    let result =
+                        AccountsHash::compute_merkle_root(&thread_pool, input.clone(), fanout);
                     assert_eq!(early_result, result);
                     result
                 };
@@ -2011,7 +2079,7 @@ pub mod tests {
     #[should_panic(expected = "overflow is detected while summing capitalization")]
     fn test_accountsdb_lamport_overflow2() {
         solana_logger::setup();
-
+        let thread_pool = ThreadPoolBuilder::new().build().unwrap();
         let offset = 2;
         let input = vec![
             vec![CalculateHashIntermediate::new(
@@ -2026,6 +2094,7 @@ pub mod tests {
             )],
         ];
         AccountsHash::default().de_dup_and_eliminate_zeros(
+            &thread_pool,
             &[input],
             &mut HashStats::default(),
             2, // accounts above are in 2 groups

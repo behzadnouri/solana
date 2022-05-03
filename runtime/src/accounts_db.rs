@@ -5282,7 +5282,8 @@ impl AccountsDb {
         let total_lamports = *total_lamports.lock().unwrap();
 
         let mut hash_time = Measure::start("hash");
-        let (accumulated_hash, hash_total) = AccountsHash::calculate_hash(hashes);
+        let (accumulated_hash, hash_total) =
+            AccountsHash::calculate_hash(&self.thread_pool, hashes);
         hash_time.stop();
         datapoint_info!(
             "update_accounts_hash",
@@ -5891,6 +5892,7 @@ impl AccountsDb {
                 )?;
 
                 let (hash, lamports, for_next_pass) = hash.rest_of_hash_calculation(
+                    &self.thread_pool,
                     result,
                     &mut stats,
                     pass == num_hash_scan_passes - 1,
@@ -6139,7 +6141,7 @@ impl AccountsDb {
 
         Self::extend_hashes_with_skipped_rewrites(&mut hashes, skipped_rewrites);
 
-        let ret = AccountsHash::accumulate_account_hashes(hashes);
+        let ret = AccountsHash::accumulate_account_hashes(&self.thread_pool, hashes);
         accumulate.stop();
         let mut uncleaned_time = Measure::start("uncleaned_index");
         self.uncleaned_pubkeys.insert(slot, dirty_keys);
@@ -7768,6 +7770,7 @@ pub mod tests {
         },
         assert_matches::assert_matches,
         rand::{prelude::SliceRandom, thread_rng, Rng},
+        rayon::ThreadPoolBuilder,
         solana_sdk::{
             account::{
                 accounts_equal, Account, AccountSharedData, ReadableAccount, WritableAccount,
@@ -8220,12 +8223,14 @@ pub mod tests {
     #[test]
     fn test_accountsdb_calculate_accounts_hash_without_index() {
         solana_logger::setup();
-
+        let thread_pool = ThreadPoolBuilder::new().build().unwrap();
         let (storages, raw_expected) = sample_storages_and_accounts();
-        let expected_hash =
-            AccountsHash::compute_merkle_root_loop(raw_expected.clone(), MERKLE_FANOUT, |item| {
-                item.hash
-            });
+        let expected_hash = AccountsHash::compute_merkle_root_loop(
+            &thread_pool,
+            raw_expected.clone(),
+            MERKLE_FANOUT,
+            |item| item.hash,
+        );
         let sum = raw_expected.iter().map(|item| item.lamports).sum();
         let db = AccountsDb::new(Vec::new(), &ClusterType::Development);
         let result = db

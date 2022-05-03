@@ -4,6 +4,7 @@ use {
     solana_measure::measure::Measure,
     solana_runtime::accounts_hash::AccountsHash,
     solana_sdk::{hash::Hash, pubkey::Pubkey},
+    rayon::ThreadPoolBuilder,
 };
 
 fn main() {
@@ -30,6 +31,7 @@ fn main() {
 
     let num_accounts = value_t!(matches, "num_accounts", usize).unwrap_or(10_000);
     let iterations = value_t!(matches, "iterations", usize).unwrap_or(20);
+    let thread_pool = ThreadPoolBuilder::new().build().unwrap();
     let hashes: Vec<_> = (0..num_accounts)
         .map(|_| (Pubkey::new_unique(), Hash::new_unique()))
         .collect();
@@ -38,7 +40,7 @@ fn main() {
             let hashes = hashes.clone(); // done outside timing
             let mut time = Measure::start("compute_merkle_root");
             let fanout = 16;
-            AccountsHash::compute_merkle_root(hashes, fanout);
+            AccountsHash::compute_merkle_root(&thread_pool, hashes, fanout);
             time.stop();
             time.as_us()
         })
