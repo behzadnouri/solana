@@ -1,8 +1,7 @@
 //! The `sendmmsg` module provides sendmmsg() API implementation
 
 #[cfg(target_os = "linux")]
-#[allow(deprecated)]
-use nix::sys::socket::InetAddr;
+use nix::sys::socket::{SockaddrIn, SockaddrIn6};
 #[cfg(target_os = "linux")]
 use {
     itertools::izip,
@@ -76,20 +75,21 @@ fn mmsghdr_for_packet(
     hdr.msg_hdr.msg_iovlen = 1;
     hdr.msg_hdr.msg_name = addr as *mut _ as *mut _;
 
-    #[allow(deprecated)]
-    match InetAddr::from_std(dest) {
-        InetAddr::V4(dest) => {
+    match dest {
+        SocketAddr::V4(dest) => {
+            let dest = SockaddrIn::from(*dest);
             unsafe {
                 std::ptr::write(addr as *mut _ as *mut _, dest);
             }
             hdr.msg_hdr.msg_namelen = SIZE_OF_SOCKADDR_IN as u32;
-        }
-        InetAddr::V6(dest) => {
+        },
+        SocketAddr::V6(dest) => {
+            let dest = SockaddrIn6::from(*dest);
             unsafe {
                 std::ptr::write(addr as *mut _ as *mut _, dest);
             }
             hdr.msg_hdr.msg_namelen = SIZE_OF_SOCKADDR_IN6 as u32;
-        }
+        },
     };
 }
 

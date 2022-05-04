@@ -1,8 +1,7 @@
 //! The `recvmmsg` module provides recvmmsg() API implementation
 
 #[cfg(target_os = "linux")]
-#[allow(deprecated)]
-use nix::sys::socket::InetAddr;
+use nix::sys::socket::{SockaddrIn, SockaddrIn6, InetAddr};
 pub use solana_perf::packet::NUM_RCVMMSGS;
 use {
     crate::packet::{Meta, Packet},
@@ -43,7 +42,6 @@ pub fn recv_mmsg(socket: &UdpSocket, packets: &mut [Packet]) -> io::Result</*num
 }
 
 #[cfg(target_os = "linux")]
-#[allow(deprecated)]
 fn cast_socket_addr(addr: &sockaddr_storage, hdr: &mmsghdr) -> Option<InetAddr> {
     use libc::{sa_family_t, sockaddr_in, sockaddr_in6};
     const SOCKADDR_IN_SIZE: usize = std::mem::size_of::<sockaddr_in>();
