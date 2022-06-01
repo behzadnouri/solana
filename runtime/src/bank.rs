@@ -7442,7 +7442,10 @@ pub(crate) mod tests {
                 MAX_LOCKOUT_HISTORY,
             },
         },
-        std::{result, sync::atomic::Ordering::Release, thread::Builder, time::Duration},
+        std::{
+            collections::VecDeque, result, sync::atomic::Ordering::Release, thread::Builder,
+            time::Duration,
+        },
         test_utils::goto_end_of_slot,
     };
 
@@ -12562,6 +12565,110 @@ pub(crate) mod tests {
             bank.process_transaction(&nonce_tx),
             Err(TransactionError::BlockhashNotFound),
         );
+    }
+
+    #[derive(Debug, Default)]
+    struct BankSquasher {
+        banks: VecDeque<Arc<Bank>>,
+    }
+
+    impl BankSquasher {
+        const SIZE: usize = 32;
+        fn new(bank: Arc<Bank>) -> Self {
+            let mut bs = BankSquasher::default();
+            bs.banks.push_front(bank);
+            bs
+        }
+
+        fn get_balance(&self, address: &Pubkey) -> u64 {
+            let bank0 = self.banks.get(0).unwrap();
+            bank0.get_balance(address)
+        }
+
+        fn goto_end_of_slot(&mut self) {
+            if self.banks.len() == Self::SIZE {
+                if let Some(squash) = self.banks.pop_back() {
+                    squash.squash();
+                }
+            }
+
+            let bank0 = self.banks.get_mut(0).unwrap();
+            goto_end_of_slot(Arc::get_mut(bank0).unwrap());
+            let new_bank = Arc::new(new_from_parent(bank0));
+            self.banks.push_front(new_bank);
+        }
+
+        fn get_nonce_blockhash(&self, nonce_address: &Pubkey) -> Option<Hash> {
+            let bank0 = self.banks.get(0).unwrap();
+            get_nonce_blockhash(bank0, nonce_address)
+        }
+
+        fn last_blockhash(&self) -> Hash {
+            let bank0 = self.banks.get(0).unwrap();
+            bank0.last_blockhash()
+        }
+
+        fn process_transaction(&self, tx: &Transaction) -> Result<()> {
+            let bank0 = self.banks.get(0).unwrap();
+            bank0.process_transaction(tx)
+        }
+    }
+
+    #[test]
+    fn test_nonce_transaction_extant_blockhash_takes_nonce_path() {
+        let mut feature_set = FeatureSet::all_enabled();
+        feature_set.deactivate(&tx_wide_compute_cap::id());
+        let (bank, _mint_keypair, custodian_keypair, nonce_keypair) =
+            setup_nonce_with_bank(10_000_000, |_| {}, 5_000_000, 250_000, None, feature_set)
+                .unwrap();
+        let mut bank = BankSquasher::new(bank);
+        let alice_keypair = Keypair::new();
+        let alice_pubkey = alice_keypair.pubkey();
+        let custodian_pubkey = custodian_keypair.pubkey();
+        let nonce_pubkey = nonce_keypair.pubkey();
+
+        assert_eq!(bank.get_balance(&custodian_pubkey), 4_750_000);
+        assert_eq!(bank.get_balance(&nonce_pubkey), 250_000);
+
+        /* Grab the hash stored in the nonce account */
+        let nonce_hash = bank.get_nonce_blockhash(&nonce_pubkey).unwrap();
+
+        /* Step one slot */
+        bank.goto_end_of_slot();
+
+        /* Advance and transfer with extant blockhash */
+        let blockhash = bank.last_blockhash();
+        assert_ne!(blockhash, nonce_hash);
+        let nonce_tx = Transaction::new_signed_with_payer(
+            &[
+                system_instruction::advance_nonce_account(&nonce_pubkey, &nonce_pubkey),
+                system_instruction::transfer(&custodian_pubkey, &alice_pubkey, 100_000),
+            ],
+            Some(&custodian_pubkey),
+            &[&custodian_keypair, &nonce_keypair],
+            blockhash,
+        );
+        assert_eq!(bank.process_transaction(&nonce_tx), Ok(()));
+        // replay fails at status cache
+        assert_eq!(
+            bank.process_transaction(&nonce_tx),
+            Err(TransactionError::AlreadyProcessed)
+        );
+
+        /* get new stored nonce */
+        let nonce_hash = bank.get_nonce_blockhash(&nonce_pubkey).unwrap();
+        assert_eq!(blockhash, nonce_hash);
+
+        /* Kick nonce hash off the blockhash_queue */
+        for _ in 0..MAX_RECENT_BLOCKHASHES + 32 {
+            bank.goto_end_of_slot();
+        }
+
+        // replay fails at status cache
+        bank.process_transaction(&nonce_tx).unwrap();
+        /* get new stored nonce */
+        let nonce_hash = bank.get_nonce_blockhash(&nonce_pubkey).unwrap();
+        assert_ne!(blockhash, nonce_hash);
     }
 
     #[test]
