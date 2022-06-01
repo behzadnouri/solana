@@ -4126,17 +4126,10 @@ impl Bank {
 
     pub fn check_transaction_for_nonce(
         &self,
-        tx: &SanitizedTransaction,
+        _tx: &SanitizedTransaction,
     ) -> Option<TransactionAccount> {
-        if self.cluster_type() == ClusterType::MainnetBeta {
-            if self.slot() <= 135986379 {
-                self.check_message_for_nonce(tx.message())
-            } else {
-                None
-            }
-        } else {
-            self.check_message_for_nonce(tx.message())
-        }
+        None
+        // self.check_message_for_nonce(tx.message())
     }
 
     pub fn check_transactions(
