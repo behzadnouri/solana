@@ -5549,11 +5549,10 @@ pub mod tests {
                 let authority = Pubkey::new_unique();
                 let account = AccountSharedData::new_data(
                     42,
-                    &nonce::state::Versions::new_current(nonce::State::new_initialized(
-                        &authority,
-                        DurableNonce::default(),
-                        1000,
-                    )),
+                    &nonce::state::Versions::new_current(
+                        nonce::State::new_initialized(&authority, DurableNonce::default(), 1000),
+                        /*separate_domains:*/ true,
+                    ),
                     &system_program::id(),
                 )
                 .unwrap();

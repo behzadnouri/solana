@@ -1074,9 +1074,14 @@ mod test {
         let nonce_address = Pubkey::new_unique();
         let durable_nonce =
             DurableNonce::from_blockhash(&Hash::new_unique(), /*separate_domains:*/ true);
-        let nonce_state = nonce::state::Versions::new_current(nonce::State::Initialized(
-            nonce::state::Data::new(Pubkey::default(), durable_nonce, 42),
-        ));
+        let nonce_state = nonce::state::Versions::new_current(
+            nonce::State::Initialized(nonce::state::Data::new(
+                Pubkey::default(),
+                durable_nonce,
+                42,
+            )),
+            /*separate_domains:*/ true,
+        );
         let nonce_account =
             AccountSharedData::new_data(43, &nonce_state, &system_program::id()).unwrap();
         root_bank.store_account(&nonce_address, &nonce_account);
@@ -1318,9 +1323,14 @@ mod test {
         }
         let new_durable_nonce =
             DurableNonce::from_blockhash(&Hash::new_unique(), /*separate_domains:*/ true);
-        let new_nonce_state = nonce::state::Versions::new_current(nonce::State::Initialized(
-            nonce::state::Data::new(Pubkey::default(), new_durable_nonce, 42),
-        ));
+        let new_nonce_state = nonce::state::Versions::new_current(
+            nonce::State::Initialized(nonce::state::Data::new(
+                Pubkey::default(),
+                new_durable_nonce,
+                42,
+            )),
+            /*separate_domains:*/ true,
+        );
         let nonce_account =
             AccountSharedData::new_data(43, &new_nonce_state, &system_program::id()).unwrap();
         working_bank.store_account(&nonce_address, &nonce_account);

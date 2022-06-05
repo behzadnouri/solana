@@ -16,11 +16,13 @@ use {
     std::collections::HashSet,
 };
 
-fn get_durable_nonce(invoke_context: &InvokeContext) -> DurableNonce {
+fn get_durable_nonce(invoke_context: &InvokeContext) -> (DurableNonce, /*separate_domains:*/ bool) {
     let separate_nonce_from_blockhash = invoke_context
         .feature_set
         .is_active(&feature_set::separate_nonce_from_blockhash::id());
-    DurableNonce::from_blockhash(&invoke_context.blockhash, separate_nonce_from_blockhash)
+    let durable_nonce =
+        DurableNonce::from_blockhash(&invoke_context.blockhash, separate_nonce_from_blockhash);
+    (durable_nonce, separate_nonce_from_blockhash)
 }
 
 pub fn advance_nonce_account(
@@ -56,7 +58,7 @@ pub fn advance_nonce_account(
                 );
                 return Err(InstructionError::MissingRequiredSignature);
             }
-            let next_durable_nonce = get_durable_nonce(invoke_context);
+            let (next_durable_nonce, separate_domains) = get_durable_nonce(invoke_context);
             if data.durable_nonce == next_durable_nonce {
                 ic_msg!(
                     invoke_context,
@@ -73,7 +75,10 @@ pub fn advance_nonce_account(
                 next_durable_nonce,
                 invoke_context.lamports_per_signature,
             );
-            account.set_state(&Versions::new_current(State::Initialized(new_data)))
+            account.set_state(&Versions::new_current(
+                State::Initialized(new_data),
+                separate_domains,
+            ))
         }
         _ => {
             ic_msg!(
@@ -119,6 +124,7 @@ pub fn withdraw_nonce_account(
     }
 
     let state: Versions = from.get_state()?;
+    let separate_domains = state.separate_domains();
     let signer = match state.convert_to_current() {
         State::Uninitialized => {
             if lamports > from.get_lamports() {
@@ -134,7 +140,7 @@ pub fn withdraw_nonce_account(
         }
         State::Initialized(ref data) => {
             if lamports == from.get_lamports() {
-                if data.durable_nonce == get_durable_nonce(invoke_context) {
+                if data.durable_nonce == get_durable_nonce(invoke_context).0 {
                     ic_msg!(
                         invoke_context,
                         "Withdraw nonce account: nonce can only advance once per slot"
@@ -144,7 +150,10 @@ pub fn withdraw_nonce_account(
                         merge_nonce_error_into_system_error,
                     ));
                 }
-                from.set_state(&Versions::new_current(State::Uninitialized))?;
+                from.set_state(&Versions::new_current(
+                    State::Uninitialized,
+                    separate_domains,
+                ))?;
             } else {
                 let min_balance = rent.minimum_balance(from.get_data().len());
                 let amount = checked_add(lamports, min_balance)?;
@@ -217,12 +226,14 @@ pub fn initialize_nonce_account(
                 );
                 return Err(InstructionError::InsufficientFunds);
             }
+            let (durable_nonce, separate_domains) = get_durable_nonce(invoke_context);
             let data = nonce::state::Data::new(
                 *nonce_authority,
-                get_durable_nonce(invoke_context),
+                durable_nonce,
                 invoke_context.lamports_per_signature,
             );
-            account.set_state(&Versions::new_current(State::Initialized(data)))
+            let state = State::Initialized(data);
+            account.set_state(&Versions::new_current(state, separate_domains))
         }
         _ => {
             ic_msg!(
@@ -262,6 +273,7 @@ pub fn authorize_nonce_account(
     }
 
     let state: Versions = account.get_state()?;
+    let separate_domains = state.separate_domains();
     match state.convert_to_current() {
         State::Initialized(data) => {
             if !signers.contains(&data.authority) {
@@ -277,7 +289,10 @@ pub fn authorize_nonce_account(
                 data.durable_nonce,
                 data.get_lamports_per_signature(),
             );
-            account.set_state(&Versions::new_current(State::Initialized(new_data)))
+            account.set_state(&Versions::new_current(
+                State::Initialized(new_data),
+                separate_domains,
+            ))
         }
         _ => {
             ic_msg!(
@@ -334,9 +349,12 @@ mod test {
             let accounts = vec![
                 (
                     Pubkey::new_unique(),
-                    create_account(from_lamports).into_inner(),
+                    create_account(from_lamports, /*separate_domains:*/ true).into_inner(),
                 ),
-                (Pubkey::new_unique(), create_account(42).into_inner()),
+                (
+                    Pubkey::new_unique(),
+                    create_account(42, /*separate_domains:*/ true).into_inner(),
+                ),
                 (system_program::id(), AccountSharedData::default()),
             ];
             let $instruction_accounts = vec![
@@ -405,7 +423,7 @@ mod test {
             .convert_to_current();
         let data = nonce::state::Data::new(
             data.authority,
-            get_durable_nonce(&invoke_context),
+            get_durable_nonce(&invoke_context).0,
             invoke_context.lamports_per_signature,
         );
         // First nonce instruction drives state from Uninitialized to Initialized
@@ -418,7 +436,7 @@ mod test {
             .convert_to_current();
         let data = nonce::state::Data::new(
             data.authority,
-            get_durable_nonce(&invoke_context),
+            get_durable_nonce(&invoke_context).0,
             invoke_context.lamports_per_signature,
         );
         // Second nonce instruction consumes and replaces stored nonce
@@ -431,7 +449,7 @@ mod test {
             .convert_to_current();
         let data = nonce::state::Data::new(
             data.authority,
-            get_durable_nonce(&invoke_context),
+            get_durable_nonce(&invoke_context).0,
             invoke_context.lamports_per_signature,
         );
         // Third nonce instruction for fun and profit
@@ -496,7 +514,7 @@ mod test {
             .convert_to_current();
         let data = nonce::state::Data::new(
             authority,
-            get_durable_nonce(&invoke_context),
+            get_durable_nonce(&invoke_context).0,
             invoke_context.lamports_per_signature,
         );
         assert_eq!(state, State::Initialized(data));
@@ -829,7 +847,7 @@ mod test {
             .convert_to_current();
         let data = nonce::state::Data::new(
             authority,
-            get_durable_nonce(&invoke_context),
+            get_durable_nonce(&invoke_context).0,
             invoke_context.lamports_per_signature,
         );
         assert_eq!(state, State::Initialized(data.clone()));
@@ -861,7 +879,7 @@ mod test {
             .convert_to_current();
         let data = nonce::state::Data::new(
             data.authority,
-            get_durable_nonce(&invoke_context),
+            get_durable_nonce(&invoke_context).0,
             invoke_context.lamports_per_signature,
         );
         assert_eq!(state, State::Initialized(data));
@@ -1059,7 +1077,7 @@ mod test {
             initialize_nonce_account(&mut nonce_account, &authorized, &rent, &invoke_context);
         let data = nonce::state::Data::new(
             authorized,
-            get_durable_nonce(&invoke_context),
+            get_durable_nonce(&invoke_context).0,
             invoke_context.lamports_per_signature,
         );
         assert_eq!(result, Ok(()));
@@ -1131,7 +1149,7 @@ mod test {
         let authority = Pubkey::default();
         let data = nonce::state::Data::new(
             authority,
-            get_durable_nonce(&invoke_context),
+            get_durable_nonce(&invoke_context).0,
             invoke_context.lamports_per_signature,
         );
         authorize_nonce_account(&mut nonce_account, &authority, &signers, &invoke_context).unwrap();
@@ -1213,7 +1231,7 @@ mod test {
                 .get_account_at_index(NONCE_ACCOUNT_INDEX)
                 .unwrap()
                 .borrow(),
-            get_durable_nonce(&invoke_context).as_hash(),
+            get_durable_nonce(&invoke_context).0.as_hash(),
         ));
     }
 
@@ -1268,7 +1286,7 @@ mod test {
                 .get_account_at_index(NONCE_ACCOUNT_INDEX)
                 .unwrap()
                 .borrow(),
-            get_durable_nonce(&invoke_context).as_hash(),
+            get_durable_nonce(&invoke_context).0.as_hash(),
         ));
     }
 }

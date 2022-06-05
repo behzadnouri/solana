@@ -58,7 +58,10 @@ mod test {
 
     #[test]
     fn test_parse_nonce() {
-        let nonce_data = Versions::new_current(State::Initialized(Data::default()));
+        let nonce_data = Versions::new_current(
+            State::Initialized(Data::default()),
+            /*separate_domains:*/ true,
+        );
         let nonce_account_data = bincode::serialize(&nonce_data).unwrap();
         assert_eq!(
             parse_nonce(&nonce_account_data).unwrap(),

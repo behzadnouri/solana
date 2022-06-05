@@ -8,11 +8,11 @@ use {
     std::cell::RefCell,
 };
 
-pub fn create_account(lamports: u64) -> RefCell<AccountSharedData> {
+pub fn create_account(lamports: u64, separate_domains: bool) -> RefCell<AccountSharedData> {
     RefCell::new(
         AccountSharedData::new_data_with_space(
             lamports,
-            &Versions::new_current(State::Uninitialized),
+            &Versions::new_current(State::Uninitialized, separate_domains),
             State::size(),
             &crate::system_program::id(),
         )
@@ -20,11 +20,11 @@ pub fn create_account(lamports: u64) -> RefCell<AccountSharedData> {
     )
 }
 
-// TODO: Consider changing argument from Hash to DurableNonce.
 pub fn verify_nonce_account(acc: &AccountSharedData, hash: &Hash) -> bool {
     if acc.owner() != &crate::system_program::id() {
         return false;
     }
+    // XXX Should exclude legacy!
     match StateMut::<Versions>::state(acc).map(|v| v.convert_to_current()) {
         Ok(State::Initialized(ref data)) => hash == &data.blockhash(),
         _ => false,
@@ -51,7 +51,7 @@ mod tests {
         assert_ne!(program_id, crate::system_program::id());
         let account = AccountSharedData::new_data_with_space(
             42,
-            &Versions::new_current(State::Uninitialized),
+            &Versions::new_current(State::Uninitialized, /*separate_domains:*/ true),
             State::size(),
             &program_id,
         )

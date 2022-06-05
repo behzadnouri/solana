@@ -10,7 +10,7 @@ pub enum Versions {
 }
 
 impl Versions {
-    pub fn new_current(state: State) -> Self {
+    pub fn new_current(state: State, separate_domains: bool) -> Self {
         Self::Current(Box::new(state))
     }
 
@@ -18,5 +18,9 @@ impl Versions {
         match self {
             Self::Current(state) => *state,
         }
+    }
+
+    pub fn separate_domains(&self) -> bool {
+        false // XXX
     }
 }

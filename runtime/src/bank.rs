@@ -4916,7 +4916,9 @@ impl Bank {
             let separate_nonce_from_blockhash = self
                 .feature_set
                 .is_active(&feature_set::separate_nonce_from_blockhash::id());
-            DurableNonce::from_blockhash(&last_blockhash, separate_nonce_from_blockhash)
+            let durable_nonce =
+                DurableNonce::from_blockhash(&last_blockhash, separate_nonce_from_blockhash);
+            (durable_nonce, separate_nonce_from_blockhash)
         };
         self.rc.accounts.store_cached(
             self.slot(),
@@ -7635,9 +7637,14 @@ pub(crate) mod tests {
             DurableNonce::from_blockhash(&Hash::new_unique(), /*separate_domains:*/ true);
         let nonce_account = AccountSharedData::new_data(
             43,
-            &nonce::state::Versions::new_current(nonce::State::Initialized(
-                nonce::state::Data::new(Pubkey::default(), durable_nonce, lamports_per_signature),
-            )),
+            &nonce::state::Versions::new_current(
+                nonce::State::Initialized(nonce::state::Data::new(
+                    Pubkey::default(),
+                    durable_nonce,
+                    lamports_per_signature,
+                )),
+                /*separate_domains:*/ true,
+            ),
             &system_program::id(),
         )
         .unwrap();
@@ -10160,9 +10167,10 @@ pub(crate) mod tests {
         let nonce = Keypair::new();
         let nonce_account = AccountSharedData::new_data(
             min_balance + 42,
-            &nonce::state::Versions::new_current(nonce::State::Initialized(
-                nonce::state::Data::default(),
-            )),
+            &nonce::state::Versions::new_current(
+                nonce::State::Initialized(nonce::state::Data::default()),
+                /*separate_domains:*/ true,
+            ),
             &system_program::id(),
         )
         .unwrap();
@@ -12578,9 +12586,10 @@ pub(crate) mod tests {
         let nonce = Keypair::new();
         let nonce_account = AccountSharedData::new_data(
             42_424_242,
-            &nonce::state::Versions::new_current(nonce::State::Initialized(
-                nonce::state::Data::default(),
-            )),
+            &nonce::state::Versions::new_current(
+                nonce::State::Initialized(nonce::state::Data::default()),
+                /*separate_domains:*/ true,
+            ),
             &system_program::id(),
         )
         .unwrap();
