@@ -64,22 +64,11 @@ impl Shredder {
         Vec<Shred>, // data shreds
         Vec<Shred>, // coding shreds
     ) {
-        let data_shreds = self.entries_to_data_shreds(
-            keypair,
-            entries,
-            is_last_in_slot,
-            next_shred_index,
-            next_shred_index, // fec_set_offset
-            stats,
-        );
-        let coding_shreds = Self::data_shreds_to_coding_shreds(
-            keypair,
-            &data_shreds,
-            is_last_in_slot,
-            next_code_index,
-            stats,
-        )
-        .unwrap();
+        let data_shreds =
+            self.entries_to_data_shreds(keypair, entries, is_last_in_slot, next_shred_index, stats);
+        let coding_shreds =
+            Self::data_shreds_to_coding_shreds(keypair, &data_shreds, next_code_index, stats)
+                .unwrap();
         (data_shreds, coding_shreds)
     }
 
@@ -95,14 +84,12 @@ impl Shredder {
         Some(data_shred_index - diff % MAX_DATA_SHREDS_PER_FEC_BLOCK)
     }
 
-    pub fn entries_to_data_shreds(
+    fn entries_to_data_shreds(
         &self,
         keypair: &Keypair,
         entries: &[Entry],
         is_last_in_slot: bool,
         next_shred_index: u32,
-        // Shred index offset at which FEC sets are generated.
-        fec_set_offset: u32,
         process_stats: &mut ProcessShredsStats,
     ) -> Vec<Shred> {
         let mut serialize_time = Measure::start("shred_serialize");
@@ -117,6 +104,7 @@ impl Shredder {
         // Integer division to ensure we have enough shreds to fit all the data
         let num_shreds = (serialized_shreds.len() + data_buffer_size - 1) / data_buffer_size;
         let last_shred_index = next_shred_index + num_shreds as u32 - 1;
+        let fec_set_offset = next_shred_index;
         // 1) Generate data shreds
         let make_data_shred = |shred_index: u32, data| {
             let flags = if shred_index != last_shred_index {
@@ -161,10 +149,9 @@ impl Shredder {
         data_shreds
     }
 
-    pub fn data_shreds_to_coding_shreds(
+    fn data_shreds_to_coding_shreds(
         keypair: &Keypair,
         data_shreds: &[Shred],
-        is_last_in_slot: bool,
         next_code_index: u32,
         process_stats: &mut ProcessShredsStats,
     ) -> Result<Vec<Shred>, Error> {
@@ -173,10 +160,8 @@ impl Shredder {
         }
         let mut gen_coding_time = Measure::start("gen_coding_shreds");
         // Step size when advancing next_code_index from one batch to the next.
-        let step = get_erasure_batch_size(
-            MAX_DATA_SHREDS_PER_FEC_BLOCK as usize,
-            false, // is_last_in_slot
-        ) - MAX_DATA_SHREDS_PER_FEC_BLOCK as usize;
+        let step = get_erasure_batch_size(MAX_DATA_SHREDS_PER_FEC_BLOCK as usize)
+            - MAX_DATA_SHREDS_PER_FEC_BLOCK as usize;
         // 1) Generate coding shreds
         let mut coding_shreds: Vec<_> = PAR_THREAD_POOL.install(|| {
             data_shreds
@@ -185,11 +170,7 @@ impl Shredder {
                 .flat_map(|(k, shred_data_batch)| {
                     let offset = u32::try_from(step.checked_mul(k).unwrap());
                     let next_code_index = next_code_index.checked_add(offset.unwrap());
-                    Shredder::generate_coding_shreds(
-                        shred_data_batch,
-                        is_last_in_slot,
-                        next_code_index.unwrap(),
-                    )
+                    Shredder::generate_coding_shreds(shred_data_batch, next_code_index.unwrap())
                 })
                 .collect()
         });
@@ -210,11 +191,7 @@ impl Shredder {
     }
 
     /// Generates coding shreds for the data shreds in the current FEC set
-    pub fn generate_coding_shreds(
-        data: &[Shred],
-        is_last_in_slot: bool,
-        next_code_index: u32,
-    ) -> Vec<Shred> {
+    pub fn generate_coding_shreds(data: &[Shred], next_code_index: u32) -> Vec<Shred> {
         let (slot, index, version, fec_set_index) = {
             let shred = data.first().unwrap();
             (
@@ -229,9 +206,10 @@ impl Shredder {
             && shred.version() == version
             && shred.fec_set_index() == fec_set_index));
         let num_data = data.len();
-        let num_coding = get_erasure_batch_size(num_data, is_last_in_slot)
+        let num_coding = get_erasure_batch_size(num_data)
             .checked_sub(num_data)
             .unwrap();
+        assert!(num_coding > 0);
         let data = data.iter().map(Shred::erasure_shard_as_slice);
         let data: Vec<_> = data.collect::<Result<_, _>>().unwrap();
         let mut parity = vec![vec![0u8; data[0].len()]; num_coding];
@@ -344,12 +322,8 @@ impl Shredder {
 }
 
 /// Maps number of data shreds in each batch to the erasure batch size.
-fn get_erasure_batch_size(num_data_shreds: usize, is_last_in_slot: bool) -> usize {
-    if is_last_in_slot {
-        2 * num_data_shreds.max(MAX_DATA_SHREDS_PER_FEC_BLOCK as usize)
-    } else {
-        2 * num_data_shreds
-    }
+fn get_erasure_batch_size(num_data_shreds: usize) -> usize {
+    2 * num_data_shreds.max(MAX_DATA_SHREDS_PER_FEC_BLOCK as usize)
 }
 
 #[cfg(test)]
@@ -411,8 +385,7 @@ mod tests {
         let data_buffer_size = ShredData::capacity(/*merkle_proof_size:*/ None).unwrap();
         let num_expected_data_shreds = (size + data_buffer_size - 1) / data_buffer_size;
         let num_expected_coding_shreds =
-            get_erasure_batch_size(num_expected_data_shreds, /*is_last_in_slot:*/ true)
-                - num_expected_data_shreds;
+            get_erasure_batch_size(num_expected_data_shreds) - num_expected_data_shreds;
         let start_index = 0;
         let (data_shreds, coding_shreds) = shredder.entries_to_shreds(
             &keypair,
@@ -668,7 +641,7 @@ mod tests {
         assert_eq!(data_shreds.len(), num_data_shreds);
         assert_eq!(
             num_coding_shreds,
-            get_erasure_batch_size(num_data_shreds, is_last_in_slot) - num_data_shreds
+            get_erasure_batch_size(num_data_shreds) - num_data_shreds
         );
 
         let all_shreds = data_shreds
@@ -1012,7 +985,6 @@ mod tests {
             &entries,
             true, // is_last_in_slot
             start_index,
-            start_index, // fec_set_offset
             &mut stats,
         );
 
@@ -1020,35 +992,28 @@ mod tests {
         let next_code_index = data_shreds[0].index();
 
         (1..=MAX_DATA_SHREDS_PER_FEC_BLOCK as usize).for_each(|count| {
-            for is_last_in_slot in [false, true] {
-                let coding_shreds = Shredder::data_shreds_to_coding_shreds(
-                    &keypair,
-                    &data_shreds[..count],
-                    is_last_in_slot,
-                    next_code_index,
-                    &mut stats,
-                )
-                .unwrap();
-                let num_coding_shreds = get_erasure_batch_size(count, is_last_in_slot) - count;
-                assert_eq!(coding_shreds.len(), num_coding_shreds);
-            }
-        });
-        for is_last_in_slot in [false, true] {
             let coding_shreds = Shredder::data_shreds_to_coding_shreds(
                 &keypair,
-                &data_shreds[..MAX_DATA_SHREDS_PER_FEC_BLOCK as usize + 1],
-                is_last_in_slot,
+                &data_shreds[..count],
                 next_code_index,
                 &mut stats,
             )
             .unwrap();
-            let num_shreds =
-                get_erasure_batch_size(MAX_DATA_SHREDS_PER_FEC_BLOCK as usize, is_last_in_slot)
-                    + get_erasure_batch_size(1, is_last_in_slot);
-            assert_eq!(
-                coding_shreds.len(),
-                num_shreds - MAX_DATA_SHREDS_PER_FEC_BLOCK as usize - 1
-            );
-        }
+            let num_coding_shreds = get_erasure_batch_size(count) - count;
+            assert_eq!(coding_shreds.len(), num_coding_shreds);
+        });
+        let coding_shreds = Shredder::data_shreds_to_coding_shreds(
+            &keypair,
+            &data_shreds[..MAX_DATA_SHREDS_PER_FEC_BLOCK as usize + 1],
+            next_code_index,
+            &mut stats,
+        )
+        .unwrap();
+        let num_shreds = get_erasure_batch_size(MAX_DATA_SHREDS_PER_FEC_BLOCK as usize)
+            + get_erasure_batch_size(1);
+        assert_eq!(
+            coding_shreds.len(),
+            num_shreds - MAX_DATA_SHREDS_PER_FEC_BLOCK as usize - 1
+        );
     }
 }

@@ -8794,12 +8794,10 @@ pub mod tests {
         let blockstore = Blockstore::open(ledger_path.path()).unwrap();
 
         let coding1 = Shredder::generate_coding_shreds(
-            &shreds, false, // is_last_in_slot
-            0,     // next_code_index
+            &shreds, 0, // next_code_index
         );
         let coding2 = Shredder::generate_coding_shreds(
-            &shreds, true, // is_last_in_slot
-            0,    // next_code_index
+            &shreds, 1, // next_code_index
         );
         for shred in &shreds {
             info!("shred {:?}", shred);

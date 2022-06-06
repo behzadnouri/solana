@@ -158,8 +158,7 @@ fn bench_shredder_coding(bencher: &mut Bencher) {
     bencher.iter(|| {
         Shredder::generate_coding_shreds(
             &data_shreds[..symbol_count],
-            true, // is_last_in_slot
-            0,    // next_code_index
+            0, // next_code_index
         )
         .len();
     })
@@ -171,8 +170,7 @@ fn bench_shredder_decoding(bencher: &mut Bencher) {
     let data_shreds = make_shreds(symbol_count);
     let coding_shreds = Shredder::generate_coding_shreds(
         &data_shreds[..symbol_count],
-        true, // is_last_in_slot
-        0,    // next_code_index
+        0, // next_code_index
     );
     bencher.iter(|| {
         Shredder::try_recovery(coding_shreds[..].to_vec()).unwrap();
