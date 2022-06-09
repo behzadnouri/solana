@@ -23,6 +23,13 @@ lazy_static! {
         .unwrap();
 }
 
+const ERASURE_BATCH_SIZE: [usize; 33] = [
+    0, 18, 20, 22, 23, 25, 27, 28, 30, // 8
+    32, 33, 35, 36, 38, 39, 41, 42, // 16
+    43, 45, 46, 48, 49, 51, 52, 53, // 24
+    55, 56, 58, 59, 60, 62, 63, 64, // 32
+];
+
 type ReedSolomon = reed_solomon_erasure::ReedSolomon<Field>;
 
 #[derive(Debug)]
@@ -323,7 +330,10 @@ impl Shredder {
 
 /// Maps number of data shreds in each batch to the erasure batch size.
 fn get_erasure_batch_size(num_data_shreds: usize) -> usize {
-    2 * num_data_shreds.max(MAX_DATA_SHREDS_PER_FEC_BLOCK as usize)
+    ERASURE_BATCH_SIZE
+        .get(num_data_shreds)
+        .copied()
+        .unwrap_or(num_data_shreds * 2)
 }
 
 #[cfg(test)]
@@ -1009,11 +1019,12 @@ mod tests {
             &mut stats,
         )
         .unwrap();
-        let num_shreds = get_erasure_batch_size(MAX_DATA_SHREDS_PER_FEC_BLOCK as usize)
-            + get_erasure_batch_size(1);
         assert_eq!(
             coding_shreds.len(),
-            num_shreds - MAX_DATA_SHREDS_PER_FEC_BLOCK as usize - 1
+            get_erasure_batch_size(MAX_DATA_SHREDS_PER_FEC_BLOCK as usize)
+                + get_erasure_batch_size(1)
+                - MAX_DATA_SHREDS_PER_FEC_BLOCK as usize
+                - 1
         );
     }
 }
