@@ -330,10 +330,11 @@ impl Shredder {
 
 /// Maps number of data shreds in each batch to the erasure batch size.
 fn get_erasure_batch_size(num_data_shreds: usize) -> usize {
-    ERASURE_BATCH_SIZE
-        .get(num_data_shreds)
-        .copied()
-        .unwrap_or(num_data_shreds * 2)
+    256
+    // ERASURE_BATCH_SIZE
+    //     .get(num_data_shreds)
+    //     .copied()
+    //     .unwrap_or(num_data_shreds * 2)
 }
 
 #[cfg(test)]
