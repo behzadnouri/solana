@@ -212,7 +212,7 @@ impl Shredder {
             && shred.version() == version
             && shred.fec_set_index() == fec_set_index));
         let num_data = data.len();
-        let num_coding = (2 * MAX_DATA_SHREDS_PER_FEC_BLOCK as usize)
+        let num_coding = (8 * MAX_DATA_SHREDS_PER_FEC_BLOCK as usize)
             .checked_sub(num_data)
             .unwrap();
         assert!(num_coding > 0);
