@@ -35,7 +35,7 @@ use {
     std::{
         collections::{HashMap, HashSet},
         iter::repeat,
-        net::UdpSocket,
+        net::{SocketAddr, UdpSocket},
         sync::{
             atomic::{AtomicBool, Ordering},
             Arc, Mutex, RwLock,
@@ -272,8 +272,7 @@ impl BroadcastStage {
         };
         let mut thread_hdls = vec![thread_hdl];
         let socket_receiver = Arc::new(Mutex::new(socket_receiver));
-        // XXX
-        let num_threads = get_thread_count().min(8).max(sockets.len());
+        let num_threads = get_thread_count().min(4).max(sockets.len());
         let thread_pool = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .thread_name(|i| format!("bs-transmit-{}", i))
@@ -433,13 +432,13 @@ pub fn broadcast_shreds(
     bank_forks: &RwLock<BankForks>,
     socket_addr_space: &SocketAddrSpace,
 ) -> Result<()> {
-    let mut result = Ok(());
     let mut shred_select = Measure::start("shred_select");
     let (root_bank, working_bank) = {
         let bank_forks = bank_forks.read().unwrap();
         (bank_forks.root_bank(), bank_forks.working_bank())
     };
-    let packets: Vec<_> = shreds
+    // Lookup cluster-nodes for each slot.
+    let shreds: Vec<(&Shred, Arc<ClusterNodes<_>>)> = shreds
         .iter()
         .group_by(|shred| shred.slot())
         .into_iter()
@@ -447,27 +446,50 @@ pub fn broadcast_shreds(
             let cluster_nodes =
                 cluster_nodes_cache.get(slot, &root_bank, &working_bank, cluster_info);
             update_peer_stats(&cluster_nodes, last_datapoint_submit);
-            let root_bank = root_bank.clone();
-            shreds.flat_map(move |shred| {
-                repeat(shred.payload()).zip(cluster_nodes.get_broadcast_addrs(
+            shreds.zip(repeat(cluster_nodes))
+        })
+        .collect();
+    // Pair payloads with target socket addresses.
+    let packets: Vec<(&[u8], SocketAddr)> = thread_pool.install(|| {
+        shreds
+            .into_par_iter()
+            .flat_map(|(shred, cluster_nodes)| {
+                let addrs = cluster_nodes.get_broadcast_addrs(
                     shred,
                     &root_bank,
                     DATA_PLANE_FANOUT,
                     socket_addr_space,
-                ))
+                );
+                let payload = &shred.payload()[..];
+                rayon::iter::repeat(payload).zip(addrs)
             })
-        })
-        .collect();
+            .collect()
+    });
     shred_select.stop();
     transmit_stats.shred_select += shred_select.as_us();
-
+    // Send out packets.
     let mut send_mmsg_time = Measure::start("send_mmsg");
-    // XXX
-    let s = &sockets[0];
-    if let Err(SendPktsError::IoError(ioerr, num_failed)) = batch_send(s, &packets[..]) {
-        transmit_stats.dropped_packets += num_failed;
-        result = Err(Error::Io(ioerr));
-    }
+    let chunk_size = (packets.len() + sockets.len() - 1) / sockets.len();
+    let errs: Vec<_> = thread_pool.install(|| {
+        packets
+            .par_chunks(chunk_size)
+            .filter_map(|packets: &[(&[u8], SocketAddr)]| {
+                let index = thread_pool.current_thread_index().unwrap();
+                let socket = &sockets[index % sockets.len()];
+                batch_send(socket, packets).err()
+            })
+            .collect()
+    });
+    let errs = errs.into_iter().map(|err| match err {
+        SendPktsError::IoError(err, num_failed) => {
+            transmit_stats.dropped_packets += num_failed;
+            err
+        }
+    });
+    let result = match errs.rev().last() {
+        Some(err) => Err(Error::Io(err)),
+        None => Ok(()),
+    };
     send_mmsg_time.stop();
     transmit_stats.send_mmsg_elapsed += send_mmsg_time.as_us();
     transmit_stats.total_packets += packets.len();

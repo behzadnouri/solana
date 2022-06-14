@@ -494,6 +494,7 @@ impl BroadcastRun for StandardBroadcastRun {
         sockets: &[UdpSocket],
         bank_forks: &RwLock<BankForks>,
     ) -> Result<()> {
+        // XXX This should drain the channel.
         let (shreds, batch_info) = receiver.lock().unwrap().recv()?;
         self.broadcast(
             thread_pool,
