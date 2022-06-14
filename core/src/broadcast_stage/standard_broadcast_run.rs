@@ -168,9 +168,10 @@ impl StandardBroadcastRun {
     #[cfg(test)]
     fn test_process_receive_results(
         &mut self,
+        thread_pool: &ThreadPool,
         keypair: &Keypair,
         cluster_info: &ClusterInfo,
-        sock: &UdpSocket,
+        sockets: &[UdpSocket],
         blockstore: &Blockstore,
         receive_results: ReceiveResults,
         bank_forks: &RwLock<BankForks>,
@@ -182,10 +183,10 @@ impl StandardBroadcastRun {
         let brecv = Arc::new(Mutex::new(brecv));
 
         //data
-        let _ = self.transmit(&srecv, cluster_info, sock, bank_forks);
+        let _ = self.transmit(thread_pool, &srecv, cluster_info, sockets, bank_forks);
         let _ = self.record(&brecv, blockstore);
         //coding
-        let _ = self.transmit(&srecv, cluster_info, sock, bank_forks);
+        let _ = self.transmit(thread_pool, &srecv, cluster_info, sockets, bank_forks);
         let _ = self.record(&brecv, blockstore);
         Ok(())
     }
@@ -359,7 +360,8 @@ impl StandardBroadcastRun {
 
     fn broadcast(
         &mut self,
-        sock: &UdpSocket,
+        thread_pool: &ThreadPool,
+        sockets: &[UdpSocket],
         cluster_info: &ClusterInfo,
         shreds: Arc<Vec<Shred>>,
         broadcast_shred_batch_info: Option<BroadcastShredBatchInfo>,
@@ -371,7 +373,8 @@ impl StandardBroadcastRun {
         let mut transmit_time = Measure::start("broadcast_shreds");
 
         broadcast_shreds(
-            sock,
+            thread_pool,
+            sockets,
             &shreds,
             &self.cluster_nodes_cache,
             &self.last_datapoint_submit,
@@ -485,13 +488,21 @@ impl BroadcastRun for StandardBroadcastRun {
     }
     fn transmit(
         &mut self,
+        thread_pool: &ThreadPool,
         receiver: &Mutex<TransmitReceiver>,
         cluster_info: &ClusterInfo,
-        sock: &UdpSocket,
+        sockets: &[UdpSocket],
         bank_forks: &RwLock<BankForks>,
     ) -> Result<()> {
         let (shreds, batch_info) = receiver.lock().unwrap().recv()?;
-        self.broadcast(sock, cluster_info, shreds, batch_info, bank_forks)
+        self.broadcast(
+            thread_pool,
+            sockets,
+            cluster_info,
+            shreds,
+            batch_info,
+            bank_forks,
+        )
     }
     fn record(&mut self, receiver: &Mutex<RecordReceiver>, blockstore: &Blockstore) -> Result<()> {
         let (shreds, slot_start_ts) = receiver.lock().unwrap().recv()?;
@@ -528,7 +539,7 @@ mod test {
         Arc<ClusterInfo>,
         Arc<Bank>,
         Arc<Keypair>,
-        UdpSocket,
+        Vec<UdpSocket>,
         Arc<RwLock<BankForks>>,
     ) {
         // Setup
@@ -557,7 +568,7 @@ mod test {
             cluster_info,
             bank0,
             leader_keypair,
-            socket,
+            vec![socket],
             bank_forks,
         )
     }
@@ -599,6 +610,7 @@ mod test {
 
     #[test]
     fn test_slot_interrupt() {
+        let thread_pool = ThreadPoolBuilder::new().num_threads(2).build().unwrap();
         // Setup
         let num_shreds_per_slot = 2;
         let (blockstore, genesis_config, cluster_info, bank0, leader_keypair, socket, bank_forks) =
@@ -617,6 +629,7 @@ mod test {
         let mut standard_broadcast_run = StandardBroadcastRun::new(0);
         standard_broadcast_run
             .test_process_receive_results(
+                &thread_pool,
                 &leader_keypair,
                 &cluster_info,
                 &socket,
@@ -682,6 +695,7 @@ mod test {
         };
         standard_broadcast_run
             .test_process_receive_results(
+                &thread_pool,
                 &leader_keypair,
                 &cluster_info,
                 &socket,
@@ -778,6 +792,7 @@ mod test {
 
     #[test]
     fn test_slot_finish() {
+        let thread_pool = ThreadPoolBuilder::new().num_threads(2).build().unwrap();
         // Setup
         let num_shreds_per_slot = 2;
         let (blockstore, genesis_config, cluster_info, bank0, leader_keypair, socket, bank_forks) =
@@ -795,6 +810,7 @@ mod test {
         let mut standard_broadcast_run = StandardBroadcastRun::new(0);
         standard_broadcast_run
             .test_process_receive_results(
+                &thread_pool,
                 &leader_keypair,
                 &cluster_info,
                 &socket,

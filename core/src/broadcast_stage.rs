@@ -14,11 +14,13 @@ use {
     },
     crossbeam_channel::{unbounded, Receiver, RecvError, RecvTimeoutError, Sender},
     itertools::Itertools,
+    rayon::{prelude::*, ThreadPool, ThreadPoolBuilder},
     solana_gossip::cluster_info::{ClusterInfo, ClusterInfoError, DATA_PLANE_FANOUT},
     solana_ledger::{blockstore::Blockstore, shred::Shred},
     solana_measure::measure::Measure,
     solana_metrics::{inc_new_counter_error, inc_new_counter_info},
     solana_poh::poh_recorder::WorkingBankEntry,
+    solana_rayon_threadlimit::get_thread_count,
     solana_runtime::bank_forks::BankForks,
     solana_sdk::{
         clock::Slot,
@@ -144,9 +146,10 @@ trait BroadcastRun {
     ) -> Result<()>;
     fn transmit(
         &mut self,
+        thread_pool: &ThreadPool,
         receiver: &Mutex<TransmitReceiver>,
         cluster_info: &ClusterInfo,
-        sock: &UdpSocket,
+        sockets: &[UdpSocket],
         bank_forks: &RwLock<BankForks>,
     ) -> Result<()>;
     fn record(&mut self, receiver: &Mutex<RecordReceiver>, blockstore: &Blockstore) -> Result<()>;
@@ -235,7 +238,7 @@ impl BroadcastStage {
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::same_item_push)]
     fn new(
-        socks: Vec<UdpSocket>,
+        sockets: Vec<UdpSocket>,
         cluster_info: Arc<ClusterInfo>,
         receiver: Receiver<WorkingBankEntry>,
         retransmit_slots_receiver: RetransmitSlotsReceiver,
@@ -269,24 +272,51 @@ impl BroadcastStage {
         };
         let mut thread_hdls = vec![thread_hdl];
         let socket_receiver = Arc::new(Mutex::new(socket_receiver));
-        for sock in socks.into_iter() {
-            let socket_receiver = socket_receiver.clone();
-            let mut bs_transmit = broadcast_stage_run.clone();
-            let cluster_info = cluster_info.clone();
-            let bank_forks = bank_forks.clone();
-            let t = Builder::new()
+        // XXX
+        let num_threads = get_thread_count().min(8).max(sockets.len());
+        let thread_pool = ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .thread_name(|i| format!("bs-transmit-{}", i))
+            .build()
+            .unwrap();
+        let mut bs_transmit = broadcast_stage_run.clone();
+        let transmit = move || loop {
+            let res = bs_transmit.transmit(
+                &thread_pool,
+                &socket_receiver,
+                &cluster_info,
+                &sockets,
+                &bank_forks,
+            );
+            let res = Self::handle_error(res, "solana-broadcaster-transmit");
+            if let Some(res) = res {
+                return res;
+            }
+        };
+        thread_hdls.push(
+            Builder::new()
                 .name("solana-broadcaster-transmit".to_string())
-                .spawn(move || loop {
-                    let res =
-                        bs_transmit.transmit(&socket_receiver, &cluster_info, &sock, &bank_forks);
-                    let res = Self::handle_error(res, "solana-broadcaster-transmit");
-                    if let Some(res) = res {
-                        return res;
-                    }
-                })
-                .unwrap();
-            thread_hdls.push(t);
-        }
+                .spawn(transmit)
+                .unwrap(),
+        );
+        // for sock in sockets.into_iter() {
+        //     let socket_receiver = socket_receiver.clone();
+        //     let mut bs_transmit = broadcast_stage_run.clone();
+        //     let cluster_info = cluster_info.clone();
+        //     let bank_forks = bank_forks.clone();
+        //     let t = Builder::new()
+        //         .name("solana-broadcaster-transmit".to_string())
+        //         .spawn(move || loop {
+        //             let res =
+        //                 bs_transmit.transmit(&socket_receiver, &cluster_info, &sock, &bank_forks);
+        //             let res = Self::handle_error(res, "solana-broadcaster-transmit");
+        //             if let Some(res) = res {
+        //                 return res;
+        //             }
+        //         })
+        //         .unwrap();
+        //     thread_hdls.push(t);
+        // }
         let blockstore_receiver = Arc::new(Mutex::new(blockstore_receiver));
         for _ in 0..NUM_INSERT_THREADS {
             let blockstore_receiver = blockstore_receiver.clone();
@@ -393,7 +423,8 @@ fn update_peer_stats(
 /// broadcast messages from the leader to layer 1 nodes
 /// # Remarks
 pub fn broadcast_shreds(
-    s: &UdpSocket,
+    thread_pool: &ThreadPool,
+    sockets: &[UdpSocket],
     shreds: &[Shred],
     cluster_nodes_cache: &ClusterNodesCache<BroadcastStage>,
     last_datapoint_submit: &AtomicInterval,
@@ -431,6 +462,8 @@ pub fn broadcast_shreds(
     transmit_stats.shred_select += shred_select.as_us();
 
     let mut send_mmsg_time = Measure::start("send_mmsg");
+    // XXX
+    let s = &sockets[0];
     if let Err(SendPktsError::IoError(ioerr, num_failed)) = batch_send(s, &packets[..]) {
         transmit_stats.dropped_packets += num_failed;
         result = Err(Error::Io(ioerr));

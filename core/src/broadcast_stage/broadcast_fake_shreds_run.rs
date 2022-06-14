@@ -120,9 +120,10 @@ impl BroadcastRun for BroadcastFakeShredsRun {
     }
     fn transmit(
         &mut self,
+        _thread_pool: &ThreadPool,
         receiver: &Mutex<TransmitReceiver>,
         cluster_info: &ClusterInfo,
-        sock: &UdpSocket,
+        sockets: &[UdpSocket],
         _bank_forks: &RwLock<BankForks>,
     ) -> Result<()> {
         for (data_shreds, batch_info) in receiver.lock().unwrap().iter() {
@@ -132,7 +133,7 @@ impl BroadcastRun for BroadcastFakeShredsRun {
                 if fake == (i <= self.partition) {
                     // Send fake shreds to the first N peers
                     data_shreds.iter().for_each(|b| {
-                        sock.send_to(b.payload(), &peer.tvu_forwards).unwrap();
+                        sockets[0].send_to(b.payload(), &peer.tvu_forwards).unwrap();
                     });
                 }
             });
