@@ -252,12 +252,12 @@ impl BroadcastRun for BroadcastDuplicatesRun {
     fn transmit(
         &mut self,
         _thread_pool: &ThreadPool,
-        receiver: &Mutex<TransmitReceiver>,
+        receiver: &TransmitReceiver,
         cluster_info: &ClusterInfo,
         sockets: &[UdpSocket],
         bank_forks: &RwLock<BankForks>,
     ) -> Result<()> {
-        let (shreds, _) = receiver.lock().unwrap().recv()?;
+        let (shreds, _) = receiver.recv()?;
         if shreds.is_empty() {
             return Ok(());
         }

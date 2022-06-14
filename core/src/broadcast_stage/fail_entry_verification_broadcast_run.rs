@@ -149,12 +149,12 @@ impl BroadcastRun for FailEntryVerificationBroadcastRun {
     fn transmit(
         &mut self,
         thread_pool: &ThreadPool,
-        receiver: &Mutex<TransmitReceiver>,
+        receiver: &TransmitReceiver,
         cluster_info: &ClusterInfo,
         sockets: &[UdpSocket],
         bank_forks: &RwLock<BankForks>,
     ) -> Result<()> {
-        let (shreds, _) = receiver.lock().unwrap().recv()?;
+        let (shreds, _) = receiver.recv()?;
         broadcast_shreds(
             thread_pool,
             sockets,

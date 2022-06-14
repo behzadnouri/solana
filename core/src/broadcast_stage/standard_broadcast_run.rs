@@ -179,7 +179,6 @@ impl StandardBroadcastRun {
         let (bsend, brecv) = unbounded();
         let (ssend, srecv) = unbounded();
         self.process_receive_results(keypair, blockstore, &ssend, &bsend, receive_results)?;
-        let srecv = Arc::new(Mutex::new(srecv));
         let brecv = Arc::new(Mutex::new(brecv));
 
         //data
@@ -489,13 +488,13 @@ impl BroadcastRun for StandardBroadcastRun {
     fn transmit(
         &mut self,
         thread_pool: &ThreadPool,
-        receiver: &Mutex<TransmitReceiver>,
+        receiver: &TransmitReceiver,
         cluster_info: &ClusterInfo,
         sockets: &[UdpSocket],
         bank_forks: &RwLock<BankForks>,
     ) -> Result<()> {
         // XXX This should drain the channel.
-        let (shreds, batch_info) = receiver.lock().unwrap().recv()?;
+        let (shreds, batch_info) = receiver.recv()?;
         self.broadcast(
             thread_pool,
             sockets,

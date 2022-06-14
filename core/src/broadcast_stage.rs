@@ -147,7 +147,7 @@ trait BroadcastRun {
     fn transmit(
         &mut self,
         thread_pool: &ThreadPool,
-        receiver: &Mutex<TransmitReceiver>,
+        receiver: &TransmitReceiver,
         cluster_info: &ClusterInfo,
         sockets: &[UdpSocket],
         bank_forks: &RwLock<BankForks>,
@@ -271,7 +271,6 @@ impl BroadcastStage {
                 .unwrap()
         };
         let mut thread_hdls = vec![thread_hdl];
-        let socket_receiver = Arc::new(Mutex::new(socket_receiver));
         let num_threads = get_thread_count().min(4).max(sockets.len());
         let thread_pool = ThreadPoolBuilder::new()
             .num_threads(num_threads)
@@ -298,24 +297,6 @@ impl BroadcastStage {
                 .spawn(transmit)
                 .unwrap(),
         );
-        // for sock in sockets.into_iter() {
-        //     let socket_receiver = socket_receiver.clone();
-        //     let mut bs_transmit = broadcast_stage_run.clone();
-        //     let cluster_info = cluster_info.clone();
-        //     let bank_forks = bank_forks.clone();
-        //     let t = Builder::new()
-        //         .name("solana-broadcaster-transmit".to_string())
-        //         .spawn(move || loop {
-        //             let res =
-        //                 bs_transmit.transmit(&socket_receiver, &cluster_info, &sock, &bank_forks);
-        //             let res = Self::handle_error(res, "solana-broadcaster-transmit");
-        //             if let Some(res) = res {
-        //                 return res;
-        //             }
-        //         })
-        //         .unwrap();
-        //     thread_hdls.push(t);
-        // }
         let blockstore_receiver = Arc::new(Mutex::new(blockstore_receiver));
         for _ in 0..NUM_INSERT_THREADS {
             let blockstore_receiver = blockstore_receiver.clone();
