@@ -4,6 +4,7 @@ extern crate test;
 
 use {
     rand::{thread_rng, Rng},
+    rayon::ThreadPoolBuilder,
     solana_core::{
         broadcast_stage::{
             broadcast_metrics::TransmitShredsStats, broadcast_shreds, BroadcastStage,
@@ -37,6 +38,7 @@ use {
 #[bench]
 fn broadcast_shreds_bench(bencher: &mut Bencher) {
     solana_logger::setup();
+    let thread_pool = ThreadPoolBuilder::new().num_threads(2).build().unwrap();
     let leader_pubkey = pubkey::new_rand();
     let leader_info = Node::new_localhost_with_pubkey(&leader_pubkey);
     let cluster_info = ClusterInfo::new(
@@ -44,7 +46,7 @@ fn broadcast_shreds_bench(bencher: &mut Bencher) {
         Arc::new(Keypair::new()),
         SocketAddrSpace::Unspecified,
     );
-    let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+    let sockets = vec![UdpSocket::bind("0.0.0.0:0").unwrap()];
 
     let GenesisConfigInfo { genesis_config, .. } = create_genesis_config(10_000);
     let bank = Bank::new_for_benches(&genesis_config);
@@ -71,7 +73,8 @@ fn broadcast_shreds_bench(bencher: &mut Bencher) {
     bencher.iter(move || {
         let shreds = shreds.clone();
         broadcast_shreds(
-            &socket,
+            &thread_pool,
+            &sockets,
             &shreds,
             &cluster_nodes_cache,
             &last_datapoint,

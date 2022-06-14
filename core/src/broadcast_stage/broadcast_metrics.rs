@@ -17,7 +17,6 @@ pub(crate) struct BroadcastShredBatchInfo {
 pub struct TransmitShredsStats {
     pub transmit_elapsed: u64,
     pub send_mmsg_elapsed: u64,
-    pub get_peers_elapsed: u64,
     pub shred_select: u64,
     pub num_shreds: usize,
     pub total_packets: usize,
@@ -26,13 +25,20 @@ pub struct TransmitShredsStats {
 
 impl BroadcastStats for TransmitShredsStats {
     fn update(&mut self, new_stats: &TransmitShredsStats) {
-        self.transmit_elapsed += new_stats.transmit_elapsed;
-        self.send_mmsg_elapsed += new_stats.send_mmsg_elapsed;
-        self.get_peers_elapsed += new_stats.get_peers_elapsed;
-        self.num_shreds += new_stats.num_shreds;
-        self.shred_select += new_stats.shred_select;
-        self.total_packets += new_stats.total_packets;
-        self.dropped_packets += new_stats.dropped_packets;
+        let TransmitShredsStats {
+            transmit_elapsed,
+            send_mmsg_elapsed,
+            shred_select,
+            num_shreds,
+            total_packets,
+            dropped_packets,
+        } = new_stats;
+        self.transmit_elapsed += transmit_elapsed;
+        self.send_mmsg_elapsed += send_mmsg_elapsed;
+        self.num_shreds += num_shreds;
+        self.shred_select += shred_select;
+        self.total_packets += total_packets;
+        self.dropped_packets += dropped_packets;
     }
     fn report_stats(&mut self, slot: Slot, slot_start: Instant, was_interrupted: bool) {
         if was_interrupted {
@@ -41,7 +47,6 @@ impl BroadcastStats for TransmitShredsStats {
                 ("slot", slot as i64, i64),
                 ("transmit_elapsed", self.transmit_elapsed as i64, i64),
                 ("send_mmsg_elapsed", self.send_mmsg_elapsed as i64, i64),
-                ("get_peers_elapsed", self.get_peers_elapsed as i64, i64),
                 ("num_shreds", self.num_shreds as i64, i64),
                 ("shred_select", self.shred_select as i64, i64),
                 ("total_packets", self.total_packets as i64, i64),
@@ -60,7 +65,6 @@ impl BroadcastStats for TransmitShredsStats {
                 ),
                 ("transmit_elapsed", self.transmit_elapsed as i64, i64),
                 ("send_mmsg_elapsed", self.send_mmsg_elapsed as i64, i64),
-                ("get_peers_elapsed", self.get_peers_elapsed as i64, i64),
                 ("num_shreds", self.num_shreds as i64, i64),
                 ("shred_select", self.shred_select as i64, i64),
                 ("total_packets", self.total_packets as i64, i64),
@@ -205,7 +209,6 @@ mod test {
         slot_broadcast_stats.update(
             &TransmitShredsStats {
                 transmit_elapsed: 1,
-                get_peers_elapsed: 2,
                 send_mmsg_elapsed: 3,
                 shred_select: 4,
                 num_shreds: 5,
@@ -225,7 +228,6 @@ mod test {
         assert_eq!(slot_0_stats.num_batches, 1);
         assert_eq!(slot_0_stats.num_expected_batches.unwrap(), 2);
         assert_eq!(slot_0_stats.broadcast_shred_stats.transmit_elapsed, 1);
-        assert_eq!(slot_0_stats.broadcast_shred_stats.get_peers_elapsed, 2);
         assert_eq!(slot_0_stats.broadcast_shred_stats.send_mmsg_elapsed, 3);
         assert_eq!(slot_0_stats.broadcast_shred_stats.shred_select, 4);
         assert_eq!(slot_0_stats.broadcast_shred_stats.num_shreds, 5);
@@ -235,7 +237,6 @@ mod test {
         slot_broadcast_stats.update(
             &TransmitShredsStats {
                 transmit_elapsed: 11,
-                get_peers_elapsed: 12,
                 send_mmsg_elapsed: 13,
                 shred_select: 14,
                 num_shreds: 15,
@@ -250,7 +251,6 @@ mod test {
         assert_eq!(slot_0_stats.num_batches, 1);
         assert_eq!(slot_0_stats.num_expected_batches.unwrap(), 2);
         assert_eq!(slot_0_stats.broadcast_shred_stats.transmit_elapsed, 1);
-        assert_eq!(slot_0_stats.broadcast_shred_stats.get_peers_elapsed, 2);
         assert_eq!(slot_0_stats.broadcast_shred_stats.send_mmsg_elapsed, 3);
         assert_eq!(slot_0_stats.broadcast_shred_stats.shred_select, 4);
         assert_eq!(slot_0_stats.broadcast_shred_stats.num_shreds, 5);
@@ -262,7 +262,6 @@ mod test {
         slot_broadcast_stats.update(
             &TransmitShredsStats {
                 transmit_elapsed: 1,
-                get_peers_elapsed: 1,
                 send_mmsg_elapsed: 1,
                 shred_select: 1,
                 num_shreds: 1,

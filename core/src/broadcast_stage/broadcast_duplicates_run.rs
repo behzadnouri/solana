@@ -251,9 +251,10 @@ impl BroadcastRun for BroadcastDuplicatesRun {
 
     fn transmit(
         &mut self,
+        _thread_pool: &ThreadPool,
         receiver: &Mutex<TransmitReceiver>,
         cluster_info: &ClusterInfo,
-        sock: &UdpSocket,
+        sockets: &[UdpSocket],
         bank_forks: &RwLock<BankForks>,
     ) -> Result<()> {
         let (shreds, _) = receiver.lock().unwrap().recv()?;
@@ -349,7 +350,7 @@ impl BroadcastRun for BroadcastDuplicatesRun {
             .flatten()
             .collect();
 
-        if let Err(SendPktsError::IoError(ioerr, _)) = batch_send(sock, &packets) {
+        if let Err(SendPktsError::IoError(ioerr, _)) = batch_send(&sockets[0], &packets) {
             return Err(Error::Io(ioerr));
         }
         Ok(())
