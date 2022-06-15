@@ -450,10 +450,10 @@ pub fn broadcast_shreds(
     transmit_stats.shred_select += shred_select.as_us();
     // Send out packets.
     let mut send_mmsg_time = Measure::start("send_mmsg");
-    let chunk_size = (packets.len() + sockets.len() - 1) / sockets.len();
+    let chunk_size = (packets.len() + sockets.len() - 1usize) / sockets.len();
     let errs: Vec<_> = thread_pool.install(|| {
         packets
-            .par_chunks(chunk_size)
+            .par_chunks(chunk_size.max(1usize))
             .filter_map(|packets: &[(&[u8], SocketAddr)]| {
                 let index = thread_pool.current_thread_index().unwrap();
                 let socket = &sockets[index % sockets.len()];
