@@ -413,7 +413,7 @@ pub fn broadcast_shreds(
     bank_forks: &RwLock<BankForks>,
     socket_addr_space: &SocketAddrSpace,
 ) -> Result<()> {
-    dbg!(shreds.len());
+    // dbg!(shreds.len());
     let mut shred_select = Measure::start("shred_select");
     let (root_bank, working_bank) = {
         let bank_forks = bank_forks.read().unwrap();
@@ -435,6 +435,7 @@ pub fn broadcast_shreds(
     let packets: Vec<(&[u8], SocketAddr)> = thread_pool.install(|| {
         shreds
             .into_par_iter()
+            .with_min_len(64)
             .flat_map(|(shred, cluster_nodes)| {
                 let addrs = cluster_nodes.get_broadcast_addrs(
                     shred,
