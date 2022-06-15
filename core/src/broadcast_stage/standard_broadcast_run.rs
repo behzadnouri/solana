@@ -495,6 +495,7 @@ impl BroadcastRun for StandardBroadcastRun {
     ) -> Result<()> {
         // XXX This should drain the channel.
         let (shreds, batch_info) = receiver.recv()?;
+        dbg!(receiver.len());
         self.broadcast(
             thread_pool,
             sockets,
