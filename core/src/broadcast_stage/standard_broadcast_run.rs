@@ -358,7 +358,7 @@ impl StandardBroadcastRun {
     }
 
     fn broadcast(
-        &mut self,
+        &self,
         thread_pool: &ThreadPool,
         sockets: &[UdpSocket],
         cluster_info: &ClusterInfo,
@@ -393,7 +393,7 @@ impl StandardBroadcastRun {
     }
 
     fn update_transmit_metrics(
-        &mut self,
+        &self,
         new_transmit_shreds_stats: &TransmitShredsStats,
         broadcast_shred_batch_info: &Option<BroadcastShredBatchInfo>,
     ) {
