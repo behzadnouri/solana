@@ -7,7 +7,7 @@ use {
     solana_ledger::shred::{get_shred_slot_index_type, ShredFetchStats},
     solana_perf::packet::{Packet, PacketBatch, PacketBatchRecycler, PacketFlags},
     solana_runtime::bank_forks::BankForks,
-    solana_sdk::clock::{Slot, DEFAULT_MS_PER_SLOT},
+    solana_sdk::clock::{Slot, DEFAULT_SLOT_DURATION},
     solana_streamer::streamer::{self, PacketBatchReceiver, StreamerReceiveStats},
     std::{
         net::UdpSocket,
@@ -18,51 +18,18 @@ use {
 };
 
 const DEFAULT_LRU_SIZE: usize = 10_000;
-pub type ShredsReceived = LruCache<u64, ()>;
+type ShredsReceived = LruCache<u64, ()>;
 
-pub struct ShredFetchStage {
+pub(crate) struct ShredFetchStage {
     thread_hdls: Vec<JoinHandle<()>>,
 }
 
 impl ShredFetchStage {
-    fn process_packet<F>(
-        p: &mut Packet,
-        shreds_received: &mut ShredsReceived,
-        stats: &mut ShredFetchStats,
-        last_root: Slot,
-        last_slot: Slot,
-        slots_per_epoch: u64,
-        modify: &F,
-        packet_hasher: &PacketHasher,
-    ) where
-        F: Fn(&mut Packet),
-    {
-        p.meta.set_discard(true);
-        if let Some((slot, _index, _shred_type)) = get_shred_slot_index_type(p, stats) {
-            // Seems reasonable to limit shreds to 2 epochs away
-            if slot > last_root && slot < (last_slot + 2 * slots_per_epoch) {
-                // Shred filter
-
-                let hash = packet_hasher.hash_packet(p);
-
-                if shreds_received.get(&hash).is_none() {
-                    shreds_received.put(hash, ());
-                    p.meta.set_discard(false);
-                    modify(p);
-                } else {
-                    stats.duplicate_shred += 1;
-                }
-            } else {
-                stats.slot_out_of_range += 1;
-            }
-        }
-    }
-
     // updates packets received on a channel and sends them on another channel
     fn modify_packets<F>(
         recvr: PacketBatchReceiver,
         sendr: Sender<Vec<PacketBatch>>,
-        bank_forks: Option<Arc<RwLock<BankForks>>>,
+        bank_forks: &RwLock<BankForks>,
         name: &'static str,
         modify: F,
     ) where
@@ -72,41 +39,32 @@ impl ShredFetchStage {
         let mut shreds_received = LruCache::new(DEFAULT_LRU_SIZE);
         let mut last_updated = Instant::now();
 
-        // In the case of bank_forks=None, setup to accept any slot range
-        let mut last_root = 0;
-        let mut last_slot = std::u64::MAX;
-        let mut slots_per_epoch = 0;
+        let (mut root, mut max_slot) = get_slots_range(bank_forks);
 
         let mut stats = ShredFetchStats::default();
         let mut packet_hasher = PacketHasher::default();
 
-        while let Some(mut packet_batch) = recvr.iter().next() {
-            if last_updated.elapsed().as_millis() as u64 > DEFAULT_MS_PER_SLOT {
+        for mut packet_batch in recvr {
+            if last_updated.elapsed() > DEFAULT_SLOT_DURATION {
                 last_updated = Instant::now();
                 packet_hasher.reset();
                 shreds_received.clear();
-                if let Some(bank_forks) = bank_forks.as_ref() {
-                    let bank_forks_r = bank_forks.read().unwrap();
-                    last_root = bank_forks_r.root();
-                    let working_bank = bank_forks_r.working_bank();
-                    last_slot = working_bank.slot();
-                    let root_bank = bank_forks_r.root_bank();
-                    slots_per_epoch = root_bank.get_slots_in_epoch(root_bank.epoch());
-                }
+                (root, max_slot) = get_slots_range(bank_forks);
             }
             stats.shred_count += packet_batch.len();
-            packet_batch.iter_mut().for_each(|packet| {
-                Self::process_packet(
+            for packet in packet_batch.iter_mut() {
+                if should_discard_packet(
                     packet,
+                    (root, max_slot),
+                    &packet_hasher,
                     &mut shreds_received,
                     &mut stats,
-                    last_root,
-                    last_slot,
-                    slots_per_epoch,
-                    &modify,
-                    &packet_hasher,
-                );
-            });
+                ) {
+                    packet.meta.set_discard(true);
+                } else {
+                    modify(packet)
+                }
+            }
             stats.maybe_submit(name, STATS_SUBMIT_CADENCE);
             if sendr.send(vec![packet_batch]).is_err() {
                 break;
@@ -119,7 +77,7 @@ impl ShredFetchStage {
         exit: &Arc<AtomicBool>,
         sender: Sender<Vec<PacketBatch>>,
         recycler: PacketBatchRecycler,
-        bank_forks: Option<Arc<RwLock<BankForks>>>,
+        bank_forks: Arc<RwLock<BankForks>>,
         name: &'static str,
         modify: F,
     ) -> (Vec<JoinHandle<()>>, JoinHandle<()>)
@@ -145,17 +103,17 @@ impl ShredFetchStage {
 
         let modifier_hdl = Builder::new()
             .name("solana-tvu-fetch-stage-packet-modifier".to_string())
-            .spawn(move || Self::modify_packets(packet_receiver, sender, bank_forks, name, modify))
+            .spawn(move || Self::modify_packets(packet_receiver, sender, &bank_forks, name, modify))
             .unwrap();
         (streamers, modifier_hdl)
     }
 
-    pub fn new(
+    pub(crate) fn new(
         sockets: Vec<Arc<UdpSocket>>,
         forward_sockets: Vec<Arc<UdpSocket>>,
         repair_socket: Arc<UdpSocket>,
-        sender: &Sender<Vec<PacketBatch>>,
-        bank_forks: Option<Arc<RwLock<BankForks>>>,
+        sender: Sender<Vec<PacketBatch>>,
+        bank_forks: Arc<RwLock<BankForks>>,
         exit: &Arc<AtomicBool>,
     ) -> Self {
         let recycler = PacketBatchRecycler::warmed(100, 1024);
@@ -183,7 +141,7 @@ impl ShredFetchStage {
         let (repair_receiver, repair_handler) = Self::packet_modifier(
             vec![repair_socket],
             exit,
-            sender.clone(),
+            sender,
             recycler,
             bank_forks,
             "shred_fetch_repair",
@@ -201,13 +159,72 @@ impl ShredFetchStage {
         }
     }
 
-    pub fn join(self) -> thread::Result<()> {
+    pub(crate) fn join(self) -> thread::Result<()> {
         for thread_hdl in self.thread_hdls {
             thread_hdl.join()?;
         }
         Ok(())
     }
 }
+
+// Returns slots range for which the node will ingest shreds.
+fn get_slots_range(bank_forks: &RwLock<BankForks>) -> (/*root:*/ Slot, /*max_slot:*/ Slot) {
+    let (root_bank, working_bank) = {
+        let bank_forks = bank_forks.read().unwrap();
+        (bank_forks.root_bank(), bank_forks.working_bank())
+    };
+    let slots_per_epoch = root_bank.get_slots_in_epoch(root_bank.epoch());
+    // Limit shreds to 2 epochs away.
+    let max_slot = working_bank.slot().saturating_add(2 * slots_per_epoch);
+    (root_bank.slot(), max_slot)
+}
+
+// Returns true if packet does not pass shred
+// sanity checks and should be discarded.
+#[must_use]
+fn should_discard_packet(
+    packet: &Packet,
+    (root, max_slot): (Slot, Slot),
+    packet_hasher: &PacketHasher,
+    shreds_received: &mut ShredsReceived,
+    stats: &mut ShredFetchStats,
+) -> bool {
+    let (slot, _index, _shred_type) = match get_shred_slot_index_type(packet, stats) {
+        Some(slot_index_type) => (slot_index_type),
+        None => return true,
+    };
+    if slot < root || slot > max_slot {
+        stats.slot_out_of_range += 1;
+        return true;
+    }
+    // match shred_type {
+    //     // Only data shreds have parent information
+    //     ShredType::Data => match shred.parent() {
+    //         Ok(parent) => blockstore::verify_shred_slots(shred.slot(), parent, root),
+    //         Err(_) => false,
+    //     },
+    //     // Filter out outdated coding shreds
+    //     ShredType::Code => shred.slot() >= root,
+    // }
+    let hash = packet_hasher.hash_packet(packet);
+    if shreds_received.put(hash, ()) == Some(()) {
+        stats.duplicate_shred += 1;
+        return true;
+    }
+    false
+}
+
+// fn verify_shred_slot(shred: &Shred, root: u64) -> bool {
+//     match shred.shred_type() {
+//         // Only data shreds have parent information
+//         ShredType::Data => match shred.parent() {
+//             Ok(parent) => blockstore::verify_shred_slots(shred.slot(), parent, root),
+//             Err(_) => false,
+//         },
+//         // Filter out outdated coding shreds
+//         ShredType::Code => shred.slot() >= root,
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -244,34 +261,27 @@ mod tests {
         let last_root = 0;
         let last_slot = 100;
         let slots_per_epoch = 10;
-        ShredFetchStage::process_packet(
+        let max_slot = last_slot + 2 * slots_per_epoch;
+        assert!(!should_discard_packet(
             &mut packet,
+            (last_root, max_slot),
+            &hasher,
             &mut shreds_received,
             &mut stats,
-            last_root,
-            last_slot,
-            slots_per_epoch,
-            &|_p| {},
-            &hasher,
-        );
-        assert!(!packet.meta.discard());
+        ));
         let coding = solana_ledger::shred::Shredder::generate_coding_shreds(
             &[shred],
             false, // is_last_in_slot
             3,     // next_code_index
         );
         coding[0].copy_to_packet(&mut packet);
-        ShredFetchStage::process_packet(
+        assert!(!should_discard_packet(
             &mut packet,
+            (last_root, max_slot),
+            &hasher,
             &mut shreds_received,
             &mut stats,
-            last_root,
-            last_slot,
-            slots_per_epoch,
-            &|_p| {},
-            &hasher,
-        );
-        assert!(!packet.meta.discard());
+        ));
     }
 
     #[test]
@@ -283,63 +293,50 @@ mod tests {
         let last_root = 0;
         let last_slot = 100;
         let slots_per_epoch = 10;
+        let max_slot = last_slot + 2 * slots_per_epoch;
 
         let hasher = PacketHasher::default();
 
         // packet size is 0, so cannot get index
-        ShredFetchStage::process_packet(
+        assert!(should_discard_packet(
             &mut packet,
+            (last_root, max_slot),
+            &hasher,
             &mut shreds_received,
             &mut stats,
-            last_root,
-            last_slot,
-            slots_per_epoch,
-            &|_p| {},
-            &hasher,
-        );
+        ));
         assert_eq!(stats.index_overrun, 1);
-        assert!(packet.meta.discard());
         let shred = Shred::new_from_data(1, 3, 0, &[], ShredFlags::LAST_SHRED_IN_SLOT, 0, 0, 0);
         shred.copy_to_packet(&mut packet);
 
         // rejected slot is 1, root is 3
-        ShredFetchStage::process_packet(
+        assert!(should_discard_packet(
             &mut packet,
+            (3, max_slot),
+            &hasher,
             &mut shreds_received,
             &mut stats,
-            3,
-            last_slot,
-            slots_per_epoch,
-            &|_p| {},
-            &hasher,
-        );
-        assert!(packet.meta.discard());
+        ));
+        assert_eq!(stats.slot_out_of_range, 1);
 
         // Accepted for 1,3
-        ShredFetchStage::process_packet(
+        assert!(!should_discard_packet(
             &mut packet,
+            (last_root, max_slot),
+            &hasher,
             &mut shreds_received,
             &mut stats,
-            last_root,
-            last_slot,
-            slots_per_epoch,
-            &|_p| {},
-            &hasher,
-        );
-        assert!(!packet.meta.discard());
+        ));
 
         // shreds_received should filter duplicate
-        ShredFetchStage::process_packet(
+        assert!(should_discard_packet(
             &mut packet,
+            (last_root, max_slot),
+            &hasher,
             &mut shreds_received,
             &mut stats,
-            last_root,
-            last_slot,
-            slots_per_epoch,
-            &|_p| {},
-            &hasher,
-        );
-        assert!(packet.meta.discard());
+        ));
+        assert_eq!(stats.duplicate_shred, 1);
 
         let shred = Shred::new_from_data(
             1_000_000,
@@ -354,31 +351,24 @@ mod tests {
         shred.copy_to_packet(&mut packet);
 
         // Slot 1 million is too high
-        ShredFetchStage::process_packet(
+        assert!(should_discard_packet(
             &mut packet,
+            (last_root, max_slot),
+            &hasher,
             &mut shreds_received,
             &mut stats,
-            last_root,
-            last_slot,
-            slots_per_epoch,
-            &|_p| {},
-            &hasher,
-        );
-        assert!(packet.meta.discard());
+        ));
+        assert_eq!(stats.slot_out_of_range, 2);
 
         let index = MAX_DATA_SHREDS_PER_SLOT as u32;
         let shred = Shred::new_from_data(5, index, 0, &[], ShredFlags::LAST_SHRED_IN_SLOT, 0, 0, 0);
         shred.copy_to_packet(&mut packet);
-        ShredFetchStage::process_packet(
+        assert!(should_discard_packet(
             &mut packet,
+            (last_root, max_slot),
+            &hasher,
             &mut shreds_received,
             &mut stats,
-            last_root,
-            last_slot,
-            slots_per_epoch,
-            &|_p| {},
-            &hasher,
-        );
-        assert!(packet.meta.discard());
+        ));
     }
 }

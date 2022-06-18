@@ -61,7 +61,7 @@ use {
     num_enum::{IntoPrimitive, TryFromPrimitive},
     serde::{Deserialize, Serialize},
     solana_entry::entry::{create_ticks, Entry},
-    solana_perf::packet::{deserialize_from_with_limit, Packet},
+    solana_perf::packet::Packet,
     solana_runtime::bank::Bank,
     solana_sdk::{
         clock::Slot,
@@ -564,11 +564,31 @@ pub mod layout {
     }
 
     pub fn get_slot(shred: &[u8]) -> Option<Slot> {
-        deserialize_from_with_limit(shred.get(OFFSET_OF_SHRED_SLOT..)?).ok()
+        <[u8; 8]>::try_from(shred.get(OFFSET_OF_SHRED_SLOT..)?.get(..8)?)
+            .map(Slot::from_le_bytes)
+            .ok()
     }
 
     pub(super) fn get_index(shred: &[u8]) -> Option<u32> {
-        deserialize_from_with_limit(shred.get(OFFSET_OF_SHRED_INDEX..)?).ok()
+        <[u8; 4]>::try_from(shred.get(OFFSET_OF_SHRED_INDEX..)?.get(..4)?)
+            .map(u32::from_le_bytes)
+            .ok()
+    }
+
+    pub fn get_parent(shred: &[u8]) -> Option<Slot> {
+        // Only data shreds have parent offset.
+        if get_shred_type(shred).ok()? != ShredType::Data {
+            return None;
+        }
+        let parent_offset =
+            <[u8; 2]>::try_from(shred.get(SIZE_OF_COMMON_SHRED_HEADER..)?.get(..2)?)
+                .map(u16::from_le_bytes)
+                .ok()?;
+        let slot = get_slot(shred)?;
+        if parent_offset == 0u16 && slot != 0 {
+            return None;
+        }
+        slot.checked_sub(Slot::from(parent_offset))
     }
 
     // Returns slice range of the shred payload which is signed.
@@ -1136,6 +1156,14 @@ mod tests {
             Some(shred.slot())
         );
         assert_eq!(
+            layout::get_index(packet.data(..).unwrap()),
+            Some(shred.index())
+        );
+        assert_eq!(
+            layout::get_parent(packet.data(..).unwrap()).unwrap(),
+            shred.parent().unwrap(),
+        );
+        assert_eq!(
             get_shred_slot_index_type(&packet, &mut ShredFetchStats::default()),
             Some((shred.slot(), shred.index(), shred.shred_type()))
         );
@@ -1178,6 +1206,14 @@ mod tests {
         assert_eq!(
             layout::get_slot(packet.data(..).unwrap()),
             Some(shred.slot())
+        );
+        assert_eq!(
+            layout::get_index(packet.data(..).unwrap()),
+            Some(shred.index())
+        );
+        assert_eq!(
+            layout::get_parent(packet.data(..).unwrap()).unwrap(),
+            shred.parent().unwrap(),
         );
         assert_eq!(
             get_shred_slot_index_type(&packet, &mut ShredFetchStats::default()),
@@ -1225,6 +1261,10 @@ mod tests {
         assert_eq!(
             layout::get_slot(packet.data(..).unwrap()),
             Some(shred.slot())
+        );
+        assert_eq!(
+            layout::get_index(packet.data(..).unwrap()),
+            Some(shred.index())
         );
         assert_eq!(
             get_shred_slot_index_type(&packet, &mut ShredFetchStats::default()),

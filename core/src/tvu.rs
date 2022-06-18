@@ -154,8 +154,8 @@ impl Tvu {
             fetch_sockets,
             forward_sockets,
             repair_socket.clone(),
-            &fetch_sender,
-            Some(bank_forks.clone()),
+            fetch_sender,
+            bank_forks.clone(),
             exit,
         );
 

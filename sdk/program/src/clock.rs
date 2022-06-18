@@ -2,7 +2,7 @@
 
 use {
     crate::{clone_zeroed, copy_field},
-    std::mem::MaybeUninit,
+    std::{mem::MaybeUninit, time::Duration},
 };
 
 // The default tick rate that the cluster attempts to achieve.  Note that the actual tick
@@ -51,6 +51,10 @@ pub const NUM_CONSECUTIVE_LEADER_SLOTS: u64 = 4;
 static_assertions::const_assert_eq!(DEFAULT_MS_PER_SLOT, 400);
 pub const DEFAULT_MS_PER_SLOT: u64 = 1_000 * DEFAULT_TICKS_PER_SLOT / DEFAULT_TICKS_PER_SECOND;
 pub const DEFAULT_S_PER_SLOT: f64 = DEFAULT_TICKS_PER_SLOT as f64 / DEFAULT_TICKS_PER_SECOND as f64;
+
+#[cfg(test)]
+static_assertions::const_assert_eq!(DEFAULT_SLOT_DURATION.as_millis(), 400);
+pub const DEFAULT_SLOT_DURATION: Duration = Duration::from_millis(DEFAULT_MS_PER_SLOT);
 
 /// The time window of recent block hash values that the bank will track the signatures
 /// of over. Once the bank discards a block hash, it will reject any transactions that use
