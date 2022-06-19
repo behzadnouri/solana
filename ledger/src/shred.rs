@@ -671,50 +671,6 @@ impl TryFrom<u8> for ShredVariant {
     }
 }
 
-// Get slot, index, and type from a packet with partial deserialize
-pub fn get_shred_slot_index_type(
-    packet: &Packet,
-    stats: &mut ShredFetchStats,
-) -> Option<(Slot, u32, ShredType)> {
-    let shred = match layout::get_shred(packet) {
-        None => {
-            stats.index_overrun += 1;
-            return None;
-        }
-        Some(shred) => shred,
-    };
-    if OFFSET_OF_SHRED_INDEX + SIZE_OF_SHRED_INDEX > shred.len() {
-        stats.index_overrun += 1;
-        return None;
-    }
-    let shred_type = match layout::get_shred_type(shred) {
-        Ok(shred_type) => shred_type,
-        Err(_) => {
-            stats.bad_shred_type += 1;
-            return None;
-        }
-    };
-    let slot = match layout::get_slot(shred) {
-        Some(slot) => slot,
-        None => {
-            stats.slot_bad_deserialize += 1;
-            return None;
-        }
-    };
-    let index = match layout::get_index(shred) {
-        Some(index) => index,
-        None => {
-            stats.index_bad_deserialize += 1;
-            return None;
-        }
-    };
-    if index >= MAX_DATA_SHREDS_PER_SLOT as u32 {
-        stats.index_out_of_bounds += 1;
-        return None;
-    }
-    Some((slot, index, shred_type))
-}
-
 pub fn max_ticks_per_n_shreds(num_shreds: u64, shred_data_size: Option<usize>) -> u64 {
     let ticks = create_ticks(1, 0, Hash::default());
     max_entries_per_n_shred(&ticks[0], num_shreds, shred_data_size)
@@ -893,87 +849,6 @@ mod tests {
                 parent_offset: 1000
             })
         );
-    }
-
-    #[test]
-    fn test_shred_offsets() {
-        solana_logger::setup();
-        let mut packet = Packet::default();
-        let shred = Shred::new_from_data(1, 3, 0, &[], ShredFlags::LAST_SHRED_IN_SLOT, 0, 0, 0);
-        shred.copy_to_packet(&mut packet);
-        let mut stats = ShredFetchStats::default();
-        let ret = get_shred_slot_index_type(&packet, &mut stats);
-        assert_eq!(Some((1, 3, ShredType::Data)), ret);
-        assert_eq!(stats, ShredFetchStats::default());
-
-        packet.meta.size = OFFSET_OF_SHRED_VARIANT;
-        assert_eq!(None, get_shred_slot_index_type(&packet, &mut stats));
-        assert_eq!(stats.index_overrun, 1);
-
-        packet.meta.size = OFFSET_OF_SHRED_INDEX;
-        assert_eq!(None, get_shred_slot_index_type(&packet, &mut stats));
-        assert_eq!(stats.index_overrun, 2);
-
-        packet.meta.size = OFFSET_OF_SHRED_INDEX + 1;
-        assert_eq!(None, get_shred_slot_index_type(&packet, &mut stats));
-        assert_eq!(stats.index_overrun, 3);
-
-        packet.meta.size = OFFSET_OF_SHRED_INDEX + SIZE_OF_SHRED_INDEX - 1;
-        assert_eq!(None, get_shred_slot_index_type(&packet, &mut stats));
-        assert_eq!(stats.index_overrun, 4);
-
-        packet.meta.size = OFFSET_OF_SHRED_INDEX + SIZE_OF_SHRED_INDEX;
-        assert_eq!(
-            Some((1, 3, ShredType::Data)),
-            get_shred_slot_index_type(&packet, &mut stats)
-        );
-        assert_eq!(stats.index_overrun, 4);
-
-        let shred = Shred::new_from_parity_shard(
-            8,   // slot
-            2,   // index
-            &[], // parity_shard
-            10,  // fec_set_index
-            30,  // num_data
-            4,   // num_code
-            1,   // position
-            200, // version
-        );
-        shred.copy_to_packet(&mut packet);
-        assert_eq!(
-            Some((8, 2, ShredType::Code)),
-            get_shred_slot_index_type(&packet, &mut stats)
-        );
-
-        let shred = Shred::new_from_data(
-            1,
-            std::u32::MAX - 10,
-            0,
-            &[],
-            ShredFlags::LAST_SHRED_IN_SLOT,
-            0,
-            0,
-            0,
-        );
-        shred.copy_to_packet(&mut packet);
-        assert_eq!(None, get_shred_slot_index_type(&packet, &mut stats));
-        assert_eq!(1, stats.index_out_of_bounds);
-
-        let shred = Shred::new_from_parity_shard(
-            8,   // slot
-            2,   // index
-            &[], // parity_shard
-            10,  // fec_set_index
-            30,  // num_data_shreds
-            4,   // num_coding_shreds
-            3,   // position
-            200, // version
-        );
-        shred.copy_to_packet(&mut packet);
-        packet.buffer_mut()[OFFSET_OF_SHRED_VARIANT] = u8::MAX;
-
-        assert_eq!(None, get_shred_slot_index_type(&packet, &mut stats));
-        assert_eq!(1, stats.bad_shred_type);
     }
 
     // Asserts that ShredType is backward compatible with u8.
@@ -1163,10 +1038,6 @@ mod tests {
             layout::get_parent(packet.data(..).unwrap()).unwrap(),
             shred.parent().unwrap(),
         );
-        assert_eq!(
-            get_shred_slot_index_type(&packet, &mut ShredFetchStats::default()),
-            Some((shred.slot(), shred.index(), shred.shred_type()))
-        );
     }
 
     #[test]
@@ -1215,10 +1086,6 @@ mod tests {
             layout::get_parent(packet.data(..).unwrap()).unwrap(),
             shred.parent().unwrap(),
         );
-        assert_eq!(
-            get_shred_slot_index_type(&packet, &mut ShredFetchStats::default()),
-            Some((shred.slot(), shred.index(), shred.shred_type()))
-        );
     }
 
     #[test]
@@ -1265,10 +1132,6 @@ mod tests {
         assert_eq!(
             layout::get_index(packet.data(..).unwrap()),
             Some(shred.index())
-        );
-        assert_eq!(
-            get_shred_slot_index_type(&packet, &mut ShredFetchStats::default()),
-            Some((shred.slot(), shred.index(), shred.shred_type()))
         );
     }
 

@@ -217,6 +217,10 @@ fn should_discard_packet(
         }
         Some(index) => index,
     };
+    if index as usize >= MAX_DATA_SHREDS_PER_SLOT {
+        stats.index_out_of_bounds += 1;
+        return true;
+    }
     let shred_type = match shred::layout::get_shred_type(shred) {
         Err(_) => {
             stats.bad_shred_type += 1;
@@ -225,10 +229,6 @@ fn should_discard_packet(
         Ok(shred_type) => shred_type,
     };
     if shred_type == ShredType::Data {
-        if index as usize >= MAX_DATA_SHREDS_PER_SLOT {
-            stats.index_out_of_bounds += 1;
-            return true;
-        }
         let parent = match shred::layout::get_parent(shred) {
             None => {
                 stats.invalid_parent_slot += 1;
