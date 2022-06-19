@@ -4,7 +4,10 @@ use {
     crate::packet_hasher::PacketHasher,
     crossbeam_channel::{unbounded, Sender},
     lru::LruCache,
-    solana_ledger::shred::{get_shred_slot_index_type, ShredFetchStats},
+    solana_ledger::{
+        blockstore::{self, MAX_DATA_SHREDS_PER_SLOT},
+        shred::{self, ShredFetchStats, ShredType},
+    },
     solana_perf::packet::{Packet, PacketBatch, PacketBatchRecycler, PacketFlags},
     solana_runtime::bank_forks::BankForks,
     solana_sdk::clock::{Slot, DEFAULT_SLOT_DURATION},
@@ -189,23 +192,55 @@ fn should_discard_packet(
     shreds_received: &mut ShredsReceived,
     stats: &mut ShredFetchStats,
 ) -> bool {
-    let (slot, _index, _shred_type) = match get_shred_slot_index_type(packet, stats) {
-        Some(slot_index_type) => (slot_index_type),
-        None => return true,
+    let shred = match shred::layout::get_shred(packet) {
+        None => {
+            stats.index_overrun += 1;
+            return true;
+        }
+        Some(shred) => shred,
     };
-    if slot < root || slot > max_slot {
-        stats.slot_out_of_range += 1;
-        return true;
+    let slot = match shred::layout::get_slot(shred) {
+        None => {
+            stats.slot_bad_deserialize += 1;
+            return true;
+        }
+        Some(slot) if slot <= root || slot > max_slot => {
+            stats.slot_out_of_range += 1;
+            return true;
+        }
+        Some(slot) => slot,
+    };
+    let index = match shred::layout::get_index(shred) {
+        None => {
+            stats.index_bad_deserialize += 1;
+            return true;
+        }
+        Some(index) => index,
+    };
+    let shred_type = match shred::layout::get_shred_type(shred) {
+        Err(_) => {
+            stats.bad_shred_type += 1;
+            return true;
+        }
+        Ok(shred_type) => shred_type,
+    };
+    if shred_type == ShredType::Data {
+        if index as usize >= MAX_DATA_SHREDS_PER_SLOT {
+            stats.index_out_of_bounds += 1;
+            return true;
+        }
+        let parent = match shred::layout::get_parent(shred) {
+            None => {
+                stats.invalid_parent_slot += 1;
+                return true;
+            }
+            Some(parent) => parent,
+        };
+        if !blockstore::verify_shred_slots(slot, parent, root) {
+            stats.invalid_parent_slot += 1;
+            return true;
+        }
     }
-    // match shred_type {
-    //     // Only data shreds have parent information
-    //     ShredType::Data => match shred.parent() {
-    //         Ok(parent) => blockstore::verify_shred_slots(shred.slot(), parent, root),
-    //         Err(_) => false,
-    //     },
-    //     // Filter out outdated coding shreds
-    //     ShredType::Code => shred.slot() >= root,
-    // }
     let hash = packet_hasher.hash_packet(packet);
     if shreds_received.put(hash, ()) == Some(()) {
         stats.duplicate_shred += 1;
@@ -247,7 +282,7 @@ mod tests {
         let shred = Shred::new_from_data(
             slot,
             3,   // shred index
-            0,   // parent offset
+            1,   // parent offset
             &[], // data
             ShredFlags::LAST_SHRED_IN_SLOT,
             0, // reference_tick
@@ -306,7 +341,7 @@ mod tests {
             &mut stats,
         ));
         assert_eq!(stats.index_overrun, 1);
-        let shred = Shred::new_from_data(1, 3, 0, &[], ShredFlags::LAST_SHRED_IN_SLOT, 0, 0, 0);
+        let shred = Shred::new_from_data(1, 3, 1, &[], ShredFlags::LAST_SHRED_IN_SLOT, 0, 0, 0);
         shred.copy_to_packet(&mut packet);
 
         // rejected slot is 1, root is 3

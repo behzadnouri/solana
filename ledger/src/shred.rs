@@ -558,7 +558,7 @@ pub mod layout {
         ShredVariant::try_from(shred_variant).map_err(|_| Error::InvalidShredVariant)
     }
 
-    pub(super) fn get_shred_type(shred: &[u8]) -> Result<ShredType, Error> {
+    pub fn get_shred_type(shred: &[u8]) -> Result<ShredType, Error> {
         let shred_variant = get_shred_variant(shred)?;
         Ok(ShredType::from(shred_variant))
     }
@@ -569,7 +569,7 @@ pub mod layout {
             .ok()
     }
 
-    pub(super) fn get_index(shred: &[u8]) -> Option<u32> {
+    pub fn get_index(shred: &[u8]) -> Option<u32> {
         <[u8; 4]>::try_from(shred.get(OFFSET_OF_SHRED_INDEX..)?.get(..4)?)
             .map(u32::from_le_bytes)
             .ok()
