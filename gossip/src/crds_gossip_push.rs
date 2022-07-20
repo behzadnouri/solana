@@ -17,7 +17,6 @@ use {
         contact_info::ContactInfo,
         crds::GossipRoute,
         crds_gossip::{get_stake, get_weight},
-        crds_gossip_error::CrdsGossipError,
         crds_pool::{CrdsPool, Cursor},
         crds_value::CrdsValue,
         weighted_shuffle::WeightedShuffle,
@@ -214,42 +213,29 @@ impl CrdsGossipPush {
         from: &Pubkey,
         values: Vec<CrdsValue>,
         now: u64,
-    ) -> Vec<Result<Pubkey, CrdsGossipError>> {
+    ) -> Vec<Pubkey> {
         self.num_total.fetch_add(values.len(), Ordering::Relaxed);
         let values: Vec<_> = {
             let wallclock_window = self.wallclock_window(now);
             let mut received_cache = self.received_cache.lock().unwrap();
             values
                 .into_iter()
+                .filter(|value| wallclock_window.contains(&value.wallclock()))
                 .map(|value| {
-                    if !wallclock_window.contains(&value.wallclock()) {
-                        return Err(CrdsGossipError::PushMessageTimeout);
-                    }
                     let origin = value.pubkey();
                     let peers = received_cache.entry(origin).or_default();
                     peers
                         .entry(*from)
                         .and_modify(|(_pruned, timestamp)| *timestamp = now)
                         .or_insert((/*pruned:*/ false, now));
-                    Ok(value)
+                    value
                 })
                 .collect()
         };
-        // TODO: Should use batch funtion.
-        values
-            .into_iter()
-            .map(|value| {
-                let value = value?;
-                let origin = value.pubkey();
-                match crds.insert(value, now, GossipRoute::PushMessage) {
-                    Ok(()) => Ok(origin),
-                    Err(_) => {
-                        self.num_old.fetch_add(1, Ordering::Relaxed);
-                        Err(CrdsGossipError::PushMessageOldVersion)
-                    }
-                }
-            })
-            .collect()
+        let num_values = values.len();
+        let pubkeys: Vec<_> = crds.insert_many(values, now, GossipRoute::PushMessage).collect();
+        self.num_old.fetch_add(num_values - pubkeys.len(), Ordering::Relaxed);
+        pubkeys
     }
 
     /// New push message to broadcast to peers.
