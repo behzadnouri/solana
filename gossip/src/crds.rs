@@ -77,7 +77,7 @@ pub struct Crds {
     stats: Mutex<CrdsStats>,
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CrdsError {
     InsertFailed,
     UnknownStakes,

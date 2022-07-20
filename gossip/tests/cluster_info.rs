@@ -147,7 +147,7 @@ fn retransmit(
 #[allow(clippy::type_complexity)]
 fn run_simulation(stakes: &[u64], fanout: usize) {
     let num_threads = num_threads();
-    const TIMEOUT: Duration = Duration::from_secs(10 * 60);
+    const TIMEOUT: Duration = Duration::from_secs(20 * 60);
 
     // describe the leader
     let leader_info = ContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), 0);

@@ -88,10 +88,9 @@ impl CrdsGossip {
         pending_push_messages: Vec<CrdsValue>,
         now: u64,
     ) -> HashMap<Pubkey, Vec<CrdsValue>> {
-        // TODO: Should use a batch function.
-        for entry in pending_push_messages {
-            let _ = self.crds.insert(entry, now, GossipRoute::LocalMessage);
-        }
+        self.crds
+            .insert_many(pending_push_messages, now, GossipRoute::LocalMessage)
+            .count();
         self.push.new_push_messages(&self.crds, now)
     }
 

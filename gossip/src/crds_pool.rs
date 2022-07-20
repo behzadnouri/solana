@@ -5,6 +5,7 @@ use {
         crds_entry::CrdsEntry,
         crds_value::{CrdsValue, CrdsValueLabel},
     },
+    itertools::Itertools,
     rand::Rng,
     rayon::{prelude::*, ThreadPool},
     solana_sdk::{
@@ -89,6 +90,28 @@ impl CrdsPool {
         let index = self.shard_index(&value.pubkey());
         let mut crds = self.shards[index].write().unwrap();
         crds.insert(value, now, route)
+    }
+
+    #[must_use]
+    pub(crate) fn insert_many(
+        &self,
+        values: impl IntoIterator<Item = CrdsValue>,
+        now: u64,
+        route: GossipRoute,
+    ) -> impl Iterator<Item = Pubkey> + '_ {
+        values
+            .into_iter()
+            .map(|value| (self.shard_index(&value.pubkey()), value))
+            .into_group_map()
+            .into_iter()
+            .flat_map(move |(shard, values)| {
+                let mut crds = self.shards[shard].write().unwrap();
+                values.into_iter().flat_map(move |value| {
+                    let pubkey = value.pubkey();
+                    crds.insert(value, now, route).ok()?;
+                    Some(pubkey)
+                })
+            })
     }
 
     pub fn get<'a, 'b, V>(&'a self, key: V::Key) -> Option<GuardRef<'a, V>>

@@ -336,11 +336,11 @@ impl CrdsGossipPull {
     where
         I: IntoIterator<Item = CrdsValue>,
     {
-        // TODO: Should use batch function.
+        let callers: Vec<_> = crds
+            .insert_many(callers, now, GossipRoute::PullRequest)
+            .collect();
         for caller in callers {
-            let key = caller.pubkey();
-            let _ = crds.insert(caller, now, GossipRoute::PullRequest);
-            crds.update_record_timestamp(&key, now);
+            crds.update_record_timestamp(&caller, now);
         }
     }
 
