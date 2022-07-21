@@ -52,11 +52,14 @@ impl CrdsGossip {
         values: Vec<CrdsValue>,
         now: u64,
     ) -> (usize, HashSet<Pubkey>) {
-        let pubkeys = self
+        let keys = self
             .push
             .process_push_message(&self.crds, from, values, now);
-        let success_count = pubkeys.len();
-        (success_count, HashSet::from_iter(pubkeys))
+        let success_count = keys.len();
+        (
+            success_count,
+            HashSet::from_iter(keys.into_iter().map(|key| key.pubkey())),
+        )
     }
 
     /// Remove redundant paths in the network.
@@ -79,7 +82,8 @@ impl CrdsGossip {
         now: u64,
     ) -> HashMap<Pubkey, Vec<CrdsValue>> {
         self.crds
-            .insert_many(pending_push_messages, now, GossipRoute::LocalMessage);
+            .upsert(pending_push_messages, now, GossipRoute::LocalMessage)
+            .count();
         self.push.new_push_messages(&self.crds, now)
     }
 

@@ -92,12 +92,14 @@ impl CrdsPool {
         crds.insert(value, now, route)
     }
 
-    pub(crate) fn insert_many(
+    // Returns labels of successfully upserted values.
+    #[must_use = "must consume the iterator"]
+    pub(crate) fn upsert(
         &self,
         values: impl IntoIterator<Item = CrdsValue>,
         now: u64,
         route: GossipRoute,
-    ) -> impl Iterator<Item = Pubkey> + '_ {
+    ) -> impl Iterator<Item = CrdsValueLabel> + '_ {
         values
             .into_iter()
             .map(|value| (self.shard_index(&value.pubkey()), value))
@@ -106,9 +108,9 @@ impl CrdsPool {
             .flat_map(move |(shard, values)| {
                 let mut crds = self.shards[shard].write().unwrap();
                 values.into_iter().flat_map(move |value| {
-                    let pubkey = value.pubkey();
+                    let key = value.label();
                     crds.insert(value, now, route).ok()?;
-                    Some(pubkey)
+                    Some(key)
                 })
             })
     }

@@ -337,10 +337,10 @@ impl CrdsGossipPull {
         I: IntoIterator<Item = CrdsValue>,
     {
         let callers: Vec<_> = crds
-            .insert_many(callers, now, GossipRoute::PullRequest)
+            .upsert(callers, now, GossipRoute::PullRequest)
             .collect();
         for caller in callers {
-            crds.update_record_timestamp(&caller, now);
+            crds.update_record_timestamp(&caller.pubkey(), now);
         }
     }
 
