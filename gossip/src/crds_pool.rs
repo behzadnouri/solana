@@ -92,7 +92,6 @@ impl CrdsPool {
         crds.insert(value, now, route)
     }
 
-    #[must_use]
     pub(crate) fn insert_many(
         &self,
         values: impl IntoIterator<Item = CrdsValue>,

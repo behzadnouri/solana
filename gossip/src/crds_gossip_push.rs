@@ -553,14 +553,14 @@ mod test {
         // push a new message
         assert_eq!(
             push.process_push_message(&crds, &Pubkey::default(), vec![value.clone()], 0),
-            [Ok(label.pubkey())],
+            [label.pubkey()],
         );
         assert_eq!(*crds.get::<&CrdsValue>(&label).unwrap(), &value);
 
         // push it again
         assert_eq!(
             push.process_push_message(&crds, &Pubkey::default(), vec![value], 0),
-            [Err(CrdsGossipError::PushMessageOldVersion)],
+            [],
         );
     }
     #[test]
@@ -574,7 +574,7 @@ mod test {
         // push a new message
         assert_eq!(
             push.process_push_message(&crds, &Pubkey::default(), vec![value], 0),
-            [Ok(ci.id)],
+            [ci.id],
         );
 
         // push an old version
@@ -582,7 +582,7 @@ mod test {
         let value = CrdsValue::new_unsigned(CrdsData::ContactInfo(ci));
         assert_eq!(
             push.process_push_message(&crds, &Pubkey::default(), vec![value], 0),
-            [Err(CrdsGossipError::PushMessageOldVersion)],
+            [],
         );
     }
     #[test]
@@ -597,7 +597,7 @@ mod test {
         let value = CrdsValue::new_unsigned(CrdsData::ContactInfo(ci.clone()));
         assert_eq!(
             push.process_push_message(&crds, &Pubkey::default(), vec![value], 0),
-            [Err(CrdsGossipError::PushMessageTimeout)],
+            [],
         );
 
         // push a version to far in the past
@@ -605,7 +605,7 @@ mod test {
         let value = CrdsValue::new_unsigned(CrdsData::ContactInfo(ci));
         assert_eq!(
             push.process_push_message(&crds, &Pubkey::default(), vec![value], timeout + 1),
-            [Err(CrdsGossipError::PushMessageTimeout)]
+            []
         );
     }
     #[test]
@@ -620,7 +620,7 @@ mod test {
         // push a new message
         assert_eq!(
             push.process_push_message(&crds, &Pubkey::default(), vec![value_old], 0),
-            [Ok(origin)],
+            [origin],
         );
 
         // push an old version
@@ -628,7 +628,7 @@ mod test {
         let value = CrdsValue::new_unsigned(CrdsData::ContactInfo(ci));
         assert_eq!(
             push.process_push_message(&crds, &Pubkey::default(), vec![value], 0),
-            [Ok(origin)],
+            [origin],
         );
     }
     #[test]
@@ -918,7 +918,7 @@ mod test {
         let origin = new_msg.pubkey();
         assert_eq!(
             push.process_push_message(&crds, &Pubkey::default(), vec![new_msg], 0),
-            [Ok(origin)]
+            [origin]
         );
         assert_eq!(push.active_set.read().unwrap().len(), 1);
         assert_eq!(push.new_push_messages(&crds, 0), expected);
@@ -948,7 +948,7 @@ mod test {
         );
         assert_eq!(
             push.process_push_message(&crds, &Pubkey::default(), vec![peers[2].clone()], now),
-            [Ok(origin[2])],
+            [origin[2]],
         );
         push.refresh_push_active_set(
             &crds,
@@ -1003,7 +1003,7 @@ mod test {
         let origin = new_msg.pubkey();
         assert_eq!(
             push.process_push_message(&crds, &Pubkey::default(), vec![new_msg.clone()], 0),
-            [Ok(origin)],
+            [origin],
         );
         push.process_prune_msg(
             &self_id,
@@ -1039,7 +1039,7 @@ mod test {
         let origin = new_msg.pubkey();
         assert_eq!(
             push.process_push_message(&crds, &Pubkey::default(), vec![new_msg], 1),
-            [Ok(origin)],
+            [origin],
         );
         assert_eq!(push.new_push_messages(&crds, 0), expected);
     }
@@ -1055,14 +1055,14 @@ mod test {
         // push a new message
         assert_eq!(
             push.process_push_message(&crds, &Pubkey::default(), vec![value.clone()], 0),
-            [Ok(label.pubkey())]
+            [label.pubkey()]
         );
         assert_eq!(*crds.get::<&CrdsValue>(&label).unwrap(), &value);
 
         // push it again
         assert_eq!(
             push.process_push_message(&crds, &Pubkey::default(), vec![value.clone()], 0),
-            [Err(CrdsGossipError::PushMessageOldVersion)],
+            [],
         );
 
         // purge the old pushed
@@ -1071,7 +1071,7 @@ mod test {
         // push it again
         assert_eq!(
             push.process_push_message(&crds, &Pubkey::default(), vec![value], 0),
-            [Err(CrdsGossipError::PushMessageOldVersion)],
+            [],
         );
     }
 }

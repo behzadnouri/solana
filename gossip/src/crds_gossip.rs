@@ -79,8 +79,7 @@ impl CrdsGossip {
         now: u64,
     ) -> HashMap<Pubkey, Vec<CrdsValue>> {
         self.crds
-            .insert_many(pending_push_messages, now, GossipRoute::LocalMessage)
-            .count();
+            .insert_many(pending_push_messages, now, GossipRoute::LocalMessage);
         self.push.new_push_messages(&self.crds, now)
     }
 
