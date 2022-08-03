@@ -352,6 +352,7 @@ fn get_erasure_batch_size(num_data_shreds: usize) -> usize {
         .get(num_data_shreds)
         .copied()
         .unwrap_or(2 * num_data_shreds)
+        .min(2 * num_data_shreds)
 }
 
 // Returns offsets to fec_set_index when spliting shreds into erasure batches.
