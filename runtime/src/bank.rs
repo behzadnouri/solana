@@ -1706,6 +1706,7 @@ impl Bank {
         reward_calc_tracer: Option<impl Fn(&RewardCalculationEvent) + Send + Sync>,
         new_bank_options: NewBankOptions,
     ) -> Self {
+        eprintln!("new from parent, slot: {}", slot);
         let mut time = Measure::start("bank::new_from_parent");
         let NewBankOptions { vote_only_bank } = new_bank_options;
 
@@ -1895,6 +1896,7 @@ impl Bank {
         let (_, update_epoch_time) = measure!(
             {
                 if parent_epoch < new.epoch() {
+                    eprintln!("epoch-boundary: {}, {}", parent_epoch, new.slot());
                     let (thread_pool, thread_pool_time) = measure!(
                         ThreadPoolBuilder::new().build().unwrap(),
                         "thread_pool_creation",
@@ -2788,6 +2790,8 @@ impl Bank {
         let invalid_cached_stake_accounts = AtomicUsize::default();
         let invalid_cached_vote_accounts = AtomicUsize::default();
         let invalid_cached_stake_accounts_rent_epoch = AtomicUsize::default();
+        dbg!(self.slot());
+        eprintln!("slot: {}", self.slot());
 
         let stake_delegations: Vec<_> = stakes.stake_delegations().iter().collect();
         thread_pool.install(|| {
@@ -2804,11 +2808,13 @@ impl Bank {
                         None => {
                             invalid_stake_keys
                                 .insert(*stake_pubkey, InvalidCacheEntryReason::Missing);
+                            dbg!(cached_stake_account);
                             invalid_cached_stake_accounts.fetch_add(1, Relaxed);
                             return;
                         }
                     };
                     if cached_stake_account.account() != &stake_account {
+                        dbg!(&stake_account, cached_stake_account);
                         invalid_cached_stake_accounts.fetch_add(1, Relaxed);
                         let cached_stake_account = cached_stake_account.account();
                         if cached_stake_account.lamports() == stake_account.lamports()
@@ -2859,6 +2865,7 @@ impl Bank {
                                     invalid_vote_keys
                                         .insert(*vote_pubkey, InvalidCacheEntryReason::WrongOwner);
                                     if cached_vote_account.is_some() {
+                                        dbg!(&vote_account, cached_vote_account);
                                         invalid_cached_vote_accounts.fetch_add(1, Relaxed);
                                     }
                                     return;
@@ -2867,6 +2874,7 @@ impl Bank {
                             }
                             None => {
                                 if cached_vote_account.is_some() {
+                                    dbg!(cached_vote_account);
                                     invalid_cached_vote_accounts.fetch_add(1, Relaxed);
                                 }
                                 invalid_vote_keys
@@ -2883,6 +2891,7 @@ impl Bank {
                             invalid_vote_keys
                                 .insert(*vote_pubkey, InvalidCacheEntryReason::BadState);
                             if cached_vote_account.is_some() {
+                                dbg!(&vote_account, cached_vote_account);
                                 invalid_cached_vote_accounts.fetch_add(1, Relaxed);
                             }
                             return;
@@ -2891,6 +2900,7 @@ impl Bank {
                             Some(cached_vote_account)
                                 if cached_vote_account.account() == &vote_account => {}
                             _ => {
+                                dbg!(&vote_account, cached_vote_account);
                                 invalid_cached_vote_accounts.fetch_add(1, Relaxed);
                             }
                         };
