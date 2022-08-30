@@ -103,9 +103,24 @@ impl Shred for ShredData {
     fn sanitize(&self) -> Result<(), Error> {
         match self.common_header.shred_variant {
             ShredVariant::LegacyData => (),
-            _ => return Err(Error::InvalidShredVariant),
+            _ => {
+                error!(
+                    "shred-sanitize: InvalidShredVariant, {:?}, {:?}",
+                    self.common_header, self.data_header
+                );
+                return Err(Error::InvalidShredVariant);
+            }
         }
-        shred_data::sanitize(self)
+        match shred_data::sanitize(self) {
+            Err(err) => {
+                error!(
+                    "shred-sanitize: {:?}, {:?}, {:?}",
+                    err, self.common_header, self.data_header
+                );
+                Err(err)
+            }
+            Ok(()) => Ok(()),
+        }
     }
 
     fn signed_message(&self) -> &[u8] {
@@ -165,9 +180,24 @@ impl Shred for ShredCode {
     fn sanitize(&self) -> Result<(), Error> {
         match self.common_header.shred_variant {
             ShredVariant::LegacyCode => (),
-            _ => return Err(Error::InvalidShredVariant),
+            _ => {
+                error!(
+                    "shred-sanitize: InvalidShredVariant, {:?}, {:?}",
+                    self.common_header, self.coding_header
+                );
+                return Err(Error::InvalidShredVariant);
+            }
         }
-        shred_code::sanitize(self)
+        match shred_code::sanitize(self) {
+            Err(err) => {
+                error!(
+                    "shred-sanitize: {:?}, {:?}, {:?}",
+                    err, self.common_header, self.coding_header
+                );
+                Err(err)
+            }
+            Ok(()) => Ok(()),
+        }
     }
 
     fn signed_message(&self) -> &[u8] {
