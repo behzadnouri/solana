@@ -450,7 +450,7 @@ pub mod test {
             blockstore::Blockstore,
             genesis_utils::{create_genesis_config, GenesisConfigInfo},
             get_tmp_ledger_path,
-            shred::{max_ticks_per_n_shreds, ProcessShredsStats, Shredder},
+            shred::{max_ticks_per_n_shreds, ProcessShredsStats, ReedSolomonCache, Shredder},
         },
         solana_runtime::bank::Bank,
         solana_sdk::{
@@ -488,6 +488,7 @@ pub mod test {
             true, // is_last_in_slot
             0,    // next_shred_index,
             0,    // next_code_index
+            &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
         );
         (

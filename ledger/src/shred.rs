@@ -75,7 +75,7 @@ pub use {
         shred_data::ShredData,
         stats::{ProcessShredsStats, ShredFetchStats},
     },
-    crate::shredder::Shredder,
+    crate::shredder::{ReedSolomonCache, Shredder},
 };
 
 mod common;
@@ -714,20 +714,25 @@ impl TryFrom<u8> for ShredVariant {
     }
 }
 
-pub(crate) fn recover(shreds: Vec<Shred>) -> Result<Vec<Shred>, Error> {
+pub(crate) fn recover(
+    shreds: Vec<Shred>,
+    reed_solomon_cache: &ReedSolomonCache,
+) -> Result<Vec<Shred>, Error> {
     match shreds
         .first()
         .ok_or(TooFewShardsPresent)?
         .common_header()
         .shred_variant
     {
-        ShredVariant::LegacyData | ShredVariant::LegacyCode => Shredder::try_recovery(shreds),
+        ShredVariant::LegacyData | ShredVariant::LegacyCode => {
+            Shredder::try_recovery(shreds, reed_solomon_cache)
+        }
         ShredVariant::MerkleCode(_) | ShredVariant::MerkleData(_) => {
             let shreds = shreds
                 .into_iter()
                 .map(merkle::Shred::try_from)
                 .collect::<Result<_, _>>()?;
-            Ok(merkle::recover(shreds)?
+            Ok(merkle::recover(shreds, reed_solomon_cache)?
                 .into_iter()
                 .map(Shred::from)
                 .collect())
