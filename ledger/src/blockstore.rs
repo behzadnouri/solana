@@ -647,11 +647,15 @@ impl Blockstore {
             code_cf,
         ))
         .collect();
-        if let Ok(mut result) = shred::recover(available_shreds, reed_solomon_cache) {
-            Self::submit_metrics(slot, erasure_meta, true, "complete".into(), result.len());
-            recovered_shreds.append(&mut result);
-        } else {
-            Self::submit_metrics(slot, erasure_meta, true, "incomplete".into(), 0);
+        match shred::recover(available_shreds, reed_solomon_cache) {
+            Ok(mut result) => {
+                Self::submit_metrics(slot, erasure_meta, true, "complete".into(), result.len());
+                recovered_shreds.append(&mut result);
+            }
+            Err(err) => {
+                error!("shred-recover: {}", err);
+                Self::submit_metrics(slot, erasure_meta, true, "incomplete".into(), 0);
+            }
         }
     }
 
