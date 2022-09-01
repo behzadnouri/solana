@@ -2211,6 +2211,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "integer-encoding"
+version = "3.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bb03732005da905c88227371639bf1ad885cc712789c011c31c5fb3ab3ccf02"
+
+[[package]]
 name = "io-lifetimes"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5809,6 +5815,7 @@ dependencies = [
  "console_log",
  "curve25519-dalek",
  "getrandom 0.2.3",
+ "integer-encoding",
  "itertools",
  "js-sys",
  "lazy_static",

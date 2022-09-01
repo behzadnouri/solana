@@ -18,6 +18,7 @@ borsh-derive = "0.9.1"
 bs58 = "0.4.0"
 bytemuck = { version = "1.8.0", features = ["derive"] }
 bv = { version = "0.11.1", features = ["serde"] }
+integer-encoding = "3.0.4"
 itertools =  "0.10.1"
 lazy_static = "1.4.0"
 log = "0.4.17"
