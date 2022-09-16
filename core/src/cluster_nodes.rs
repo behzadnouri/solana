@@ -35,6 +35,7 @@ use {
     },
 };
 
+#[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 enum NodeId {
     // TVU node obtained through gossip (staked or not).
@@ -43,6 +44,7 @@ enum NodeId {
     Pubkey(Pubkey),
 }
 
+#[derive(Debug)]
 pub struct Node {
     node: NodeId,
     stake: u64,
@@ -270,6 +272,9 @@ pub fn new_cluster_nodes<T: 'static>(
 ) -> ClusterNodes<T> {
     let self_pubkey = cluster_info.id();
     let nodes = get_nodes(cluster_info, stakes);
+    if rand::thread_rng().gen_ratio(1, 12) {
+        error!("cluster-nodes: {:?}", nodes);
+    }
     let index: HashMap<_, _> = nodes
         .iter()
         .enumerate()
