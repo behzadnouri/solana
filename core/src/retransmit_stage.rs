@@ -9,6 +9,7 @@ use {
     crossbeam_channel::{Receiver, RecvTimeoutError},
     itertools::{izip, Itertools},
     lru::LruCache,
+    rand::Rng,
     rayon::{prelude::*, ThreadPool, ThreadPoolBuilder},
     solana_gossip::{
         cluster_info::{ClusterInfo, DATA_PLANE_FANOUT},
@@ -29,7 +30,7 @@ use {
         socket::SocketAddrSpace,
     },
     std::{
-        collections::HashMap,
+        collections::{HashMap, HashSet},
         iter::repeat,
         net::UdpSocket,
         ops::AddAssign,
@@ -191,6 +192,18 @@ fn retransmit(
         let bank_forks = bank_forks.read().unwrap();
         (bank_forks.working_bank(), bank_forks.root_bank())
     };
+    if rand::thread_rng().gen_ratio(1, 100) {
+        let shred_versions: HashSet<_> = shreds
+            .iter()
+            .filter_map(|shred| shred::layout::get_version(shred))
+            .collect();
+        error!(
+            "shred: {:?}, {:?}, {:?}",
+            root_bank.cluster_type(),
+            working_bank.cluster_type(),
+            shred_versions
+        );
+    }
     epoch_fetch.stop();
     stats.epoch_fetch += epoch_fetch.as_us();
 
