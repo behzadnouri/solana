@@ -13,7 +13,7 @@ use {
     },
 };
 
-const ENTRY_COALESCE_DURATION: Duration = Duration::from_millis(50);
+const ENTRY_COALESCE_DURATION: Duration = Duration::from_millis(500);
 
 pub(super) struct ReceiveResults {
     pub entries: Vec<Entry>,
@@ -63,7 +63,7 @@ pub(super) fn recv_slot_entries(receiver: &Receiver<WorkingBankEntry>) -> Result
     // Wait up to `ENTRY_COALESCE_DURATION` to try to coalesce entries into a 32 shred batch
     let mut coalesce_start = Instant::now();
     while last_tick_height != bank.max_tick_height()
-        && serialized_batch_byte_count < target_serialized_batch_byte_count
+        && (serialized_batch_byte_count < target_serialized_batch_byte_count || entries.len() < 2)
     {
         let (try_bank, (entry, tick_height)) =
             match receiver.recv_deadline(coalesce_start + ENTRY_COALESCE_DURATION) {
