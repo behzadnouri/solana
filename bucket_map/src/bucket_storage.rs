@@ -285,16 +285,16 @@ impl BucketStorage {
             .open(file.clone())
             .map_err(|e| {
                 let mmap_msg = get_mmap_count()
-                    .map(|mmap_count| format!("current mmap_count: {}", mmap_count))
+                    .map(|mmap_count| format!("current mmap_count: {mmap_count}"))
                     .unwrap_or_default();
 
                 let open_fd_msg = get_num_open_fd()
-                    .map(|open_fd| format!("current open_fd: {}", open_fd))
+                    .map(|open_fd| format!("current open_fd: {open_fd}"))
                     .unwrap_or_default();
 
                 let limit_msg = get_open_fd_limits()
                     .map(|(soft_limit, hard_limit)| {
-                        format!("soft_limit: {}, hard_limit: {}", soft_limit, hard_limit,)
+                        format!("soft_limit: {soft_limit}, hard_limit: {hard_limit}",)
                     })
                     .unwrap_or_default();
 
@@ -457,7 +457,7 @@ mod test {
         let mut v = vec![];
         for i in 1..1900000 {
             if i % 100 == 0 {
-                println!("{}", i);
+                println!("{i}");
             }
 
             let tmpdir = tempdir().unwrap();
@@ -471,7 +471,7 @@ mod test {
         let mmap_count = get_mmap_count().unwrap();
         let duration = start.elapsed();
 
-        println!("{}", mmap_count);
-        println!("Time elapsed is: {:?}", duration);
+        println!("{mmap_count}");
+        println!("Time elapsed is: {duration:?}");
     }
 }

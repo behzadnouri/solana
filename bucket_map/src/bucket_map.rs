@@ -185,7 +185,7 @@ fn read_be_u64(input: &[u8]) -> u64 {
 #[cfg(target_os = "linux")]
 pub fn get_mmap_count() -> Option<usize> {
     let pid = std::process::id();
-    let map_path = format!("/proc/{}/maps", pid);
+    let map_path = format!("/proc/{pid}/maps");
     let output = std::process::Command::new("wc")
         .args(["-l", &map_path])
         .output()
@@ -245,8 +245,8 @@ pub fn get_open_fd_limits() -> Option<(usize, usize)> {
 #[cfg(target_os = "linux")]
 pub fn get_num_open_fd() -> Option<usize> {
     let pid = std::process::id();
-    let fd_path = format!("/proc/{}/fd", pid);
-    let cmd = format!("ls -l {} | wc -l", fd_path);
+    let fd_path = format!("/proc/{pid}/fd");
+    let cmd = format!("ls -l {fd_path} | wc -l");
 
     let output = std::process::Command::new("sh")
         .args(["-c", &cmd])
