@@ -63,6 +63,7 @@ use {
         mapref::entry::Entry::{Occupied, Vacant},
         DashMap, DashSet,
     },
+    itertools::Either,
     log::*,
     rand::{thread_rng, Rng},
     rayon::{prelude::*, ThreadPool},
@@ -87,6 +88,7 @@ use {
         convert::TryFrom,
         hash::{Hash as StdHash, Hasher as StdHasher},
         io::{Error as IoError, Result as IoResult},
+        iter::Empty,
         ops::{Range, RangeBounds},
         path::{Path, PathBuf},
         str::FromStr,
@@ -257,7 +259,7 @@ impl CurrentAncientAppendVec {
             ),
             None::<Vec<Hash>>,
             Some(self.append_vec()),
-            None,
+            None::<Empty<_>>, // write_version_producer
             StoreReclaims::Ignore,
         )
     }
@@ -6427,7 +6429,7 @@ impl AccountsDb {
                 (slot, &accounts[..], include_slot_in_hash),
                 Some(hashes),
                 Some(&flushed_store),
-                None,
+                None::<Empty<_>>, // write_version_producer
                 StoreReclaims::Default,
             );
 
@@ -6445,7 +6447,7 @@ impl AccountsDb {
                     (slot, &accounts[..], include_slot_in_hash),
                     Some(hashes),
                     Some(&flushed_store),
-                    None,
+                    None::<Empty<_>>, // write_version_producer
                     StoreReclaims::Ignore,
                 );
             }
@@ -6536,18 +6538,21 @@ impl AccountsDb {
         }
     }
 
-    fn write_accounts_to_cache<'a, 'b, T: ReadableAccount + Sync, P>(
+    fn write_accounts_to_cache<'a, 'b, I, T, P>(
         &self,
         slot: Slot,
         accounts_and_meta_to_store: &impl StorableAccounts<'b, T>,
-        txn_signatures_iter: Box<dyn std::iter::Iterator<Item = &Option<&Signature>> + 'a>,
+        txn_signatures: I,
         include_slot_in_hash: IncludeSlotInHash,
         mut write_version_producer: P,
     ) -> Vec<AccountInfo>
     where
+        I: IntoIterator<Item = &'a Option<&'a Signature>>,
         P: Iterator<Item = u64>,
+        T: ReadableAccount + Sync,
     {
-        txn_signatures_iter
+        txn_signatures
+            .into_iter()
             .enumerate()
             .map(|(i, signature)| {
                 let account = accounts_and_meta_to_store
@@ -6615,19 +6620,17 @@ impl AccountsDb {
             .fetch_add(calc_stored_meta_time.as_us(), Ordering::Relaxed);
 
         if is_cached_store {
-            let signature_iter: Box<dyn std::iter::Iterator<Item = &Option<&Signature>>> =
-                match txn_signatures {
-                    Some(txn_signatures) => {
-                        assert_eq!(txn_signatures.len(), accounts.len());
-                        Box::new(txn_signatures.iter())
-                    }
-                    None => Box::new(std::iter::repeat(&None).take(accounts.len())),
-                };
-
+            let txn_signatures = match txn_signatures {
+                None => Either::Left(std::iter::repeat(&None).take(accounts.len())),
+                Some(txn_signatures) => {
+                    assert_eq!(txn_signatures.len(), accounts.len());
+                    Either::Right(txn_signatures.iter())
+                }
+            };
             self.write_accounts_to_cache(
                 slot,
                 accounts,
-                signature_iter,
+                txn_signatures,
                 accounts.include_slot_in_hash(),
                 write_version_producer,
             )
@@ -8340,7 +8343,7 @@ impl AccountsDb {
             accounts,
             hashes,
             None,
-            None::<Box<dyn Iterator<Item = u64>>>,
+            None::<Empty<_>>, // write_version_producer
             is_cached_store,
             reset_accounts,
             txn_signatures,
@@ -8348,14 +8351,18 @@ impl AccountsDb {
         );
     }
 
-    pub(crate) fn store_accounts_frozen<'a, T: ReadableAccount + Sync + ZeroLamport + 'a>(
+    pub(crate) fn store_accounts_frozen<'a, I, T>(
         &'a self,
         accounts: impl StorableAccounts<'a, T>,
         hashes: Option<Vec<impl Borrow<Hash>>>,
         storage: Option<&'a Arc<AccountStorageEntry>>,
-        write_version_producer: Option<Box<dyn Iterator<Item = StoredMetaWriteVersion>>>,
+        write_version_producer: Option<I>,
         reclaim: StoreReclaims,
-    ) -> StoreAccountsTiming {
+    ) -> StoreAccountsTiming
+    where
+        I: IntoIterator<Item = StoredMetaWriteVersion>,
+        T: ReadableAccount + Sync + ZeroLamport + 'a,
+    {
         // stores on a frozen slot should not reset
         // the append vec so that hashing could happen on the store
         // and accounts in the append_vec can be unrefed correctly
@@ -8373,33 +8380,33 @@ impl AccountsDb {
         )
     }
 
-    fn store_accounts_custom<'a, T: ReadableAccount + Sync + ZeroLamport + 'a>(
+    fn store_accounts_custom<'a, I, T>(
         &self,
         accounts: impl StorableAccounts<'a, T>,
         hashes: Option<Vec<impl Borrow<Hash>>>,
         storage: Option<&'a Arc<AccountStorageEntry>>,
-        write_version_producer: Option<Box<dyn Iterator<Item = u64>>>,
+        write_version_producer: Option<I>,
         is_cached_store: bool,
         reset_accounts: bool,
         txn_signatures: Option<&[Option<&Signature>]>,
         reclaim: StoreReclaims,
-    ) -> StoreAccountsTiming {
+    ) -> StoreAccountsTiming
+    where
+        I: IntoIterator<Item = u64>,
+        T: ReadableAccount + Sync + ZeroLamport + 'a,
+    {
         let storage_finder = Box::new(move |slot, size| {
             storage
                 .cloned()
                 .unwrap_or_else(|| self.find_storage_candidate(slot, size))
         });
-
-        let write_version_producer: Box<dyn Iterator<Item = u64>> = write_version_producer
-            .unwrap_or_else(|| {
-                let mut current_version = self.bulk_assign_write_version(accounts.len());
-                Box::new(std::iter::from_fn(move || {
-                    let ret = current_version;
-                    current_version += 1;
-                    Some(ret)
-                }))
-            });
-
+        let write_version_producer = match write_version_producer {
+            None => {
+                let current_version = self.bulk_assign_write_version(accounts.len());
+                Either::Left(current_version..)
+            }
+            Some(write_version_producer) => Either::Right(write_version_producer.into_iter()),
+        };
         self.stats
             .store_num_accounts
             .fetch_add(accounts.len() as u64, Ordering::Relaxed);
@@ -8872,7 +8879,7 @@ impl AccountsDb {
                     (*slot, &add[..], include_slot_in_hash),
                     Some(hashes),
                     None,
-                    None,
+                    None::<Empty<_>>, // write_version_producer
                     StoreReclaims::Ignore,
                 );
             });
