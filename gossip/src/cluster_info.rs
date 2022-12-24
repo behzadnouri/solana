@@ -1862,6 +1862,7 @@ impl ClusterInfo {
         recycler: &PacketBatchRecycler,
         stakes: &HashMap<Pubkey, u64>,
         response_sender: &PacketBatchSender,
+        mask_bit_counts: &mut [usize; 65],
     ) {
         let _st = ScopedTimer::from(&self.stats.handle_batch_pull_requests_time);
         if requests.is_empty() {
@@ -1892,6 +1893,10 @@ impl ClusterInfo {
             self.stats
                 .pull_requests_count
                 .add_relaxed(requests.len() as u64);
+            for PullData { filter, .. } in &requests {
+                let k = filter.mask_bits.min(64u32) as usize;
+                mask_bit_counts[k] = mask_bit_counts[k].saturating_add(1);
+            }
             let response = self.handle_pull_requests(thread_pool, recycler, requests, stakes);
             if !response.is_empty() {
                 self.stats
@@ -2379,6 +2384,7 @@ impl ClusterInfo {
         _feature_set: Option<&FeatureSet>,
         epoch_duration: Duration,
         should_check_duplicate_instance: bool,
+        mask_bit_counts: &mut [usize; 65],
     ) -> Result<(), GossipError> {
         let _st = ScopedTimer::from(&self.stats.process_gossip_packets_time);
         // Filter out values if the shred-versions are different.
@@ -2470,6 +2476,7 @@ impl ClusterInfo {
             recycler,
             stakes,
             response_sender,
+            mask_bit_counts,
         );
         self.stats
             .process_gossip_packets_iterations_since_last_report
@@ -2566,6 +2573,7 @@ impl ClusterInfo {
         thread_pool: &ThreadPool,
         last_print: &mut Instant,
         should_check_duplicate_instance: bool,
+        mask_bit_counts: &mut [usize; 65],
     ) -> Result<(), GossipError> {
         let _st = ScopedTimer::from(&self.stats.gossip_listen_loop_time);
         const RECV_TIMEOUT: Duration = Duration::from_secs(1);
@@ -2601,9 +2609,15 @@ impl ClusterInfo {
             feature_set.as_deref(),
             get_epoch_duration(bank_forks, &self.stats),
             should_check_duplicate_instance,
+            mask_bit_counts,
         )?;
         if last_print.elapsed() > SUBMIT_GOSSIP_STATS_INTERVAL {
-            submit_gossip_stats(&self.stats, &self.gossip, &stakes);
+            submit_gossip_stats(
+                &self.stats,
+                &self.gossip,
+                &stakes,
+                std::mem::replace(mask_bit_counts, [0usize; 65]),
+            );
             *last_print = Instant::now();
         }
         self.stats
@@ -2655,6 +2669,7 @@ impl ClusterInfo {
             .thread_name(|i| format!("solGossipWork{:02}", i))
             .build()
             .unwrap();
+        let mut mask_bit_counts = [0usize; 65];
         Builder::new()
             .name("solGossipListen".to_string())
             .spawn(move || {
@@ -2667,6 +2682,7 @@ impl ClusterInfo {
                         &thread_pool,
                         &mut last_print,
                         should_check_duplicate_instance,
+                        &mut mask_bit_counts,
                     ) {
                         match err {
                             GossipError::RecvTimeoutError(RecvTimeoutError::Disconnected) => break,
