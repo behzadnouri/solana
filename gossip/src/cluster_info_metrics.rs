@@ -189,7 +189,14 @@ pub(crate) fn submit_gossip_stats(
     stats: &GossipStats,
     gossip: &CrdsGossip,
     stakes: &HashMap<Pubkey, u64>,
+    mask_bit_counts: [usize; 65],
 ) {
+    let mask_bit_counts: Vec<_> = mask_bit_counts
+        .into_iter()
+        .enumerate()
+        .filter(|&(_, count)| count != 0)
+        .collect();
+    info!("mask_bit_counts: {:?}", mask_bit_counts);
     let (crds_stats, table_size, num_nodes, num_pubkeys, purged_values_size, failed_inserts_size) = {
         let gossip_crds = gossip.crds.read().unwrap();
         (
