@@ -63,7 +63,7 @@ pub const KEYS: f64 = 8f64;
 pub struct CrdsFilter {
     pub filter: Bloom<Hash>,
     mask: u64,
-    mask_bits: u32,
+    pub(crate) mask_bits: u32,
 }
 
 impl Default for CrdsFilter {

@@ -1,11 +1,12 @@
 use {
-    crate::crds_gossip::CrdsGossip,
+    crate::{contact_info::ContactInfo, crds_gossip::CrdsGossip},
     itertools::Itertools,
     solana_measure::measure::Measure,
     solana_sdk::{clock::Slot, pubkey::Pubkey},
     std::{
         cmp::Reverse,
         collections::HashMap,
+        net::SocketAddr,
         ops::{Deref, DerefMut},
         sync::atomic::{AtomicU64, Ordering},
         time::Instant,
@@ -189,7 +190,24 @@ pub(crate) fn submit_gossip_stats(
     stats: &GossipStats,
     gossip: &CrdsGossip,
     stakes: &HashMap<Pubkey, u64>,
+    mask_bit_counts: [usize; 65],
+    outliers: HashMap<(SocketAddr, ContactInfo), usize>,
 ) {
+    let mask_bit_counts: Vec<_> = mask_bit_counts
+        .into_iter()
+        .enumerate()
+        .filter(|&(_, count)| count != 0)
+        .collect();
+    info!("mask_bit_counts: {:?}", mask_bit_counts);
+    let mut outliers: Vec<_> = outliers
+        .into_iter()
+        .map(|((addr, caller), count)| (count, addr, caller))
+        .collect();
+    outliers.sort_unstable_by_key(|&(count, _, _)| Reverse(count));
+    outliers.truncate(5);
+    if !outliers.is_empty() {
+        info!("mask_bit_outliers: {:?}", outliers);
+    }
     let (crds_stats, table_size, num_nodes, num_pubkeys, purged_values_size, failed_inserts_size) = {
         let gossip_crds = gossip.crds.read().unwrap();
         (
