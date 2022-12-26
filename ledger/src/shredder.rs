@@ -31,11 +31,10 @@ lazy_static! {
 
 // Maps number of data shreds to the optimal erasure batch size which has the
 // same recovery probabilities as a 32:32 erasure batch.
-pub(crate) const ERASURE_BATCH_SIZE: [usize; 33] = [
-    0, 18, 20, 22, 23, 25, 27, 28, 30, // 8
-    32, 33, 35, 36, 38, 39, 41, 42, // 16
-    43, 45, 46, 48, 49, 51, 52, 53, // 24
-    55, 56, 58, 59, 60, 62, 63, 64, // 32
+pub(crate) const ERASURE_BATCH_SIZE: [usize; 65] = [
+    0, 15, 17, 19, 20, 22, 24, 26, 28, 29, 31, 32, 34, 36, 37, 39, 40, 42, 44, 45, 47, 48, 50, 51,
+    53, 54, 56, 57, 59, 60, 62, 63, 64, 66, 68, 70, 72, 74, 75, 77, 79, 81, 83, 85, 86, 88, 90, 92,
+    94, 96, 97, 99, 101, 103, 105, 106, 108, 110, 112, 114, 116, 117, 119, 121, 123,
 ];
 
 type ReedSolomon = reed_solomon_erasure::ReedSolomon<Field>;

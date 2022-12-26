@@ -13,7 +13,7 @@ use {
     static_assertions::const_assert_eq,
 };
 
-const_assert_eq!(MAX_CODE_SHREDS_PER_SLOT, 32_768 * 17);
+const_assert_eq!(MAX_CODE_SHREDS_PER_SLOT, 32_768 * 14);
 pub(crate) const MAX_CODE_SHREDS_PER_SLOT: usize =
     MAX_DATA_SHREDS_PER_SLOT * (ERASURE_BATCH_SIZE[1] - 1);
 
