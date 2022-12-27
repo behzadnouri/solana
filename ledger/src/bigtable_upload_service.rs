@@ -90,7 +90,9 @@ impl BigTableUploadService {
             );
             let end_slot = min(
                 highest_complete_root,
-                start_slot.saturating_add(config.max_num_slots_to_check as u64 * 2),
+                (config.max_num_slots_to_check as u64)
+                    .saturating_mul(2)
+                    .saturating_add(start_slot),
             );
 
             if end_slot <= start_slot {

@@ -1,3 +1,4 @@
+#![allow(clippy::integer_arithmetic)]
 use {
     crate::{
         block_error::BlockError, blockstore::Blockstore, blockstore_db::BlockstoreError,
@@ -1851,6 +1852,7 @@ pub fn fill_blockstore_slot_with_ticks(
 }
 
 #[cfg(test)]
+#[allow(clippy::integer_arithmetic)]
 pub mod tests {
     use {
         super::*,

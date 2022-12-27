@@ -2,6 +2,7 @@
 //! Proof of History ledger as well as iterative read, append write, and random
 //! access read to a persistent file-based ledger.
 
+#![allow(clippy::integer_arithmetic)]
 use {
     crate::{
         ancestor_iterator::AncestorIterator,
@@ -1618,6 +1619,7 @@ impl Blockstore {
     }
 
     #[cfg(test)]
+    #[allow(clippy::integer_arithmetic)]
     fn get_data_shreds(
         &self,
         slot: Slot,
@@ -4363,6 +4365,7 @@ fn adjust_ulimit_nofile(enforce_ulimit_nofile: bool) -> Result<()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::integer_arithmetic)]
 pub mod tests {
     use {
         super::*,

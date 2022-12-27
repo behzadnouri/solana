@@ -16,7 +16,7 @@ pub async fn delete_confirmed_blocks(
     }
     info!("{} blocks to be deleted", blocks_to_delete.len());
 
-    let mut failures = 0;
+    let mut failures = 0usize;
     for blocks in blocks_to_delete.chunks(NUM_BLOCKS_TO_DELETE_IN_PARALLEL) {
         let mut measure_delete = Measure::start("Delete");
         info!("Preparing the next {} blocks for deletion", blocks.len());
@@ -35,7 +35,7 @@ pub async fn delete_confirmed_blocks(
                     block,
                     result.err()
                 );
-                failures += 1;
+                failures = failures.saturating_add(1);
             }
         }
 

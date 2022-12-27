@@ -1,3 +1,4 @@
+#![allow(clippy::integer_arithmetic)]
 use {
     crate::shred::{
         self, Error, ProcessShredsStats, Shred, ShredData, ShredFlags, DATA_SHREDS_PER_FEC_BLOCK,
@@ -464,6 +465,7 @@ fn get_fec_set_offsets(
 }
 
 #[cfg(test)]
+#[allow(clippy::integer_arithmetic)]
 mod tests {
     use {
         super::*,

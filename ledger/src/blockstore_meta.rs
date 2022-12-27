@@ -1,3 +1,4 @@
+#![allow(clippy::integer_arithmetic)]
 use {
     crate::shred::{Shred, ShredType},
     bitflags::bitflags,

@@ -1,3 +1,4 @@
+#![allow(clippy::integer_arithmetic)]
 use {
     crate::blockstore::Blockstore,
     crossbeam_channel::{bounded, unbounded},

@@ -1,4 +1,5 @@
 #![allow(clippy::implicit_hasher)]
+#![allow(clippy::integer_arithmetic)]
 use {
     crate::shred,
     itertools::Itertools,

@@ -101,13 +101,18 @@ impl SlotsStats {
         let mut stats = self.stats.lock().unwrap();
         let (mut slot_stats, evicted) = Self::get_or_default_with_eviction_check(&mut stats, slot);
         match source {
-            ShredSource::Recovered => slot_stats.num_recovered += 1,
-            ShredSource::Repaired => slot_stats.num_repaired += 1,
+            ShredSource::Recovered => {
+                slot_stats.num_recovered = slot_stats.num_recovered.saturating_add(1)
+            }
+            ShredSource::Repaired => {
+                slot_stats.num_repaired = slot_stats.num_repaired.saturating_add(1)
+            }
             ShredSource::Turbine => {
-                *slot_stats
+                let entry = slot_stats
                     .turbine_fec_set_index_counts
                     .entry(fec_set_index)
-                    .or_default() += 1
+                    .or_default();
+                *entry = entry.saturating_add(1);
             }
         }
         if let Some(meta) = slot_meta {

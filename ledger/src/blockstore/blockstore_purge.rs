@@ -423,6 +423,7 @@ impl Blockstore {
 }
 
 #[cfg(test)]
+#[allow(clippy::integer_arithmetic)]
 pub mod tests {
     use {
         super::*,

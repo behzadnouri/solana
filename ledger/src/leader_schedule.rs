@@ -1,3 +1,4 @@
+#![allow(clippy::integer_arithmetic)]
 use {
     itertools::Itertools,
     rand::distributions::{Distribution, WeightedIndex},
@@ -93,7 +94,8 @@ impl Index<u64> for LeaderSchedule {
     type Output = Pubkey;
     fn index(&self, index: u64) -> &Pubkey {
         let index = index as usize;
-        &self.slot_leaders[index % self.slot_leaders.len()]
+        let index = index.checked_rem(self.slot_leaders.len());
+        &self.slot_leaders[index.unwrap()]
     }
 }
 

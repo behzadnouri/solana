@@ -1062,6 +1062,7 @@ fn make_erasure_batch(
 }
 
 #[cfg(test)]
+#[allow(clippy::integer_arithmetic)]
 mod test {
     use {
         super::*,

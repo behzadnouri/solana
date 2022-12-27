@@ -49,6 +49,8 @@
 //! So, given a) - c), we must restrict data shred's payload length such that the entire coding
 //! payload can fit into one coding shred / packet.
 
+#![allow(clippy::integer_arithmetic)]
+
 #[cfg(test)]
 pub(crate) use shred_code::MAX_CODE_SHREDS_PER_SLOT;
 use {
@@ -922,6 +924,7 @@ pub fn verify_test_data_shred(
 }
 
 #[cfg(test)]
+#[allow(clippy::integer_arithmetic)]
 mod tests {
     use {
         super::*,
