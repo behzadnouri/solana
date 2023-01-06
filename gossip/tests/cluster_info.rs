@@ -8,7 +8,7 @@ use {
     serial_test::serial,
     solana_gossip::{
         cluster_info::{compute_retransmit_peers, ClusterInfo},
-        contact_info::ContactInfo,
+        contact_info::LegacyContactInfo,
         weighted_shuffle::WeightedShuffle,
     },
     solana_sdk::{pubkey::Pubkey, signer::keypair::Keypair},
@@ -38,7 +38,7 @@ fn find_insert_shred(id: &Pubkey, shred: i32, batches: &mut [Nodes]) {
 fn sorted_retransmit_peers_and_stakes(
     cluster_info: &ClusterInfo,
     stakes: Option<&HashMap<Pubkey, u64>>,
-) -> (Vec<ContactInfo>, Vec<(u64, usize)>) {
+) -> (Vec<LegacyContactInfo>, Vec<(u64, usize)>) {
     let mut peers = cluster_info.tvu_peers();
     // insert "self" into this list for the layer and neighborhood computation
     peers.push(cluster_info.my_contact_info());
@@ -47,7 +47,7 @@ fn sorted_retransmit_peers_and_stakes(
 }
 
 fn sorted_stakes_with_index(
-    peers: &[ContactInfo],
+    peers: &[LegacyContactInfo],
     stakes: Option<&HashMap<Pubkey, u64>>,
 ) -> Vec<(u64, usize)> {
     let stakes_and_index: Vec<_> = peers
@@ -77,7 +77,7 @@ fn sorted_stakes_with_index(
 
 fn shuffle_peers_and_index(
     id: &Pubkey,
-    peers: &[ContactInfo],
+    peers: &[LegacyContactInfo],
     stakes_and_index: &[(u64, usize)],
     seed: [u8; 32],
 ) -> (usize, Vec<(u64, usize)>) {
@@ -107,7 +107,7 @@ fn stake_weighted_shuffle(stakes_and_index: &[(u64, usize)], seed: [u8; 32]) -> 
 }
 
 fn retransmit(
-    mut shuffled_nodes: Vec<ContactInfo>,
+    mut shuffled_nodes: Vec<LegacyContactInfo>,
     senders: &HashMap<Pubkey, Sender<(i32, bool)>>,
     cluster: &ClusterInfo,
     fanout: usize,
@@ -151,7 +151,7 @@ fn run_simulation(stakes: &[u64], fanout: usize) {
     let timeout = 60 * 5;
 
     // describe the leader
-    let leader_info = ContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), 0);
+    let leader_info = LegacyContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), 0);
     let cluster_info = ClusterInfo::new(
         leader_info.clone(),
         Arc::new(Keypair::new()),
@@ -178,7 +178,7 @@ fn run_simulation(stakes: &[u64], fanout: usize) {
         chunk.iter().for_each(|i| {
             //distribute neighbors across threads to maximize parallel compute
             let batch_ix = *i % batches.len();
-            let node = ContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), 0);
+            let node = LegacyContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), 0);
             staked_nodes.insert(node.id, stakes[*i - 1]);
             cluster_info.insert_info(node.clone());
             let (s, r) = unbounded();
@@ -192,7 +192,7 @@ fn run_simulation(stakes: &[u64], fanout: usize) {
     let c_info = cluster_info.clone_with_id(&cluster_info.id());
 
     let shreds_len = 100;
-    let shuffled_peers: Vec<Vec<ContactInfo>> = (0..shreds_len as i32)
+    let shuffled_peers: Vec<Vec<LegacyContactInfo>> = (0..shreds_len as i32)
         .map(|i| {
             let mut seed = [0; 32];
             seed[0..4].copy_from_slice(&i.to_le_bytes());

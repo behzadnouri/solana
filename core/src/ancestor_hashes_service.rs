@@ -772,7 +772,7 @@ mod test {
         },
         solana_gossip::{
             cluster_info::{ClusterInfo, Node},
-            contact_info::ContactInfo,
+            contact_info::LegacyContactInfo,
         },
         solana_ledger::{blockstore::make_many_slot_entries, get_tmp_ledger_path, shred::Nonce},
         solana_runtime::{accounts_background_service::AbsRequestSender, bank_forks::BankForks},
@@ -948,7 +948,7 @@ mod test {
         t_request_receiver: JoinHandle<()>,
         t_listen: JoinHandle<()>,
         exit: Arc<AtomicBool>,
-        responder_info: ContactInfo,
+        responder_info: LegacyContactInfo,
         response_receiver: PacketBatchReceiver,
         correct_bank_hashes: HashMap<Slot, Hash>,
     }
@@ -1144,7 +1144,7 @@ mod test {
     fn send_ancestor_repair_request(
         requester_serve_repair: &ServeRepair,
         requester_cluster_info: &ClusterInfo,
-        responder_info: &ContactInfo,
+        responder_info: &LegacyContactInfo,
         ancestor_hashes_request_socket: &UdpSocket,
         dead_slot: Slot,
         nonce: Nonce,

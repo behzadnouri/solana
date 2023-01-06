@@ -3,7 +3,7 @@ use {
     crate::cluster_nodes::ClusterNodesCache,
     itertools::Itertools,
     solana_entry::entry::Entry,
-    solana_gossip::contact_info::ContactInfo,
+    solana_gossip::contact_info::LegacyContactInfo,
     solana_ledger::shred::{ProcessShredsStats, ReedSolomonCache, Shredder},
     solana_sdk::{
         hash::Hash,
@@ -305,7 +305,7 @@ impl BroadcastRun for BroadcastDuplicatesRun {
             .iter()
             .filter_map(|shred| {
                 let node = cluster_nodes.get_broadcast_peer(&shred.id())?;
-                if !ContactInfo::is_valid_address(&node.tvu, socket_addr_space) {
+                if !LegacyContactInfo::is_valid_address(&node.tvu, socket_addr_space) {
                     return None;
                 }
                 if self

@@ -7,7 +7,7 @@ use {
     solana_genesis_utils::download_then_check_genesis_hash,
     solana_gossip::{
         cluster_info::{ClusterInfo, Node},
-        contact_info::ContactInfo,
+        contact_info::LegacyContactInfo,
         crds_value,
         gossip_service::GossipService,
     },
@@ -56,32 +56,32 @@ pub struct RpcBootstrapConfig {
 
 fn verify_reachable_ports(
     node: &Node,
-    cluster_entrypoint: &ContactInfo,
+    cluster_entrypoint: &LegacyContactInfo,
     validator_config: &ValidatorConfig,
     socket_addr_space: &SocketAddrSpace,
 ) -> bool {
     let mut udp_sockets = vec![&node.sockets.gossip, &node.sockets.repair];
 
-    if ContactInfo::is_valid_address(&node.info.serve_repair, socket_addr_space) {
+    if LegacyContactInfo::is_valid_address(&node.info.serve_repair, socket_addr_space) {
         udp_sockets.push(&node.sockets.serve_repair);
     }
-    if ContactInfo::is_valid_address(&node.info.tpu, socket_addr_space) {
+    if LegacyContactInfo::is_valid_address(&node.info.tpu, socket_addr_space) {
         udp_sockets.extend(node.sockets.tpu.iter());
         udp_sockets.push(&node.sockets.tpu_quic);
     }
-    if ContactInfo::is_valid_address(&node.info.tpu_forwards, socket_addr_space) {
+    if LegacyContactInfo::is_valid_address(&node.info.tpu_forwards, socket_addr_space) {
         udp_sockets.extend(node.sockets.tpu_forwards.iter());
         udp_sockets.push(&node.sockets.tpu_forwards_quic);
     }
-    if ContactInfo::is_valid_address(&node.info.tpu_vote, socket_addr_space) {
+    if LegacyContactInfo::is_valid_address(&node.info.tpu_vote, socket_addr_space) {
         udp_sockets.extend(node.sockets.tpu_vote.iter());
     }
-    if ContactInfo::is_valid_address(&node.info.tvu, socket_addr_space) {
+    if LegacyContactInfo::is_valid_address(&node.info.tvu, socket_addr_space) {
         udp_sockets.extend(node.sockets.tvu.iter());
         udp_sockets.extend(node.sockets.broadcast.iter());
         udp_sockets.extend(node.sockets.retransmit_sockets.iter());
     }
-    if ContactInfo::is_valid_address(&node.info.tvu_forwards, socket_addr_space) {
+    if LegacyContactInfo::is_valid_address(&node.info.tvu_forwards, socket_addr_space) {
         udp_sockets.extend(node.sockets.tvu_forwards.iter());
     }
 
@@ -91,7 +91,7 @@ fn verify_reachable_ports(
             ("RPC", rpc_addr, &node.info.rpc),
             ("RPC pubsub", rpc_pubsub_addr, &node.info.rpc_pubsub),
         ] {
-            if ContactInfo::is_valid_address(public_addr, socket_addr_space) {
+            if LegacyContactInfo::is_valid_address(public_addr, socket_addr_space) {
                 tcp_listeners.push((
                     bind_addr.port(),
                     TcpListener::bind(bind_addr).unwrap_or_else(|err| {
@@ -128,7 +128,7 @@ fn is_known_validator(id: &Pubkey, known_validators: &Option<HashSet<Pubkey>>) -
 
 fn start_gossip_node(
     identity_keypair: Arc<Keypair>,
-    cluster_entrypoints: &[ContactInfo],
+    cluster_entrypoints: &[LegacyContactInfo],
     ledger_path: &Path,
     gossip_addr: &SocketAddr,
     gossip_socket: UdpSocket,
@@ -162,13 +162,13 @@ fn start_gossip_node(
 
 fn get_rpc_peers(
     cluster_info: &ClusterInfo,
-    cluster_entrypoints: &[ContactInfo],
+    cluster_entrypoints: &[LegacyContactInfo],
     validator_config: &ValidatorConfig,
     blacklisted_rpc_nodes: &mut HashSet<Pubkey>,
     blacklist_timeout: &Instant,
     retry_reason: &mut Option<String>,
     bootstrap_config: &RpcBootstrapConfig,
-) -> Option<Vec<ContactInfo>> {
+) -> Option<Vec<LegacyContactInfo>> {
     let shred_version = validator_config
         .expected_shred_version
         .unwrap_or_else(|| cluster_info.my_shred_version());
@@ -309,14 +309,14 @@ fn check_vote_account(
 /// snapshots to download.
 #[derive(Debug)]
 struct GetRpcNodeResult {
-    rpc_contact_info: ContactInfo,
+    rpc_contact_info: LegacyContactInfo,
     snapshot_hash: Option<SnapshotHash>,
 }
 
 /// Struct to wrap the peers & snapshot hashes together.
 #[derive(Debug, PartialEq, Eq, Clone)]
 struct PeerSnapshotHash {
-    rpc_contact_info: ContactInfo,
+    rpc_contact_info: LegacyContactInfo,
     snapshot_hash: SnapshotHash,
 }
 
@@ -347,7 +347,7 @@ pub fn fail_rpc_node(
 
 #[allow(clippy::too_many_arguments)]
 pub fn attempt_download_genesis_and_snapshot(
-    rpc_contact_info: &ContactInfo,
+    rpc_contact_info: &LegacyContactInfo,
     ledger_path: &Path,
     validator_config: &mut ValidatorConfig,
     bootstrap_config: &RpcBootstrapConfig,
@@ -458,7 +458,7 @@ pub fn rpc_bootstrap(
     incremental_snapshot_archives_dir: &Path,
     vote_account: &Pubkey,
     authorized_voter_keypairs: Arc<RwLock<Vec<Arc<Keypair>>>>,
-    cluster_entrypoints: &[ContactInfo],
+    cluster_entrypoints: &[LegacyContactInfo],
     validator_config: &mut ValidatorConfig,
     bootstrap_config: RpcBootstrapConfig,
     do_port_check: bool,
@@ -491,7 +491,7 @@ pub fn rpc_bootstrap(
 
     let blacklisted_rpc_nodes = RwLock::new(HashSet::new());
     let mut gossip = None;
-    let mut vetted_rpc_nodes: Vec<(ContactInfo, Option<SnapshotHash>, RpcClient)> = vec![];
+    let mut vetted_rpc_nodes: Vec<(LegacyContactInfo, Option<SnapshotHash>, RpcClient)> = vec![];
     let mut download_abort_count = 0;
     loop {
         if gossip.is_none() {
@@ -607,7 +607,7 @@ pub fn rpc_bootstrap(
 /// This function finds the highest compatible snapshots from the cluster and returns RPC peers.
 fn get_rpc_nodes(
     cluster_info: &ClusterInfo,
-    cluster_entrypoints: &[ContactInfo],
+    cluster_entrypoints: &[LegacyContactInfo],
     validator_config: &ValidatorConfig,
     blacklisted_rpc_nodes: &mut HashSet<Pubkey>,
     bootstrap_config: &RpcBootstrapConfig,
@@ -740,7 +740,7 @@ fn get_highest_local_snapshot_hash(
 /// 3. have the highest full snapshot slot of (2)
 fn get_peer_snapshot_hashes(
     cluster_info: &ClusterInfo,
-    rpc_peers: &[ContactInfo],
+    rpc_peers: &[LegacyContactInfo],
     known_validators: Option<&HashSet<Pubkey>>,
     known_validators_to_wait_for: KnownValidatorsToWaitFor,
     incremental_snapshot_fetch: bool,
@@ -1017,7 +1017,7 @@ where
 /// hash, or a combo full (i.e. base) snapshot hash and incremental snapshot hash.
 fn get_eligible_peer_snapshot_hashes(
     cluster_info: &ClusterInfo,
-    rpc_peers: &[ContactInfo],
+    rpc_peers: &[LegacyContactInfo],
     incremental_snapshot_fetch: bool,
 ) -> Vec<PeerSnapshotHash> {
     let mut peer_snapshot_hashes = Vec::new();
@@ -1138,7 +1138,7 @@ fn download_snapshots(
     maximum_snapshot_download_abort: u64,
     download_abort_count: &mut u64,
     snapshot_hash: Option<SnapshotHash>,
-    rpc_contact_info: &ContactInfo,
+    rpc_contact_info: &LegacyContactInfo,
 ) -> Result<(), String> {
     if snapshot_hash.is_none() {
         return Ok(());
@@ -1236,7 +1236,7 @@ fn download_snapshot(
     minimal_snapshot_download_speed: f32,
     maximum_snapshot_download_abort: u64,
     download_abort_count: &mut u64,
-    rpc_contact_info: &ContactInfo,
+    rpc_contact_info: &LegacyContactInfo,
     desired_snapshot_hash: (Slot, Hash),
     snapshot_type: SnapshotType,
 ) -> Result<(), String> {
@@ -1398,7 +1398,7 @@ mod tests {
 
     impl PeerSnapshotHash {
         fn new(
-            rpc_contact_info: ContactInfo,
+            rpc_contact_info: LegacyContactInfo,
             full_snapshot_hash: (Slot, Hash),
             incremental_snapshot_hash: Option<(Slot, Hash)>,
         ) -> Self {
@@ -1412,9 +1412,9 @@ mod tests {
         }
     }
 
-    fn default_contact_info_for_tests() -> ContactInfo {
+    fn default_contact_info_for_tests() -> LegacyContactInfo {
         let sock_addr = SocketAddr::from(([1, 1, 1, 1], 11_111));
-        ContactInfo {
+        LegacyContactInfo {
             id: Pubkey::default(),
             gossip: sock_addr,
             tvu: sock_addr,

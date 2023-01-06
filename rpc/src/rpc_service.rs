@@ -575,7 +575,7 @@ mod tests {
         super::*,
         crate::rpc::create_validator_exit,
         solana_gossip::{
-            contact_info::ContactInfo,
+            contact_info::LegacyContactInfo,
             crds::GossipRoute,
             crds_value::{CrdsData, CrdsValue, SnapshotHashes},
         },
@@ -609,7 +609,7 @@ mod tests {
         let validator_exit = create_validator_exit(&exit);
         let bank = Bank::new_for_tests(&genesis_config);
         let cluster_info = Arc::new(ClusterInfo::new(
-            ContactInfo::default(),
+            LegacyContactInfo::default(),
             Arc::new(Keypair::new()),
             SocketAddrSpace::Unspecified,
         ));
@@ -834,7 +834,7 @@ mod tests {
     #[test]
     fn test_health_check_with_known_validators() {
         let cluster_info = Arc::new(ClusterInfo::new(
-            ContactInfo::default(),
+            LegacyContactInfo::default(),
             Arc::new(Keypair::new()),
             SocketAddrSpace::Unspecified,
         ));

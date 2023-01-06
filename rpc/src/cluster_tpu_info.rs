@@ -59,7 +59,7 @@ impl TpuInfo for ClusterTpuInfo {
 mod test {
     use {
         super::*,
-        solana_gossip::contact_info::ContactInfo,
+        solana_gossip::contact_info::LegacyContactInfo,
         solana_ledger::{
             blockstore::Blockstore, get_tmp_ledger_path, leader_schedule_cache::LeaderScheduleCache,
         },
@@ -114,7 +114,7 @@ mod test {
 
             let node_keypair = Arc::new(Keypair::new());
             let cluster_info = Arc::new(ClusterInfo::new(
-                ContactInfo::new_localhost(&node_keypair.pubkey(), timestamp()),
+                LegacyContactInfo::new_localhost(&node_keypair.pubkey(), timestamp()),
                 node_keypair,
                 SocketAddrSpace::Unspecified,
             ));

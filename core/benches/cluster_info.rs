@@ -12,7 +12,7 @@ use {
     },
     solana_gossip::{
         cluster_info::{ClusterInfo, Node},
-        contact_info::ContactInfo,
+        contact_info::LegacyContactInfo,
     },
     solana_ledger::{
         genesis_utils::{create_genesis_config, GenesisConfigInfo},
@@ -57,7 +57,7 @@ fn broadcast_shreds_bench(bencher: &mut Bencher) {
     const NUM_PEERS: usize = 200;
     for _ in 0..NUM_PEERS {
         let id = pubkey::new_rand();
-        let contact_info = ContactInfo::new_localhost(&id, timestamp());
+        let contact_info = LegacyContactInfo::new_localhost(&id, timestamp());
         cluster_info.insert_info(contact_info);
         stakes.insert(id, thread_rng().gen_range(1, NUM_PEERS) as u64);
     }

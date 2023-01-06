@@ -210,7 +210,7 @@ impl PingCache {
     /// message, records current timestamp and hash of ping token, and returns
     /// the ping message.
     /// Caller should verify if the socket address is valid. (e.g. by using
-    /// ContactInfo::is_valid_address).
+    /// LegacyContactInfo::is_valid_address).
     pub fn check<T, F>(
         &mut self,
         now: Instant,

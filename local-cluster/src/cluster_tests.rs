@@ -11,7 +11,7 @@ use {
     solana_entry::entry::{Entry, EntrySlice},
     solana_gossip::{
         cluster_info,
-        contact_info::ContactInfo,
+        contact_info::LegacyContactInfo,
         crds_value::{self, CrdsData, CrdsValue},
         gossip_error::GossipError,
         gossip_service::discover_cluster,
@@ -43,9 +43,9 @@ use {
     },
 };
 
-pub fn get_client_facing_addr(contact_info: &ContactInfo) -> (SocketAddr, SocketAddr) {
+pub fn get_client_facing_addr(contact_info: &LegacyContactInfo) -> (SocketAddr, SocketAddr) {
     let (rpc, mut tpu) = contact_info.client_facing_addr();
-    // QUIC certificate authentication requires the IP Address to match. ContactInfo might have
+    // QUIC certificate authentication requires the IP Address to match. LegacyContactInfo might have
     // 0.0.0.0 as the IP instead of 127.0.0.1.
     tpu.set_ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
     (rpc, tpu)
@@ -53,7 +53,7 @@ pub fn get_client_facing_addr(contact_info: &ContactInfo) -> (SocketAddr, Socket
 
 /// Spend and verify from every node in the network
 pub fn spend_and_verify_all_nodes<S: ::std::hash::BuildHasher + Sync + Send>(
-    entry_point_info: &ContactInfo,
+    entry_point_info: &LegacyContactInfo,
     funding_keypair: &Keypair,
     nodes: usize,
     ignore_nodes: HashSet<Pubkey, S>,
@@ -100,7 +100,7 @@ pub fn spend_and_verify_all_nodes<S: ::std::hash::BuildHasher + Sync + Send>(
 
 pub fn verify_balances<S: ::std::hash::BuildHasher>(
     expected_balances: HashMap<Pubkey, u64, S>,
-    node: &ContactInfo,
+    node: &LegacyContactInfo,
     connection_cache: Arc<ConnectionCache>,
 ) {
     let (rpc, tpu) = get_client_facing_addr(node);
@@ -114,7 +114,7 @@ pub fn verify_balances<S: ::std::hash::BuildHasher>(
 }
 
 pub fn send_many_transactions(
-    node: &ContactInfo,
+    node: &LegacyContactInfo,
     funding_keypair: &Keypair,
     connection_cache: &Arc<ConnectionCache>,
     max_tokens_per_transfer: u64,
@@ -201,7 +201,7 @@ pub fn sleep_n_epochs(
 }
 
 pub fn kill_entry_and_spend_and_verify_rest(
-    entry_point_info: &ContactInfo,
+    entry_point_info: &LegacyContactInfo,
     entry_point_validator_exit: &Arc<RwLock<Exit>>,
     funding_keypair: &Keypair,
     connection_cache: &Arc<ConnectionCache>,
@@ -310,7 +310,7 @@ pub fn kill_entry_and_spend_and_verify_rest(
 
 pub fn check_for_new_roots(
     num_new_roots: usize,
-    contact_infos: &[ContactInfo],
+    contact_infos: &[LegacyContactInfo],
     connection_cache: &Arc<ConnectionCache>,
     test_name: &str,
 ) {
@@ -347,7 +347,7 @@ pub fn check_for_new_roots(
 
 pub fn check_no_new_roots(
     num_slots_to_wait: usize,
-    contact_infos: &[ContactInfo],
+    contact_infos: &[LegacyContactInfo],
     connection_cache: &Arc<ConnectionCache>,
     test_name: &str,
 ) {
@@ -411,8 +411,8 @@ pub fn check_no_new_roots(
 }
 
 fn poll_all_nodes_for_signature(
-    entry_point_info: &ContactInfo,
-    cluster_nodes: &[ContactInfo],
+    entry_point_info: &LegacyContactInfo,
+    cluster_nodes: &[LegacyContactInfo],
     connection_cache: &Arc<ConnectionCache>,
     sig: &Signature,
     confs: usize,

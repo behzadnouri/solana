@@ -35,7 +35,7 @@ use {
             ClusterInfo, Node, DEFAULT_CONTACT_DEBUG_INTERVAL_MILLIS,
             DEFAULT_CONTACT_SAVE_INTERVAL_MILLIS,
         },
-        contact_info::ContactInfo,
+        contact_info::LegacyContactInfo,
         crds_gossip_pull::CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS,
         gossip_service::GossipService,
     },
@@ -371,7 +371,7 @@ impl Validator {
         ledger_path: &Path,
         vote_account: &Pubkey,
         authorized_voter_keypairs: Arc<RwLock<Vec<Arc<Keypair>>>>,
-        cluster_entrypoints: Vec<ContactInfo>,
+        cluster_entrypoints: Vec<LegacyContactInfo>,
         config: &ValidatorConfig,
         should_check_duplicate_instance: bool,
         start_progress: Arc<RwLock<ValidatorStartProgress>>,
@@ -763,13 +763,13 @@ impl Validator {
             optimistically_confirmed_bank_tracker,
             bank_notification_sender,
         ) = if let Some((rpc_addr, rpc_pubsub_addr)) = config.rpc_addrs {
-            if ContactInfo::is_valid_address(&node.info.rpc, &socket_addr_space) {
-                assert!(ContactInfo::is_valid_address(
+            if LegacyContactInfo::is_valid_address(&node.info.rpc, &socket_addr_space) {
+                assert!(LegacyContactInfo::is_valid_address(
                     &node.info.rpc_pubsub,
                     &socket_addr_space
                 ));
             } else {
-                assert!(!ContactInfo::is_valid_address(
+                assert!(!LegacyContactInfo::is_valid_address(
                     &node.info.rpc_pubsub,
                     &socket_addr_space
                 ));
@@ -2218,7 +2218,7 @@ mod tests {
         use solana_sdk::hash::hash;
         let node_keypair = Arc::new(Keypair::new());
         let cluster_info = ClusterInfo::new(
-            ContactInfo::new_localhost(&node_keypair.pubkey(), timestamp()),
+            LegacyContactInfo::new_localhost(&node_keypair.pubkey(), timestamp()),
             node_keypair,
             SocketAddrSpace::Unspecified,
         );

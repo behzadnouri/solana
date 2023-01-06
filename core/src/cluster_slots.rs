@@ -1,7 +1,8 @@
 use {
     itertools::Itertools,
     solana_gossip::{
-        cluster_info::ClusterInfo, contact_info::ContactInfo, crds::Cursor, epoch_slots::EpochSlots,
+        cluster_info::ClusterInfo, contact_info::LegacyContactInfo, crds::Cursor,
+        epoch_slots::EpochSlots,
     },
     solana_runtime::{bank::Bank, epoch_stakes::NodeIdToVoteAccounts},
     solana_sdk::{
@@ -168,7 +169,11 @@ impl ClusterSlots {
         }
     }
 
-    pub(crate) fn compute_weights(&self, slot: Slot, repair_peers: &[ContactInfo]) -> Vec<u64> {
+    pub(crate) fn compute_weights(
+        &self,
+        slot: Slot,
+        repair_peers: &[LegacyContactInfo],
+    ) -> Vec<u64> {
         if repair_peers.is_empty() {
             return Vec::default();
         }
@@ -201,7 +206,7 @@ impl ClusterSlots {
     pub(crate) fn compute_weights_exclude_nonfrozen(
         &self,
         slot: Slot,
-        repair_peers: &[ContactInfo],
+        repair_peers: &[LegacyContactInfo],
     ) -> Vec<(u64, usize)> {
         let slot_peers = self.lookup(slot);
         repair_peers
@@ -272,15 +277,15 @@ mod tests {
     #[test]
     fn test_compute_weights() {
         let cs = ClusterSlots::default();
-        let ci = ContactInfo::default();
+        let ci = LegacyContactInfo::default();
         assert_eq!(cs.compute_weights(0, &[ci]), vec![1]);
     }
 
     #[test]
     fn test_best_peer_2() {
         let cs = ClusterSlots::default();
-        let mut c1 = ContactInfo::default();
-        let mut c2 = ContactInfo::default();
+        let mut c1 = LegacyContactInfo::default();
+        let mut c2 = LegacyContactInfo::default();
         let mut map = HashMap::new();
         let k1 = solana_sdk::pubkey::new_rand();
         let k2 = solana_sdk::pubkey::new_rand();
@@ -301,8 +306,8 @@ mod tests {
     #[test]
     fn test_best_peer_3() {
         let cs = ClusterSlots::default();
-        let mut c1 = ContactInfo::default();
-        let mut c2 = ContactInfo::default();
+        let mut c1 = LegacyContactInfo::default();
+        let mut c2 = LegacyContactInfo::default();
         let mut map = HashMap::new();
         let k1 = solana_sdk::pubkey::new_rand();
         let k2 = solana_sdk::pubkey::new_rand();
@@ -333,7 +338,7 @@ mod tests {
     #[test]
     fn test_best_completed_slot_peer() {
         let cs = ClusterSlots::default();
-        let mut contact_infos = vec![ContactInfo::default(); 2];
+        let mut contact_infos = vec![LegacyContactInfo::default(); 2];
         for ci in contact_infos.iter_mut() {
             ci.id = solana_sdk::pubkey::new_rand();
         }

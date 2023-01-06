@@ -760,7 +760,7 @@ impl RepairService {
 mod test {
     use {
         super::*,
-        solana_gossip::{cluster_info::Node, contact_info::ContactInfo},
+        solana_gossip::{cluster_info::Node, contact_info::LegacyContactInfo},
         solana_ledger::{
             blockstore::{
                 make_chaining_slot_entries, make_many_slot_entries, make_slot_entries, Blockstore,
@@ -775,7 +775,7 @@ mod test {
         std::collections::HashSet,
     };
 
-    fn new_test_cluster_info(contact_info: ContactInfo) -> ClusterInfo {
+    fn new_test_cluster_info(contact_info: LegacyContactInfo) -> ClusterInfo {
         ClusterInfo::new(
             contact_info,
             Arc::new(Keypair::new()),

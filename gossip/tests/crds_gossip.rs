@@ -7,7 +7,7 @@ use {
     solana_gossip::{
         cluster_info,
         cluster_info_metrics::GossipStats,
-        contact_info::ContactInfo,
+        contact_info::LegacyContactInfo,
         crds::GossipRoute,
         crds_gossip::*,
         crds_gossip_error::CrdsGossipError,
@@ -35,20 +35,24 @@ use {
 #[derive(Clone)]
 struct Node {
     keypair: Arc<Keypair>,
-    contact_info: ContactInfo,
+    contact_info: LegacyContactInfo,
     gossip: Arc<CrdsGossip>,
     ping_cache: Arc<Mutex<PingCache>>,
     stake: u64,
 }
 
 impl Node {
-    fn new(keypair: Arc<Keypair>, contact_info: ContactInfo, gossip: Arc<CrdsGossip>) -> Self {
+    fn new(
+        keypair: Arc<Keypair>,
+        contact_info: LegacyContactInfo,
+        gossip: Arc<CrdsGossip>,
+    ) -> Self {
         Self::staked(keypair, contact_info, gossip, 0)
     }
 
     fn staked(
         keypair: Arc<Keypair>,
-        contact_info: ContactInfo,
+        contact_info: LegacyContactInfo,
         gossip: Arc<CrdsGossip>,
         stake: u64,
     ) -> Self {
@@ -97,13 +101,13 @@ fn stakes(network: &Network) -> HashMap<Pubkey, u64> {
 
 fn star_network_create(num: usize) -> Network {
     let node_keypair = Arc::new(Keypair::new());
-    let contact_info = ContactInfo::new_localhost(&node_keypair.pubkey(), 0);
-    let entry = CrdsValue::new_unsigned(CrdsData::ContactInfo(contact_info.clone()));
+    let contact_info = LegacyContactInfo::new_localhost(&node_keypair.pubkey(), 0);
+    let entry = CrdsValue::new_unsigned(CrdsData::LegacyContactInfo(contact_info.clone()));
     let mut network: HashMap<_, _> = (1..num)
         .map(|_| {
             let node_keypair = Arc::new(Keypair::new());
-            let contact_info = ContactInfo::new_localhost(&node_keypair.pubkey(), 0);
-            let new = CrdsValue::new_unsigned(CrdsData::ContactInfo(contact_info.clone()));
+            let contact_info = LegacyContactInfo::new_localhost(&node_keypair.pubkey(), 0);
+            let new = CrdsValue::new_unsigned(CrdsData::LegacyContactInfo(contact_info.clone()));
             let node = CrdsGossip::default();
             {
                 let mut node_crds = node.crds.write().unwrap();
@@ -132,8 +136,8 @@ fn star_network_create(num: usize) -> Network {
 
 fn rstar_network_create(num: usize) -> Network {
     let node_keypair = Arc::new(Keypair::new());
-    let contact_info = ContactInfo::new_localhost(&node_keypair.pubkey(), 0);
-    let entry = CrdsValue::new_unsigned(CrdsData::ContactInfo(contact_info.clone()));
+    let contact_info = LegacyContactInfo::new_localhost(&node_keypair.pubkey(), 0);
+    let entry = CrdsValue::new_unsigned(CrdsData::LegacyContactInfo(contact_info.clone()));
     let origin = CrdsGossip::default();
     let id = entry.label().pubkey();
     origin
@@ -145,8 +149,8 @@ fn rstar_network_create(num: usize) -> Network {
     let mut network: HashMap<_, _> = (1..num)
         .map(|_| {
             let node_keypair = Arc::new(Keypair::new());
-            let contact_info = ContactInfo::new_localhost(&node_keypair.pubkey(), 0);
-            let new = CrdsValue::new_unsigned(CrdsData::ContactInfo(contact_info.clone()));
+            let contact_info = LegacyContactInfo::new_localhost(&node_keypair.pubkey(), 0);
+            let new = CrdsValue::new_unsigned(CrdsData::LegacyContactInfo(contact_info.clone()));
             let node = CrdsGossip::default();
             node.crds
                 .write()
@@ -172,8 +176,8 @@ fn ring_network_create(num: usize) -> Network {
     let mut network: HashMap<_, _> = (0..num)
         .map(|_| {
             let node_keypair = Arc::new(Keypair::new());
-            let contact_info = ContactInfo::new_localhost(&node_keypair.pubkey(), 0);
-            let new = CrdsValue::new_unsigned(CrdsData::ContactInfo(contact_info.clone()));
+            let contact_info = LegacyContactInfo::new_localhost(&node_keypair.pubkey(), 0);
+            let new = CrdsValue::new_unsigned(CrdsData::LegacyContactInfo(contact_info.clone()));
             let node = CrdsGossip::default();
             node.crds
                 .write()
@@ -189,7 +193,7 @@ fn ring_network_create(num: usize) -> Network {
         let start_info = {
             let start = &network[&keys[k]];
             let start_id = keys[k];
-            let label = CrdsValueLabel::ContactInfo(start_id);
+            let label = CrdsValueLabel::LegacyContactInfo(start_id);
             let gossip_crds = start.gossip.crds.read().unwrap();
             gossip_crds.get::<&CrdsValue>(&label).unwrap().clone()
         };
@@ -207,8 +211,8 @@ fn connected_staked_network_create(stakes: &[u64]) -> Network {
     let mut network: HashMap<_, _> = (0..num)
         .map(|n| {
             let node_keypair = Arc::new(Keypair::new());
-            let contact_info = ContactInfo::new_localhost(&node_keypair.pubkey(), 0);
-            let new = CrdsValue::new_unsigned(CrdsData::ContactInfo(contact_info.clone()));
+            let contact_info = LegacyContactInfo::new_localhost(&node_keypair.pubkey(), 0);
+            let new = CrdsValue::new_unsigned(CrdsData::LegacyContactInfo(contact_info.clone()));
             let node = CrdsGossip::default();
             node.crds
                 .write()
@@ -225,7 +229,7 @@ fn connected_staked_network_create(stakes: &[u64]) -> Network {
         .iter()
         .map(|k| {
             let start = &network[k];
-            let start_label = CrdsValueLabel::ContactInfo(*k);
+            let start_label = CrdsValueLabel::LegacyContactInfo(*k);
             let gossip_crds = start.gossip.crds.read().unwrap();
             gossip_crds.get::<&CrdsValue>(&start_label).unwrap().clone()
         })
@@ -286,13 +290,16 @@ fn network_simulator(thread_pool: &ThreadPool, network: &mut Network, max_conver
             let node_pubkey = node.keypair.pubkey();
             let mut m = {
                 let node_crds = node.gossip.crds.read().unwrap();
-                node_crds.get::<&ContactInfo>(node_pubkey).cloned().unwrap()
+                node_crds
+                    .get::<&LegacyContactInfo>(node_pubkey)
+                    .cloned()
+                    .unwrap()
             };
             m.wallclock = now;
             node.gossip.process_push_message(
                 vec![(
                     Pubkey::default(),
-                    vec![CrdsValue::new_unsigned(CrdsData::ContactInfo(m))],
+                    vec![CrdsValue::new_unsigned(CrdsData::LegacyContactInfo(m))],
                 )],
                 now,
             );
@@ -508,7 +515,7 @@ fn network_run_pull(
                         )
                         .unwrap_or_default();
                     let from_pubkey = from.keypair.pubkey();
-                    let label = CrdsValueLabel::ContactInfo(from_pubkey);
+                    let label = CrdsValueLabel::LegacyContactInfo(from_pubkey);
                     let gossip_crds = from.gossip.crds.read().unwrap();
                     let self_info = gossip_crds.get::<&CrdsValue>(&label).unwrap().clone();
                     requests
@@ -727,14 +734,14 @@ fn test_prune_errors() {
     let crds_gossip = CrdsGossip::default();
     let keypair = Keypair::new();
     let id = keypair.pubkey();
-    let ci = ContactInfo::new_localhost(&Pubkey::new(&[1; 32]), 0);
+    let ci = LegacyContactInfo::new_localhost(&Pubkey::new(&[1; 32]), 0);
     let prune_pubkey = Pubkey::new(&[2; 32]);
     crds_gossip
         .crds
         .write()
         .unwrap()
         .insert(
-            CrdsValue::new_unsigned(CrdsData::ContactInfo(ci.clone())),
+            CrdsValue::new_unsigned(CrdsData::LegacyContactInfo(ci.clone())),
             0,
             GossipRoute::LocalMessage,
         )

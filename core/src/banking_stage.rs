@@ -30,7 +30,7 @@ use {
     itertools::Itertools,
     solana_client::{connection_cache::ConnectionCache, tpu_connection::TpuConnection},
     solana_entry::entry::hash_transactions,
-    solana_gossip::{cluster_info::ClusterInfo, contact_info::ContactInfo},
+    solana_gossip::{cluster_info::ClusterInfo, contact_info::LegacyContactInfo},
     solana_ledger::{
         blockstore_processor::TransactionStatusSender, token_balances::collect_token_balances,
     },
@@ -1941,7 +1941,7 @@ fn next_leader_x<F>(
     port_selector: F,
 ) -> Option<(Pubkey, std::net::SocketAddr)>
 where
-    F: FnOnce(&ContactInfo) -> SocketAddr,
+    F: FnOnce(&LegacyContactInfo) -> SocketAddr,
 {
     let leader_pubkey = poh_recorder
         .read()
@@ -1964,7 +1964,7 @@ mod tests {
         crossbeam_channel::{unbounded, Receiver},
         solana_address_lookup_table_program::state::{AddressLookupTable, LookupTableMeta},
         solana_entry::entry::{next_entry, next_versioned_entry, Entry, EntrySlice},
-        solana_gossip::{cluster_info::Node, contact_info::ContactInfo},
+        solana_gossip::{cluster_info::Node, contact_info::LegacyContactInfo},
         solana_ledger::{
             blockstore::{entries_to_test_shreds, Blockstore},
             genesis_utils::{create_genesis_config, GenesisConfigInfo},
@@ -2005,7 +2005,7 @@ mod tests {
         },
     };
 
-    fn new_test_cluster_info(contact_info: ContactInfo) -> ClusterInfo {
+    fn new_test_cluster_info(contact_info: LegacyContactInfo) -> ClusterInfo {
         ClusterInfo::new(
             contact_info,
             Arc::new(Keypair::new()),

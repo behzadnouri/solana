@@ -8,7 +8,7 @@ use {
     crate::{
         cluster_info::Ping,
         cluster_info_metrics::GossipStats,
-        contact_info::ContactInfo,
+        contact_info::LegacyContactInfo,
         crds::{Crds, GossipRoute},
         crds_gossip_error::CrdsGossipError,
         crds_gossip_pull::{CrdsFilter, CrdsGossipPull, ProcessPullStats},
@@ -208,7 +208,7 @@ impl CrdsGossip {
         ping_cache: &Mutex<PingCache>,
         pings: &mut Vec<(SocketAddr, Ping)>,
         socket_addr_space: &SocketAddrSpace,
-    ) -> Result<HashMap<ContactInfo, Vec<CrdsFilter>>, CrdsGossipError> {
+    ) -> Result<HashMap<LegacyContactInfo, Vec<CrdsFilter>>, CrdsGossipError> {
         self.pull.new_pull_request(
             thread_pool,
             &self.crds,
@@ -357,9 +357,9 @@ pub fn get_weight(max_weight: f32, time_since_last_selected: u32, stake: f32) ->
 // Dedups gossip addresses, keeping only the one with the highest weight.
 pub(crate) fn dedup_gossip_addresses<I, T: PartialOrd>(
     nodes: I,
-) -> HashMap</*gossip:*/ SocketAddr, (/*weight:*/ T, ContactInfo)>
+) -> HashMap</*gossip:*/ SocketAddr, (/*weight:*/ T, LegacyContactInfo)>
 where
-    I: IntoIterator<Item = (/*weight:*/ T, ContactInfo)>,
+    I: IntoIterator<Item = (/*weight:*/ T, LegacyContactInfo)>,
 {
     nodes
         .into_iter()
@@ -374,7 +374,7 @@ where
 mod test {
     use {
         super::*,
-        crate::{contact_info::ContactInfo, crds_value::CrdsData},
+        crate::{contact_info::LegacyContactInfo, crds_value::CrdsData},
         solana_sdk::{hash::hash, timing::timestamp},
     };
 
@@ -383,14 +383,14 @@ mod test {
         let crds_gossip = CrdsGossip::default();
         let keypair = Keypair::new();
         let id = keypair.pubkey();
-        let ci = ContactInfo::new_localhost(&Pubkey::new(&[1; 32]), 0);
+        let ci = LegacyContactInfo::new_localhost(&Pubkey::new(&[1; 32]), 0);
         let prune_pubkey = Pubkey::new(&[2; 32]);
         crds_gossip
             .crds
             .write()
             .unwrap()
             .insert(
-                CrdsValue::new_unsigned(CrdsData::ContactInfo(ci.clone())),
+                CrdsValue::new_unsigned(CrdsData::LegacyContactInfo(ci.clone())),
                 0,
                 GossipRoute::LocalMessage,
             )

@@ -467,7 +467,9 @@ mod tests {
     use {
         super::*,
         rand::seq::SliceRandom,
-        solana_gossip::{cluster_info::make_accounts_hashes_message, contact_info::ContactInfo},
+        solana_gossip::{
+            cluster_info::make_accounts_hashes_message, contact_info::LegacyContactInfo,
+        },
         solana_sdk::{
             hash::hash,
             signature::{Keypair, Signer},
@@ -476,7 +478,7 @@ mod tests {
         std::str::FromStr,
     };
 
-    fn new_test_cluster_info(contact_info: ContactInfo) -> ClusterInfo {
+    fn new_test_cluster_info(contact_info: LegacyContactInfo) -> ClusterInfo {
         ClusterInfo::new(
             contact_info,
             Arc::new(Keypair::new()),
@@ -488,7 +490,7 @@ mod tests {
     fn test_should_halt() {
         let keypair = Keypair::new();
 
-        let contact_info = ContactInfo::new_localhost(&keypair.pubkey(), 0);
+        let contact_info = LegacyContactInfo::new_localhost(&keypair.pubkey(), 0);
         let cluster_info = new_test_cluster_info(contact_info);
         let cluster_info = Arc::new(cluster_info);
 
@@ -522,7 +524,7 @@ mod tests {
         solana_logger::setup();
         let keypair = Keypair::new();
 
-        let contact_info = ContactInfo::new_localhost(&keypair.pubkey(), 0);
+        let contact_info = LegacyContactInfo::new_localhost(&keypair.pubkey(), 0);
         let cluster_info = new_test_cluster_info(contact_info);
         let cluster_info = Arc::new(cluster_info);
 

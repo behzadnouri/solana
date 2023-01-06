@@ -10,7 +10,7 @@ use {
     itertools::{izip, Itertools},
     lru::LruCache,
     rayon::{prelude::*, ThreadPool, ThreadPoolBuilder},
-    solana_gossip::{cluster_info::ClusterInfo, contact_info::ContactInfo},
+    solana_gossip::{cluster_info::ClusterInfo, contact_info::LegacyContactInfo},
     solana_ledger::{
         leader_schedule_cache::LeaderScheduleCache,
         shred::{self, ShredId},
@@ -302,7 +302,7 @@ fn retransmit_shred(
         cluster_nodes.get_retransmit_addrs(slot_leader, key, root_bank, data_plane_fanout);
     let addrs: Vec<_> = addrs
         .into_iter()
-        .filter(|addr| ContactInfo::is_valid_address(addr, socket_addr_space))
+        .filter(|addr| LegacyContactInfo::is_valid_address(addr, socket_addr_space))
         .collect();
     compute_turbine_peers.stop();
     stats

@@ -480,7 +480,7 @@ mod test {
     use {
         super::*,
         solana_entry::entry::{create_ticks, Entry},
-        solana_gossip::contact_info::ContactInfo,
+        solana_gossip::contact_info::LegacyContactInfo,
         solana_ledger::{
             blockstore::{make_many_slot_entries, Blockstore},
             get_tmp_ledger_path,
@@ -551,7 +551,7 @@ mod test {
         sender.send(duplicate_shred).unwrap();
         assert!(!blockstore.has_duplicate_shreds_in_slot(duplicate_shred_slot));
         let keypair = Keypair::new();
-        let contact_info = ContactInfo::new_localhost(&keypair.pubkey(), timestamp());
+        let contact_info = LegacyContactInfo::new_localhost(&keypair.pubkey(), timestamp());
         let cluster_info = ClusterInfo::new(
             contact_info,
             Arc::new(keypair),

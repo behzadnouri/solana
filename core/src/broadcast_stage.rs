@@ -16,7 +16,7 @@ use {
     itertools::Itertools,
     solana_gossip::{
         cluster_info::{ClusterInfo, ClusterInfoError},
-        contact_info::ContactInfo,
+        contact_info::LegacyContactInfo,
     },
     solana_ledger::{blockstore::Blockstore, shred::Shred},
     solana_measure::measure::Measure,
@@ -414,7 +414,7 @@ pub fn broadcast_shreds(
             update_peer_stats(&cluster_nodes, last_datapoint_submit);
             shreds.flat_map(move |shred| {
                 let node = cluster_nodes.get_broadcast_peer(&shred.id())?;
-                ContactInfo::is_valid_address(&node.tvu, socket_addr_space)
+                LegacyContactInfo::is_valid_address(&node.tvu, socket_addr_space)
                     .then(|| (shred.payload(), node.tvu))
             })
         })

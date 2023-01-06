@@ -49,7 +49,7 @@ use {
     solana_core::serve_repair::{RepairProtocol, RepairRequestHeader, ServeRepair},
     solana_dos::cli::*,
     solana_gossip::{
-        contact_info::ContactInfo,
+        contact_info::LegacyContactInfo,
         gossip_service::{discover, get_multi_client},
     },
     solana_measure::measure::Measure,
@@ -411,7 +411,7 @@ fn create_generator_thread<T: 'static + BenchTpsClient + Send + Sync>(
 }
 
 fn get_target(
-    nodes: &[ContactInfo],
+    nodes: &[LegacyContactInfo],
     mode: Mode,
     entrypoint_addr: SocketAddr,
 ) -> Option<(Pubkey, SocketAddr)> {
@@ -447,7 +447,7 @@ fn get_target(
 }
 
 fn get_rpc_client(
-    nodes: &[ContactInfo],
+    nodes: &[LegacyContactInfo],
     entrypoint_addr: SocketAddr,
 ) -> Result<RpcClient, &'static str> {
     if nodes.is_empty() {
@@ -601,7 +601,7 @@ fn run_dos_transactions<T: 'static + BenchTpsClient + Send + Sync>(
 }
 
 fn run_dos<T: 'static + BenchTpsClient + Send + Sync>(
-    nodes: &[ContactInfo],
+    nodes: &[LegacyContactInfo],
     iterations: usize,
     client: Option<Arc<T>>,
     params: DosClientParameters,
@@ -802,13 +802,17 @@ pub mod test {
 
     // thin wrapper for the run_dos function
     // to avoid specifying everywhere generic parameters
-    fn run_dos_no_client(nodes: &[ContactInfo], iterations: usize, params: DosClientParameters) {
+    fn run_dos_no_client(
+        nodes: &[LegacyContactInfo],
+        iterations: usize,
+        params: DosClientParameters,
+    ) {
         run_dos::<ThinClient>(nodes, iterations, None, params);
     }
 
     #[test]
     fn test_dos() {
-        let nodes = [ContactInfo::new_localhost(
+        let nodes = [LegacyContactInfo::new_localhost(
             &solana_sdk::pubkey::new_rand(),
             timestamp(),
         )];

@@ -9,7 +9,7 @@ use {
     solana_core::{
         consensus::Tower, tower_storage::TowerStorage, validator::ValidatorStartProgress,
     },
-    solana_gossip::{cluster_info::ClusterInfo, contact_info::ContactInfo},
+    solana_gossip::{cluster_info::ClusterInfo, contact_info::LegacyContactInfo},
     solana_rpc::rpc::verify_pubkey,
     solana_rpc_client_api::{config::RpcAccountIndex, custom_error::RpcCustomError},
     solana_runtime::{accounts_index::AccountIndex, bank_forks::BankForks},
@@ -88,9 +88,9 @@ pub struct AdminRpcRepairWhitelist {
     pub whitelist: Vec<Pubkey>,
 }
 
-impl From<ContactInfo> for AdminRpcContactInfo {
-    fn from(contact_info: ContactInfo) -> Self {
-        let ContactInfo {
+impl From<LegacyContactInfo> for AdminRpcContactInfo {
+    fn from(contact_info: LegacyContactInfo) -> Self {
+        let LegacyContactInfo {
             id,
             gossip,
             tvu,
@@ -644,9 +644,9 @@ mod tests {
         fn start_with_config(config: TestConfig) -> Self {
             let identity = Pubkey::new_unique();
             let cluster_info = Arc::new(ClusterInfo::new(
-                ContactInfo {
+                LegacyContactInfo {
                     id: identity,
-                    ..ContactInfo::default()
+                    ..LegacyContactInfo::default()
                 },
                 Arc::new(Keypair::new()),
                 SocketAddrSpace::Unspecified,

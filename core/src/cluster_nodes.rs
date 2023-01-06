@@ -6,7 +6,7 @@ use {
     rand_chacha::ChaChaRng,
     solana_gossip::{
         cluster_info::{compute_retransmit_peers, ClusterInfo, DATA_PLANE_FANOUT},
-        contact_info::ContactInfo,
+        contact_info::LegacyContactInfo,
         crds::GossipRoute,
         crds_gossip_pull::CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS,
         crds_value::{CrdsData, CrdsValue},
@@ -40,7 +40,7 @@ pub(crate) const MAX_NUM_TURBINE_HOPS: usize = 4;
 #[allow(clippy::large_enum_variant)]
 enum NodeId {
     // TVU node obtained through gossip (staked or not).
-    ContactInfo(ContactInfo),
+    LegacyContactInfo(LegacyContactInfo),
     // Staked node with no contact-info in gossip table.
     Pubkey(Pubkey),
 }
@@ -85,15 +85,15 @@ impl Node {
     fn pubkey(&self) -> Pubkey {
         match &self.node {
             NodeId::Pubkey(pubkey) => *pubkey,
-            NodeId::ContactInfo(node) => node.id,
+            NodeId::LegacyContactInfo(node) => node.id,
         }
     }
 
     #[inline]
-    fn contact_info(&self) -> Option<&ContactInfo> {
+    fn contact_info(&self) -> Option<&LegacyContactInfo> {
         match &self.node {
             NodeId::Pubkey(_) => None,
-            NodeId::ContactInfo(node) => Some(node),
+            NodeId::LegacyContactInfo(node) => Some(node),
         }
     }
 }
@@ -135,7 +135,7 @@ impl ClusterNodes<BroadcastStage> {
         new_cluster_nodes(cluster_info, stakes)
     }
 
-    pub(crate) fn get_broadcast_peer(&self, shred: &ShredId) -> Option<&ContactInfo> {
+    pub(crate) fn get_broadcast_peer(&self, shred: &ShredId) -> Option<&LegacyContactInfo> {
         let shred_seed = shred.seed(&self.pubkey);
         let mut rng = ChaChaRng::from_seed(shred_seed);
         let index = self.weighted_shuffle.first(&mut rng)?;
@@ -426,9 +426,9 @@ impl<T: 'static> ClusterNodesCache<T> {
     }
 }
 
-impl From<ContactInfo> for NodeId {
-    fn from(node: ContactInfo) -> Self {
-        NodeId::ContactInfo(node)
+impl From<LegacyContactInfo> for NodeId {
+    fn from(node: LegacyContactInfo) -> Self {
+        NodeId::LegacyContactInfo(node)
     }
 }
 
@@ -443,12 +443,12 @@ pub fn make_test_cluster<R: Rng>(
     num_nodes: usize,
     unstaked_ratio: Option<(u32, u32)>,
 ) -> (
-    Vec<ContactInfo>,
+    Vec<LegacyContactInfo>,
     HashMap<Pubkey, u64>, // stakes
     ClusterInfo,
 ) {
     let (unstaked_numerator, unstaked_denominator) = unstaked_ratio.unwrap_or((1, 7));
-    let mut nodes: Vec<_> = repeat_with(|| ContactInfo::new_rand(rng, None))
+    let mut nodes: Vec<_> = repeat_with(|| LegacyContactInfo::new_rand(rng, None))
         .take(num_nodes)
         .collect();
     nodes.shuffle(rng);
@@ -475,7 +475,7 @@ pub fn make_test_cluster<R: Rng>(
         let mut gossip_crds = cluster_info.gossip.crds.write().unwrap();
         // First node is pushed to crds table by ClusterInfo constructor.
         for node in nodes.iter().skip(1) {
-            let node = CrdsData::ContactInfo(node.clone());
+            let node = CrdsData::LegacyContactInfo(node.clone());
             let node = CrdsValue::new_unsigned(node);
             assert_eq!(
                 gossip_crds.insert(node, now, GossipRoute::LocalMessage),

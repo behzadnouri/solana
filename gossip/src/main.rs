@@ -9,7 +9,7 @@ use {
         input_parsers::keypair_of,
         input_validators::{is_keypair_or_ask_keyword, is_port, is_pubkey},
     },
-    solana_gossip::{contact_info::ContactInfo, gossip_service::discover},
+    solana_gossip::{contact_info::LegacyContactInfo, gossip_service::discover},
     solana_sdk::pubkey::Pubkey,
     solana_streamer::socket::SocketAddrSpace,
     std::{
@@ -176,7 +176,7 @@ fn parse_gossip_host(matches: &ArgMatches, entrypoint_addr: Option<SocketAddr>) 
 
 fn process_spy_results(
     timeout: Option<u64>,
-    validators: Vec<ContactInfo>,
+    validators: Vec<LegacyContactInfo>,
     num_nodes: Option<usize>,
     num_nodes_exactly: Option<usize>,
     pubkey: Option<Pubkey>,
@@ -291,7 +291,7 @@ fn process_rpc_url(
         .iter()
         .filter_map(|contact_info| {
             if (any || all || Some(contact_info.gossip) == entrypoint_addr)
-                && ContactInfo::is_valid_address(&contact_info.rpc, &socket_addr_space)
+                && LegacyContactInfo::is_valid_address(&contact_info.rpc, &socket_addr_space)
             {
                 return Some(contact_info.rpc);
             }

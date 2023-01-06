@@ -10,7 +10,7 @@ use {
         accounts_hash_verifier::AccountsHashVerifier,
         snapshot_packager_service::SnapshotPackagerService,
     },
-    solana_gossip::{cluster_info::ClusterInfo, contact_info::ContactInfo},
+    solana_gossip::{cluster_info::ClusterInfo, contact_info::LegacyContactInfo},
     solana_runtime::{
         accounts_background_service::{
             AbsRequestHandlers, AbsRequestSender, AccountsBackgroundService,
@@ -216,7 +216,7 @@ fn run_bank_forks_snapshot_n<F>(
     let exit = Arc::new(AtomicBool::new(false));
     let node_id = Arc::new(Keypair::new());
     let cluster_info = Arc::new(ClusterInfo::new(
-        ContactInfo::new_localhost(&node_id.pubkey(), timestamp()),
+        LegacyContactInfo::new_localhost(&node_id.pubkey(), timestamp()),
         Arc::clone(&node_id),
         SocketAddrSpace::Unspecified,
     ));
@@ -506,7 +506,7 @@ fn test_concurrent_snapshot_packaging(
     let exit = Arc::new(AtomicBool::new(false));
 
     let cluster_info = Arc::new(ClusterInfo::new(
-        ContactInfo::default(),
+        LegacyContactInfo::default(),
         Arc::new(Keypair::new()),
         SocketAddrSpace::Unspecified,
     ));
@@ -731,7 +731,7 @@ fn test_bank_forks_incremental_snapshot(
     let exit = Arc::new(AtomicBool::new(false));
     let node_id = Arc::new(Keypair::new());
     let cluster_info = Arc::new(ClusterInfo::new(
-        ContactInfo::new_localhost(&node_id.pubkey(), timestamp()),
+        LegacyContactInfo::new_localhost(&node_id.pubkey(), timestamp()),
         Arc::clone(&node_id),
         SocketAddrSpace::Unspecified,
     ));
@@ -980,7 +980,7 @@ fn test_snapshots_with_background_services(
 
     let node_keypair = Arc::new(Keypair::new());
     let cluster_info = Arc::new(ClusterInfo::new(
-        ContactInfo::new_localhost(&node_keypair.pubkey(), timestamp()),
+        LegacyContactInfo::new_localhost(&node_keypair.pubkey(), timestamp()),
         node_keypair,
         SocketAddrSpace::Unspecified,
     ));

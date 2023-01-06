@@ -15,7 +15,7 @@ use {
     },
     solana_gossip::{
         cluster_info::{ClusterInfo, ClusterInfoError},
-        contact_info::ContactInfo,
+        contact_info::LegacyContactInfo,
         ping_pong::{self, PingCache, Pong},
         weighted_shuffle::WeightedShuffle,
     },
@@ -208,13 +208,13 @@ pub(crate) type Ping = ping_pong::Ping<[u8; REPAIR_PING_TOKEN_SIZE]>;
 /// Window protocol messages
 #[derive(Serialize, Deserialize, Debug)]
 pub enum RepairProtocol {
-    LegacyWindowIndex(ContactInfo, Slot, u64),
-    LegacyHighestWindowIndex(ContactInfo, Slot, u64),
-    LegacyOrphan(ContactInfo, Slot),
-    LegacyWindowIndexWithNonce(ContactInfo, Slot, u64, Nonce),
-    LegacyHighestWindowIndexWithNonce(ContactInfo, Slot, u64, Nonce),
-    LegacyOrphanWithNonce(ContactInfo, Slot, Nonce),
-    LegacyAncestorHashes(ContactInfo, Slot, Nonce),
+    LegacyWindowIndex(LegacyContactInfo, Slot, u64),
+    LegacyHighestWindowIndex(LegacyContactInfo, Slot, u64),
+    LegacyOrphan(LegacyContactInfo, Slot),
+    LegacyWindowIndexWithNonce(LegacyContactInfo, Slot, u64, Nonce),
+    LegacyHighestWindowIndexWithNonce(LegacyContactInfo, Slot, u64, Nonce),
+    LegacyOrphanWithNonce(LegacyContactInfo, Slot, Nonce),
+    LegacyAncestorHashes(LegacyContactInfo, Slot, Nonce),
     Pong(ping_pong::Pong),
     WindowIndex {
         header: RepairRequestHeader,
@@ -287,12 +287,12 @@ pub struct ServeRepair {
 // Cache entry for repair peers for a slot.
 pub(crate) struct RepairPeers {
     asof: Instant,
-    peers: Vec<(Pubkey, /*ContactInfo.serve_repair:*/ SocketAddr)>,
+    peers: Vec<(Pubkey, /*LegacyContactInfo.serve_repair:*/ SocketAddr)>,
     weighted_index: WeightedIndex<u64>,
 }
 
 impl RepairPeers {
-    fn new(asof: Instant, peers: &[ContactInfo], weights: &[u64]) -> Result<Self> {
+    fn new(asof: Instant, peers: &[LegacyContactInfo], weights: &[u64]) -> Result<Self> {
         if peers.is_empty() {
             return Err(Error::from(ClusterInfoError::NoPeers));
         }
@@ -507,7 +507,7 @@ impl ServeRepair {
                 };
 
                 let from_addr = packet.meta().socket_addr();
-                if !ContactInfo::is_valid_address(&from_addr, &socket_addr_space) {
+                if !LegacyContactInfo::is_valid_address(&from_addr, &socket_addr_space) {
                     stats.err_malformed += 1;
                     continue;
                 }
@@ -1094,7 +1094,7 @@ impl ServeRepair {
         &self,
         repair_validators: &Option<HashSet<Pubkey>>,
         slot: Slot,
-    ) -> Vec<ContactInfo> {
+    ) -> Vec<LegacyContactInfo> {
         if let Some(repair_validators) = repair_validators {
             repair_validators
                 .iter()
@@ -1302,7 +1302,7 @@ mod tests {
         let GenesisConfigInfo { genesis_config, .. } = create_genesis_config(10_000);
         let bank = Bank::new_for_tests(&genesis_config);
         let bank_forks = Arc::new(RwLock::new(BankForks::new(bank)));
-        let me = ContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), timestamp());
+        let me = LegacyContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), timestamp());
         let cluster_info = Arc::new(new_test_cluster_info(me));
         let serve_repair = ServeRepair::new(
             cluster_info.clone(),
@@ -1345,7 +1345,7 @@ mod tests {
     fn test_serialize_deserialize_ancestor_hashes_request() {
         let slot: Slot = 50;
         let nonce = 70;
-        let me = ContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), timestamp());
+        let me = LegacyContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), timestamp());
         let cluster_info = Arc::new(new_test_cluster_info(me));
         let repair_peer_id = solana_sdk::pubkey::new_rand();
         let GenesisConfigInfo { genesis_config, .. } = create_genesis_config(10_000);
@@ -1390,7 +1390,7 @@ mod tests {
         let GenesisConfigInfo { genesis_config, .. } = create_genesis_config(10_000);
         let bank = Bank::new_for_tests(&genesis_config);
         let bank_forks = Arc::new(RwLock::new(BankForks::new(bank)));
-        let me = ContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), timestamp());
+        let me = LegacyContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), timestamp());
         let cluster_info = Arc::new(new_test_cluster_info(me));
         let serve_repair = ServeRepair::new(
             cluster_info.clone(),
@@ -1707,7 +1707,7 @@ mod tests {
         Blockstore::destroy(&ledger_path).expect("Expected successful database destruction");
     }
 
-    fn new_test_cluster_info(contact_info: ContactInfo) -> ClusterInfo {
+    fn new_test_cluster_info(contact_info: LegacyContactInfo) -> ClusterInfo {
         ClusterInfo::new(
             contact_info,
             Arc::new(Keypair::new()),
@@ -1721,7 +1721,7 @@ mod tests {
         let bank = Bank::new_for_tests(&genesis_config);
         let bank_forks = Arc::new(RwLock::new(BankForks::new(bank)));
         let cluster_slots = ClusterSlots::default();
-        let me = ContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), timestamp());
+        let me = LegacyContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), timestamp());
         let cluster_info = Arc::new(new_test_cluster_info(me));
         let serve_repair = ServeRepair::new(
             cluster_info.clone(),
@@ -1742,7 +1742,7 @@ mod tests {
         assert_matches!(rv, Err(Error::ClusterInfo(ClusterInfoError::NoPeers)));
 
         let serve_repair_addr = socketaddr!([127, 0, 0, 1], 1243);
-        let nxt = ContactInfo {
+        let nxt = LegacyContactInfo {
             id: solana_sdk::pubkey::new_rand(),
             gossip: socketaddr!([127, 0, 0, 1], 1234),
             tvu: socketaddr!([127, 0, 0, 1], 1235),
@@ -1773,7 +1773,7 @@ mod tests {
         assert_eq!(rv.0, nxt.serve_repair);
 
         let serve_repair_addr2 = socketaddr!([127, 0, 0, 2], 1243);
-        let nxt = ContactInfo {
+        let nxt = LegacyContactInfo {
             id: solana_sdk::pubkey::new_rand(),
             gossip: socketaddr!([127, 0, 0, 1], 1234),
             tvu: socketaddr!([127, 0, 0, 1], 1235),
@@ -2047,14 +2047,14 @@ mod tests {
         let bank = Bank::new_for_tests(&genesis_config);
         let bank_forks = Arc::new(RwLock::new(BankForks::new(bank)));
         let cluster_slots = ClusterSlots::default();
-        let me = ContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), timestamp());
+        let me = LegacyContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), timestamp());
         let cluster_info = Arc::new(new_test_cluster_info(me.clone()));
 
         // Insert two peers on the network
         let contact_info2 =
-            ContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), timestamp());
+            LegacyContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), timestamp());
         let contact_info3 =
-            ContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), timestamp());
+            LegacyContactInfo::new_localhost(&solana_sdk::pubkey::new_rand(), timestamp());
         cluster_info.insert_info(contact_info2.clone());
         cluster_info.insert_info(contact_info3.clone());
         let identity_keypair = cluster_info.keypair().clone();

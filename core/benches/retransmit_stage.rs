@@ -10,7 +10,7 @@ use {
     solana_entry::entry::Entry,
     solana_gossip::{
         cluster_info::{ClusterInfo, Node},
-        contact_info::ContactInfo,
+        contact_info::LegacyContactInfo,
     },
     solana_ledger::{
         genesis_utils::{create_genesis_config, GenesisConfigInfo},
@@ -59,7 +59,7 @@ fn bench_retransmitter(bencher: &mut Bencher) {
     let peer_sockets: Vec<_> = repeat_with(|| {
         let id = Pubkey::new_unique();
         let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
-        let mut contact_info = ContactInfo::new_localhost(&id, timestamp());
+        let mut contact_info = LegacyContactInfo::new_localhost(&id, timestamp());
         contact_info.tvu = socket.local_addr().unwrap();
         contact_info.tvu.set_ip("127.0.0.1".parse().unwrap());
         contact_info.tvu_forwards = contact_info.tvu;

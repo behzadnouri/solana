@@ -12,7 +12,7 @@ use {
         validator::{Validator, ValidatorConfig, ValidatorStartProgress},
     },
     solana_gossip::{
-        cluster_info::Node, contact_info::ContactInfo, gossip_service::discover_cluster,
+        cluster_info::Node, contact_info::LegacyContactInfo, gossip_service::discover_cluster,
     },
     solana_ledger::create_new_tmp_ledger,
     solana_runtime::{
@@ -116,7 +116,7 @@ pub struct LocalCluster {
     /// Keypair with funding to participate in the network
     pub funding_keypair: Keypair,
     /// Entry point from which the rest of the network can be discovered
-    pub entry_point_info: ContactInfo,
+    pub entry_point_info: LegacyContactInfo,
     pub validators: HashMap<Pubkey, ClusterValidatorInfo>,
     pub genesis_config: GenesisConfig,
     pub connection_cache: Arc<ConnectionCache>,
@@ -775,8 +775,8 @@ impl Cluster for LocalCluster {
         &mut self,
         pubkey: &Pubkey,
         cluster_validator_info: &mut ClusterValidatorInfo,
-    ) -> (Node, Option<ContactInfo>) {
-        // Update the stored ContactInfo for this node
+    ) -> (Node, Option<LegacyContactInfo>) {
+        // Update the stored LegacyContactInfo for this node
         let node = Node::new_localhost_with_pubkey(pubkey);
         cluster_validator_info.info.contact_info = node.info.clone();
         cluster_validator_info.config.rpc_addrs = Some((node.info.rpc, node.info.rpc_pubsub));
@@ -814,7 +814,7 @@ impl Cluster for LocalCluster {
 
     fn restart_node_with_context(
         mut cluster_validator_info: ClusterValidatorInfo,
-        (node, entry_point_info): (Node, Option<ContactInfo>),
+        (node, entry_point_info): (Node, Option<LegacyContactInfo>),
         socket_addr_space: SocketAddrSpace,
     ) -> ClusterValidatorInfo {
         // Restart the node
@@ -856,7 +856,7 @@ impl Cluster for LocalCluster {
         self.restart_node(pubkey, cluster_validator_info, socket_addr_space);
     }
 
-    fn get_contact_info(&self, pubkey: &Pubkey) -> Option<&ContactInfo> {
+    fn get_contact_info(&self, pubkey: &Pubkey) -> Option<&LegacyContactInfo> {
         self.validators.get(pubkey).map(|v| &v.info.contact_info)
     }
 }

@@ -1,7 +1,7 @@
 //! The `gossip_service` module implements the network control plane.
 
 use {
-    crate::{cluster_info::ClusterInfo, contact_info::ContactInfo},
+    crate::{cluster_info::ClusterInfo, contact_info::LegacyContactInfo},
     crossbeam_channel::{unbounded, Sender},
     rand::{thread_rng, Rng},
     solana_client::{connection_cache::ConnectionCache, thin_client::ThinClient},
@@ -109,7 +109,7 @@ pub fn discover_cluster(
     entrypoint: &SocketAddr,
     num_nodes: usize,
     socket_addr_space: SocketAddrSpace,
-) -> std::io::Result<Vec<ContactInfo>> {
+) -> std::io::Result<Vec<LegacyContactInfo>> {
     const DISCOVER_CLUSTER_TIMEOUT: Duration = Duration::from_secs(120);
     let (_all_peers, validators) = discover(
         None, // keypair
@@ -136,8 +136,8 @@ pub fn discover(
     my_shred_version: u16,
     socket_addr_space: SocketAddrSpace,
 ) -> std::io::Result<(
-    Vec<ContactInfo>, // all gossip peers
-    Vec<ContactInfo>, // tvu peers (validators)
+    Vec<LegacyContactInfo>, // all gossip peers
+    Vec<LegacyContactInfo>, // tvu peers (validators)
 )> {
     let keypair = keypair.unwrap_or_else(Keypair::new);
     let exit = Arc::new(AtomicBool::new(false));
@@ -196,13 +196,13 @@ pub fn discover(
 
 /// Creates a ThinClient by selecting a valid node at random
 pub fn get_client(
-    nodes: &[ContactInfo],
+    nodes: &[LegacyContactInfo],
     socket_addr_space: &SocketAddrSpace,
     connection_cache: Arc<ConnectionCache>,
 ) -> ThinClient {
     let nodes: Vec<_> = nodes
         .iter()
-        .filter_map(|node| ContactInfo::valid_client_facing_addr(node, socket_addr_space))
+        .filter_map(|node| LegacyContactInfo::valid_client_facing_addr(node, socket_addr_space))
         .collect();
     let select = thread_rng().gen_range(0, nodes.len());
     let (rpc, tpu) = nodes[select];
@@ -210,13 +210,13 @@ pub fn get_client(
 }
 
 pub fn get_multi_client(
-    nodes: &[ContactInfo],
+    nodes: &[LegacyContactInfo],
     socket_addr_space: &SocketAddrSpace,
     connection_cache: Arc<ConnectionCache>,
 ) -> (ThinClient, usize) {
     let addrs: Vec<_> = nodes
         .iter()
-        .filter_map(|node| ContactInfo::valid_client_facing_addr(node, socket_addr_space))
+        .filter_map(|node| LegacyContactInfo::valid_client_facing_addr(node, socket_addr_space))
         .collect();
     let rpc_addrs: Vec<_> = addrs.iter().map(|addr| addr.0).collect();
     let tpu_addrs: Vec<_> = addrs.iter().map(|addr| addr.1).collect();
@@ -235,15 +235,15 @@ fn spy(
     find_node_by_pubkey: Option<Pubkey>,
     find_node_by_gossip_addr: Option<&SocketAddr>,
 ) -> (
-    bool,             // if found the specified nodes
-    Duration,         // elapsed time until found the nodes or timed-out
-    Vec<ContactInfo>, // all gossip peers
-    Vec<ContactInfo>, // tvu peers (validators)
+    bool,                   // if found the specified nodes
+    Duration,               // elapsed time until found the nodes or timed-out
+    Vec<LegacyContactInfo>, // all gossip peers
+    Vec<LegacyContactInfo>, // tvu peers (validators)
 ) {
     let now = Instant::now();
     let mut met_criteria = false;
-    let mut all_peers: Vec<ContactInfo> = Vec::new();
-    let mut tvu_peers: Vec<ContactInfo> = Vec::new();
+    let mut all_peers: Vec<LegacyContactInfo> = Vec::new();
+    let mut tvu_peers: Vec<LegacyContactInfo> = Vec::new();
     let mut i = 1;
     while !met_criteria && now.elapsed() < timeout {
         all_peers = spy_ref
@@ -312,7 +312,7 @@ pub fn make_gossip_node(
     };
     let cluster_info = ClusterInfo::new(node, Arc::new(keypair), socket_addr_space);
     if let Some(entrypoint) = entrypoint {
-        cluster_info.set_entrypoint(ContactInfo::new_gossip_entry_point(entrypoint));
+        cluster_info.set_entrypoint(LegacyContactInfo::new_gossip_entry_point(entrypoint));
     }
     let cluster_info = Arc::new(cluster_info);
     let gossip_service = GossipService::new(
@@ -366,9 +366,9 @@ mod tests {
         let keypair = Keypair::new();
         let peer0 = solana_sdk::pubkey::new_rand();
         let peer1 = solana_sdk::pubkey::new_rand();
-        let contact_info = ContactInfo::new_localhost(&keypair.pubkey(), 0);
-        let peer0_info = ContactInfo::new_localhost(&peer0, 0);
-        let peer1_info = ContactInfo::new_localhost(&peer1, 0);
+        let contact_info = LegacyContactInfo::new_localhost(&keypair.pubkey(), 0);
+        let peer0_info = LegacyContactInfo::new_localhost(&peer0, 0);
+        let peer1_info = LegacyContactInfo::new_localhost(&peer1, 0);
         let cluster_info = ClusterInfo::new(
             contact_info,
             Arc::new(keypair),

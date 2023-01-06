@@ -1,6 +1,6 @@
 use {
     crate::{
-        contact_info::ContactInfo,
+        contact_info::LegacyContactInfo,
         crds::VersionedCrdsValue,
         crds_value::{
             CrdsData, CrdsValue, CrdsValueLabel, IncrementalSnapshotHashes, LegacyVersion,
@@ -15,7 +15,7 @@ type CrdsTable = IndexMap<CrdsValueLabel, VersionedCrdsValue>;
 
 /// Represents types which can be looked up from crds table given a key. e.g.
 ///   CrdsValueLabel -> VersionedCrdsValue, CrdsValue, CrdsData
-///   Pubkey -> ContactInfo, LowestSlot, SnapshotHashes, ...
+///   Pubkey -> LegacyContactInfo, LowestSlot, SnapshotHashes, ...
 pub trait CrdsEntry<'a, 'b>: Sized {
     type Key; // Lookup key.
     fn get_entry(table: &'a CrdsTable, key: Self::Key) -> Option<Self>;
@@ -53,7 +53,7 @@ impl_crds_entry!(CrdsValue, |entry| Some(&entry?.value));
 impl_crds_entry!(VersionedCrdsValue, |entry| entry);
 
 // Lookup by Pubkey.
-impl_crds_entry!(ContactInfo, CrdsData::ContactInfo(node), node);
+impl_crds_entry!(LegacyContactInfo, CrdsData::LegacyContactInfo(node), node);
 impl_crds_entry!(LegacyVersion, CrdsData::LegacyVersion(version), version);
 impl_crds_entry!(LowestSlot, CrdsData::LowestSlot(_, slot), slot);
 impl_crds_entry!(Version, CrdsData::Version(version), version);
@@ -114,8 +114,8 @@ mod tests {
             assert_eq!(crds.get::<&VersionedCrdsValue>(&key).unwrap().value, *entry);
             let key = entry.pubkey();
             match &entry.data {
-                CrdsData::ContactInfo(node) => {
-                    assert_eq!(crds.get::<&ContactInfo>(key), Some(node))
+                CrdsData::LegacyContactInfo(node) => {
+                    assert_eq!(crds.get::<&LegacyContactInfo>(key), Some(node))
                 }
                 CrdsData::LowestSlot(_, slot) => {
                     assert_eq!(crds.get::<&LowestSlot>(key), Some(slot))

@@ -5,7 +5,7 @@ use {
         accounts_hash_verifier::AccountsHashVerifier,
         snapshot_packager_service::SnapshotPackagerService,
     },
-    solana_gossip::{cluster_info::ClusterInfo, contact_info::ContactInfo},
+    solana_gossip::{cluster_info::ClusterInfo, contact_info::LegacyContactInfo},
     solana_runtime::{
         accounts_background_service::{
             AbsRequestHandlers, AbsRequestSender, AccountsBackgroundService, DroppedSlotsReceiver,
@@ -118,7 +118,7 @@ impl TestEnvironment {
         let exit = Arc::new(AtomicBool::new(false));
         let node_id = Arc::new(Keypair::new());
         let cluster_info = Arc::new(ClusterInfo::new(
-            ContactInfo::new_localhost(&node_id.pubkey(), timestamp()),
+            LegacyContactInfo::new_localhost(&node_id.pubkey(), timestamp()),
             Arc::clone(&node_id),
             SocketAddrSpace::Unspecified,
         ));

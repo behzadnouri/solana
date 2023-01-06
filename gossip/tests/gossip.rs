@@ -6,7 +6,7 @@ use {
     rayon::iter::*,
     solana_gossip::{
         cluster_info::{ClusterInfo, Node},
-        contact_info::ContactInfo,
+        contact_info::LegacyContactInfo,
         crds::Cursor,
         gossip_service::GossipService,
     },
@@ -89,8 +89,8 @@ fn test_node_with_bank(
 }
 
 /// Test that the network converges.
-/// Run until every node in the network has a full ContactInfo set.
-/// Check that nodes stop sending updates after all the ContactInfo has been shared.
+/// Run until every node in the network has a full LegacyContactInfo set.
+/// Check that nodes stop sending updates after all the LegacyContactInfo has been shared.
 /// tests that actually use this function are below
 fn run_gossip_topo<F>(num: usize, topo: F)
 where
@@ -120,7 +120,7 @@ where
 
 /// retransmit messages to a list of nodes
 fn retransmit_to(
-    peers: &[&ContactInfo],
+    peers: &[&LegacyContactInfo],
     data: &[u8],
     socket: &UdpSocket,
     forwarded: bool,
@@ -131,7 +131,7 @@ fn retransmit_to(
         peers
             .iter()
             .map(|peer| peer.tvu_forwards)
-            .filter(|addr| ContactInfo::is_valid_address(addr, socket_addr_space))
+            .filter(|addr| LegacyContactInfo::is_valid_address(addr, socket_addr_space))
             .collect()
     } else {
         peers

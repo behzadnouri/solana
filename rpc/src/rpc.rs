@@ -16,7 +16,7 @@ use {
     solana_client::connection_cache::ConnectionCache,
     solana_entry::entry::Entry,
     solana_faucet::faucet::request_airdrop_transaction,
-    solana_gossip::{cluster_info::ClusterInfo, contact_info::ContactInfo},
+    solana_gossip::{cluster_info::ClusterInfo, contact_info::LegacyContactInfo},
     solana_ledger::{
         blockstore::{Blockstore, SignatureInfosForAddress},
         blockstore_db::BlockstoreError,
@@ -344,7 +344,7 @@ impl JsonRpcRequestProcessor {
         let blockstore = Arc::new(Blockstore::open(&get_tmp_ledger_path!()).unwrap());
         let exit = Arc::new(AtomicBool::new(false));
         let cluster_info = Arc::new(ClusterInfo::new(
-            ContactInfo::default(),
+            LegacyContactInfo::default(),
             Arc::new(Keypair::new()),
             socket_addr_space,
         ));
@@ -3450,7 +3450,7 @@ pub mod rpc_full {
             let cluster_info = &meta.cluster_info;
             let socket_addr_space = cluster_info.socket_addr_space();
             let valid_address_or_none = |addr: &SocketAddr| -> Option<SocketAddr> {
-                if ContactInfo::is_valid_address(addr, socket_addr_space) {
+                if LegacyContactInfo::is_valid_address(addr, socket_addr_space) {
                     Some(*addr)
                 } else {
                     None
@@ -3462,7 +3462,10 @@ pub mod rpc_full {
                 .iter()
                 .filter_map(|(contact_info, _)| {
                     if my_shred_version == contact_info.shred_version
-                        && ContactInfo::is_valid_address(&contact_info.gossip, socket_addr_space)
+                        && LegacyContactInfo::is_valid_address(
+                            &contact_info.gossip,
+                            socket_addr_space,
+                        )
                     {
                         let (version, feature_set) = if let Some(version) =
                             cluster_info.get_node_version(&contact_info.id)
@@ -4597,7 +4600,7 @@ pub mod tests {
         serde::de::DeserializeOwned,
         solana_address_lookup_table_program::state::{AddressLookupTable, LookupTableMeta},
         solana_entry::entry::next_versioned_entry,
-        solana_gossip::{contact_info::ContactInfo, socketaddr},
+        solana_gossip::{contact_info::LegacyContactInfo, socketaddr},
         solana_ledger::{
             blockstore_meta::PerfSample,
             blockstore_processor::fill_blockstore_slot_with_ticks,
@@ -4733,14 +4736,14 @@ pub mod tests {
             let exit = Arc::new(AtomicBool::new(false));
             let validator_exit = create_validator_exit(&exit);
             let cluster_info = Arc::new(ClusterInfo::new(
-                ContactInfo {
+                LegacyContactInfo {
                     id: identity,
-                    ..ContactInfo::default()
+                    ..LegacyContactInfo::default()
                 },
                 Arc::new(Keypair::new()),
                 SocketAddrSpace::Unspecified,
             ));
-            cluster_info.insert_info(ContactInfo::new_with_pubkey_socketaddr(
+            cluster_info.insert_info(LegacyContactInfo::new_with_pubkey_socketaddr(
                 &leader_pubkey,
                 &socketaddr!("127.0.0.1:1234"),
             ));
@@ -6354,7 +6357,7 @@ pub mod tests {
         let mut io = MetaIoHandler::default();
         io.extend_with(rpc_full::FullImpl.to_delegate());
         let cluster_info = Arc::new(ClusterInfo::new(
-            ContactInfo::new_with_socketaddr(&socketaddr!("127.0.0.1:1234")),
+            LegacyContactInfo::new_with_socketaddr(&socketaddr!("127.0.0.1:1234")),
             Arc::new(Keypair::new()),
             SocketAddrSpace::Unspecified,
         ));
@@ -6631,7 +6634,7 @@ pub mod tests {
         )));
 
         let cluster_info = Arc::new(ClusterInfo::new(
-            ContactInfo::default(),
+            LegacyContactInfo::default(),
             Arc::new(Keypair::new()),
             SocketAddrSpace::Unspecified,
         ));
@@ -8229,7 +8232,7 @@ pub mod tests {
         let blockstore = Arc::new(Blockstore::open(&ledger_path).unwrap());
         let block_commitment_cache = Arc::new(RwLock::new(BlockCommitmentCache::default()));
         let cluster_info = Arc::new(ClusterInfo::new(
-            ContactInfo::default(),
+            LegacyContactInfo::default(),
             Arc::new(Keypair::new()),
             SocketAddrSpace::Unspecified,
         ));
