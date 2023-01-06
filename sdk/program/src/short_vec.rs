@@ -221,13 +221,14 @@ where
 ///
 /// #[serde(with = "short_vec")]
 ///
-pub fn deserialize<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+pub fn deserialize<'de, D, T, R>(deserializer: D) -> Result<R, D::Error>
 where
     D: Deserializer<'de>,
     T: Deserialize<'de>,
+    R: From<Vec<T>>
 {
     let visitor = ShortVecVisitor { _t: PhantomData };
-    deserializer.deserialize_tuple(std::usize::MAX, visitor)
+    deserializer.deserialize_tuple(std::usize::MAX, visitor).map(R::from)
 }
 
 pub struct ShortVec<T>(pub Vec<T>);

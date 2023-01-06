@@ -1,7 +1,7 @@
 use {
     crate::{
         cluster_info::MAX_SNAPSHOT_HASHES,
-        contact_info::LegacyContactInfo,
+        contact_info::{ContactInfo, LegacyContactInfo},
         deprecated,
         duplicate_shred::{DuplicateShred, DuplicateShredIndex, MAX_DUPLICATE_SHREDS},
         epoch_slots::EpochSlots,
@@ -92,6 +92,7 @@ pub enum CrdsData {
     NodeInstance(NodeInstance),
     DuplicateShred(DuplicateShredIndex, DuplicateShred),
     IncrementalSnapshotHashes(IncrementalSnapshotHashes),
+    ContactInfo(ContactInfo),
 }
 
 impl Sanitize for CrdsData {
@@ -129,6 +130,7 @@ impl Sanitize for CrdsData {
                 }
             }
             CrdsData::IncrementalSnapshotHashes(val) => val.sanitize(),
+            CrdsData::ContactInfo(val) => todo!(),
         }
     }
 }
@@ -481,6 +483,7 @@ impl Sanitize for NodeInstance {
 /// These are labels for values in a record that is associated with `Pubkey`
 #[derive(PartialEq, Hash, Eq, Clone, Debug)]
 pub enum CrdsValueLabel {
+    ContactInfo(Pubkey),
     LegacyContactInfo(Pubkey),
     Vote(VoteIndex, Pubkey),
     LowestSlot(Pubkey),
@@ -497,6 +500,7 @@ pub enum CrdsValueLabel {
 impl fmt::Display for CrdsValueLabel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            CrdsValueLabel::ContactInfo(_) => todo!(),
             CrdsValueLabel::LegacyContactInfo(_) => {
                 write!(f, "LegacyContactInfo({})", self.pubkey())
             }
@@ -519,6 +523,7 @@ impl fmt::Display for CrdsValueLabel {
 impl CrdsValueLabel {
     pub fn pubkey(&self) -> Pubkey {
         match self {
+            CrdsValueLabel::ContactInfo(_) => todo!(),
             CrdsValueLabel::LegacyContactInfo(p) => *p,
             CrdsValueLabel::Vote(_, p) => *p,
             CrdsValueLabel::LowestSlot(p) => *p,
@@ -579,6 +584,7 @@ impl CrdsValue {
             CrdsData::NodeInstance(node) => node.wallclock,
             CrdsData::DuplicateShred(_, shred) => shred.wallclock,
             CrdsData::IncrementalSnapshotHashes(hash) => hash.wallclock,
+            CrdsData::ContactInfo(val) => todo!(),
         }
     }
     pub fn pubkey(&self) -> Pubkey {
@@ -594,6 +600,7 @@ impl CrdsValue {
             CrdsData::NodeInstance(node) => node.from,
             CrdsData::DuplicateShred(_, shred) => shred.from,
             CrdsData::IncrementalSnapshotHashes(hash) => hash.from,
+            CrdsData::ContactInfo(val) => todo!(),
         }
     }
     pub fn label(&self) -> CrdsValueLabel {
@@ -611,6 +618,7 @@ impl CrdsValue {
             CrdsData::IncrementalSnapshotHashes(_) => {
                 CrdsValueLabel::IncrementalSnapshotHashes(self.pubkey())
             }
+            CrdsData::ContactInfo(val) => todo!(),
         }
     }
     pub fn contact_info(&self) -> Option<&LegacyContactInfo> {

@@ -700,6 +700,7 @@ impl CrdsDataStats {
             CrdsData::NodeInstance(_) => 8,
             CrdsData::DuplicateShred(_, _) => 9,
             CrdsData::IncrementalSnapshotHashes(_) => 10,
+            CrdsData::ContactInfo(_) => 11,
         }
     }
 }

@@ -4,12 +4,40 @@ use {
         pubkey::Pubkey,
         rpc_port,
         sanitize::{Sanitize, SanitizeError},
+        short_vec,
         signature::{Keypair, Signer},
         timing::timestamp,
     },
     solana_streamer::socket::SocketAddrSpace,
     std::net::{IpAddr, SocketAddr},
 };
+
+enum ContactInfoEnum {
+    Legacy(LegacyContactInfo),
+    Packed(ContactInfo),
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+pub struct ContactInfo {
+    pubkey: Pubkey,
+    wallclock: u64,
+    shred_version: u16,
+    #[serde(with = "short_vec")]
+    addrs: Vec<IpAddr>,
+    #[serde(with = "short_vec")]
+    sockets: Vec<(/*kind:*/ u8, /*addr:*/ u8, /*port:*/ u16)>,
+    // TODO: should this also include Version?
+    gossip: Option<SocketAddr>,
+    repair: Option<SocketAddr>,
+    rpc: Option<SocketAddr>,
+    rpc_pubsub: Option<SocketAddr>,
+    serve_repair: Option<SocketAddr>,
+    tpu: Option<SocketAddr>,
+    tpu_forwards: Option<SocketAddr>,
+    tpu_vote: Option<SocketAddr>,
+    tvu: Option<SocketAddr>,
+    tvu_forwards: Option<SocketAddr>,
+}
 
 /// Structure representing a node on the network
 #[derive(
@@ -227,6 +255,49 @@ impl LegacyContactInfo {
             None
         }
     }
+}
+
+pub mod serde_contact_info {
+    use {
+        super::*,
+        serde::{Deserialize, Deserializer, Serialize, Serializer},
+        solana_sdk::{serde_varint, short_vec},
+    };
+
+    #[derive(Serialize, Deserialize)]
+    struct ContactInfo<'a> {
+        pubkey: Pubkey,
+        wallclock: u64,
+        shred_version: u16,
+        #[serde(with = "short_vec")]
+        addrs: std::borrow::Cow<'a, [IpAddr]>,
+        #[serde(with = "short_vec")]
+        sockets: Vec<(/*kind:*/ u8, /*addr:*/ u8, /*port:*/ u16)>,
+    }
+
+    fn find_socket(
+        kind: u8,
+        addrs: &[IpAddr],
+        sockets: &[(/*kind:*/ u8, /*addr:*/ u8, /*port:*/ u16)],
+    ) -> Option<SocketAddr> {
+        let &(_, k, port) = sockets.iter().find(|&&(k, _, _)| k == kind)?;
+        let addr = addrs.get(usize::from(k)).copied()?;
+        Some(SocketAddr::new(addr, port))
+    }
+
+    // pub fn serialize<S>(
+    //     vote_state_update: &VoteStateUpdate,
+    //     serializer: S,
+    // ) -> Result<S::Ok, S::Error>
+    // where
+    //     S: Serializer,
+    // {
+    // }
+
+    // pub fn deserialize<'de, D>(deserializer: D) -> Result<VoteStateUpdate, D::Error>
+    // where
+    //     D: Deserializer<'de>,
+    // {
 }
 
 #[cfg(test)]
