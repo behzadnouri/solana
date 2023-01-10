@@ -2,22 +2,47 @@
 
 #![allow(clippy::integer_arithmetic)]
 use {
+    num_traits::PrimInt,
     serde::{
         de::{Error as _, SeqAccess, Visitor},
         ser::SerializeTuple,
         Deserializer, Serializer,
     },
-    std::{fmt, marker::PhantomData},
+    std::{fmt, marker::PhantomData, ops::ShrAssign},
 };
 
-pub trait VarInt: Sized {
+pub trait VarInt: Sized + From<u8> + ShrAssign<i32> + PrimInt + TryInto<u8> {
+    const BITS: u32;
+    // const ZERO: Self = Self::default();
+
     fn visit_seq<'de, A>(seq: A) -> Result<Self, A::Error>
     where
         A: SeqAccess<'de>;
 
-    fn serialize<S>(self, serializer: S) -> Result<S::Ok, S::Error>
+    // fn serialize<S>(self, serializer: S) -> Result<S::Ok, S::Error>
+    // where
+    //     S: Serializer;
+
+    fn serialize<S>(mut self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer;
+        S: Serializer,
+    {
+        let bit: Self = <Self as From<u8>>::from(0x80);
+        let mask: Self = <Self as From<u8>>::from(0x7F);
+        let num_bytes = {
+            let bits = Self::BITS - self.leading_zeros();
+            ((bits + 6) / 7).max(1) as usize
+        };
+        let mut seq = serializer.serialize_tuple(num_bytes)?;
+        while self >= bit {
+            let byte: u8 = ((self & mask) | bit).try_into().ok().unwrap();
+            seq.serialize_element(&byte)?;
+            self >>= 7;
+        }
+        let byte: u8 = self.try_into().ok().unwrap();
+        seq.serialize_element(&byte)?;
+        seq.end()
+    }
 }
 
 struct VarIntVisitor<T> {
@@ -56,7 +81,7 @@ where
     T: VarInt,
 {
     deserializer.deserialize_tuple(
-        (std::mem::size_of::<T>() * 8 + 6) / 7,
+        ((T::BITS * 8 + 6) / 7) as usize,
         VarIntVisitor {
             phantom: PhantomData::default(),
         },
@@ -66,13 +91,15 @@ where
 macro_rules! impl_var_int {
     ($type:ty) => {
         impl VarInt for $type {
+            const BITS: u32 = <$type>::BITS;
+
             fn visit_seq<'de, A>(mut seq: A) -> Result<Self, A::Error>
             where
                 A: SeqAccess<'de>,
             {
                 let mut out = 0;
                 let mut shift = 0u32;
-                while shift < <$type>::BITS {
+                while shift < Self::BITS {
                     let byte = match seq.next_element::<u8>()? {
                         None => return Err(A::Error::custom("Invalid Sequence")),
                         Some(byte) => byte,
@@ -96,21 +123,21 @@ macro_rules! impl_var_int {
                 Err(A::Error::custom("Left Shift Overflows"))
             }
 
-            fn serialize<S>(mut self, serializer: S) -> Result<S::Ok, S::Error>
-            where
-                S: Serializer,
-            {
-                let bits = <$type>::BITS - self.leading_zeros();
-                let num_bytes = ((bits + 6) / 7).max(1) as usize;
-                let mut seq = serializer.serialize_tuple(num_bytes)?;
-                while self >= 0x80 {
-                    let byte = ((self & 0x7F) | 0x80) as u8;
-                    seq.serialize_element(&byte)?;
-                    self >>= 7;
-                }
-                seq.serialize_element(&(self as u8))?;
-                seq.end()
-            }
+            // fn serialize<S>(mut self, serializer: S) -> Result<S::Ok, S::Error>
+            // where
+            //     S: Serializer,
+            // {
+            //     let bits = Self::BITS - self.leading_zeros();
+            //     let num_bytes = ((bits + 6) / 7).max(1) as usize;
+            //     let mut seq = serializer.serialize_tuple(num_bytes)?;
+            //     while self >= 0x80 {
+            //         let byte = ((self & 0x7F) | 0x80) as u8;
+            //         seq.serialize_element(&byte)?;
+            //         self >>= 7;
+            //     }
+            //     seq.serialize_element(&(self as u8))?;
+            //     seq.end()
+            // }
         }
     };
 }
