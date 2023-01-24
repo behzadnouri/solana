@@ -215,6 +215,7 @@ impl Stakes<StakeAccount> {
     where
         F: Fn(&Pubkey) -> Option<AccountSharedData>,
     {
+        error!("verify stakes-cache!!!");
         let stake_delegations = stakes.stake_delegations.iter().map(|(pubkey, delegation)| {
             let stake_account = match get_account(pubkey) {
                 None => return Err(Error::StakeAccountNotFound(*pubkey)),
@@ -235,18 +236,9 @@ impl Stakes<StakeAccount> {
                 None => return Err(Error::VoteAccountNotFound(*pubkey)),
                 Some(account) => account,
             };
-            // Ignoring rent_epoch until the feature for
-            // preserve_rent_epoch_for_rent_exempt_accounts is activated.
             let vote_account = vote_account.account();
-            if vote_account.lamports() != account.lamports()
-                || vote_account.owner() != account.owner()
-                || vote_account.executable() != account.executable()
-                || vote_account.data() != account.data()
-            {
-                error!(
-                    "vote account mismatch: {}, {:?}, {:?}",
-                    pubkey, vote_account, account
-                );
+            if vote_account != &account {
+                error!("vote account mismatch: {pubkey}, {vote_account:?}, {account:?}");
                 return Err(Error::VoteAccountMismatch(*pubkey));
             }
         }
@@ -266,7 +258,7 @@ impl Stakes<StakeAccount> {
             if VoteState::is_correct_size_and_initialized(account.data())
                 && VoteAccount::try_from(account.clone()).is_ok()
             {
-                error!("vote account not cached: {}, {:?}", pubkey, account);
+                error!("vote account not cached: {pubkey}, {account:?}");
                 return Err(Error::VoteAccountNotCached(pubkey));
             }
         }
