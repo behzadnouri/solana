@@ -159,10 +159,14 @@ impl CrdsFilterSet {
     }
 
     fn add(&self, hash_value: Hash) {
-        let index = CrdsFilter::hash_as_u64(&hash_value)
-            .checked_shr(64 - self.mask_bits)
-            .unwrap_or(0);
-        self.filters[index as usize].add(&hash_value);
+        let shift = u64::BITS.checked_sub(self.mask_bits).unwrap();
+        let index = usize::try_from(
+            CrdsFilter::hash_as_u64(&hash_value)
+                .checked_shr(shift)
+                .unwrap_or_default(),
+        )
+        .unwrap();
+        self.filters[index].add(&hash_value);
     }
 }
 
