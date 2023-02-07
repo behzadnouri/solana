@@ -18,7 +18,6 @@ use {
 
 const NUM_LAMPORTS_PER_ACCOUNT_DEFAULT: u64 = solana_sdk::native_token::LAMPORTS_PER_SOL;
 
-#[derive(Debug)]
 pub enum ExternalClientType {
     // Submits transactions to an Rpc node using an RpcClient
     RpcClient,
@@ -36,14 +35,12 @@ impl Default for ExternalClientType {
     }
 }
 
-#[derive(Debug)]
 pub struct InstructionPaddingConfig {
     pub program_id: Pubkey,
     pub data_size: u32,
 }
 
 /// Holds the configuration for a single run of the benchmark
-#[derive(Debug)]
 pub struct Config {
     pub entrypoint_addr: SocketAddr,
     pub json_rpc_url: String,
@@ -385,14 +382,11 @@ pub fn extract_args(matches: &ArgMatches) -> Config {
     );
     args.websocket_url = websocket_url;
 
-    dbg!(matches.value_of("identity"));
     let (_, id_path) = ConfigInput::compute_keypair_path_setting(
         matches.value_of("identity").unwrap_or(""),
         &config.keypair_path,
     );
-    dbg!(&id_path);
     if let Ok(id) = read_keypair_file(id_path) {
-        dbg!(&id);
         args.id = id;
     } else if matches.is_present("identity") {
         panic!("could not parse identity path");
