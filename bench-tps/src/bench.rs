@@ -1063,14 +1063,14 @@ pub fn fund_keypairs<T: 'static + BenchTpsClient + Send + Sync + ?Sized>(
                 Sol(total)
             );
             let latest_blockhash = get_latest_blockhash(client.as_ref());
-            if client
+            if let Err(err) = client
                 .request_airdrop_with_blockhash(
                     &funding_key.pubkey(),
                     total + rent - funding_key_balance,
                     &latest_blockhash,
                 )
-                .is_err()
             {
+                dbg!(err);
                 return Err(BenchTpsError::AirdropFailure);
             }
         }

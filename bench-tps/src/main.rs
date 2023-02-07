@@ -145,7 +145,9 @@ fn main() {
     solana_metrics::set_panic_hook("bench-tps", /*version:*/ None);
 
     let matches = cli::build_args(solana_version::version!()).get_matches();
+    // dbg!(&matches);
     let cli_config = cli::extract_args(&matches);
+    // dbg!(&cli_config);
 
     let cli::Config {
         entrypoint_addr,
