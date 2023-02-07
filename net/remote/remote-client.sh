@@ -79,12 +79,11 @@ solana-bench-tps)
   else
     args+=(--entrypoint "$entrypointIp:8001")
   fi
-
+  # --duration 7500 \
+  # --threads $threadCount \
   clientCommand="\
     solana-bench-tps \
-      --duration 7500 \
       --sustained \
-      --threads $threadCount \
       $benchTpsExtraArgs \
       --read-client-keys ./client-accounts.yml \
       ${args[*]} \
