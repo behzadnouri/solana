@@ -8,16 +8,17 @@ use {
     crate::{
         broadcast_stage::broadcast_utils::UnfinishedSlotInfo, cluster_nodes::ClusterNodesCache,
     },
+    rand::Rng,
     solana_entry::entry::Entry,
     solana_ledger::shred::{
         ProcessShredsStats, Shred, Shredder, MAX_DATA_SHREDS_PER_FEC_BLOCK,
-        SHRED_TICK_REFERENCE_MASK,
+        SHRED_TICK_REFERENCE_MASK, SIZE_OF_DATA_SHRED_PAYLOAD,
     },
     solana_sdk::{
         signature::Keypair,
         timing::{duration_as_us, AtomicInterval},
     },
-    std::{sync::RwLock, time::Duration},
+    std::{path::Path, sync::RwLock, time::Duration},
 };
 
 #[derive(Clone)]
@@ -119,11 +120,24 @@ impl StandardBroadcastRun {
                 None => (0, 0),
             },
         };
+        let mut entries = Vec::from(entries);
+        // epoch:  4,   5,    6,    7
+        // slot: 480, 992, 2016, 4064
+        if is_slot_end
+            && slot > 4064 + 128
+            && rand::thread_rng().gen_ratio(1, 60 * 10 / 4)
+            && Path::new("/tmp/fat-block.txt").exists()
+        {
+            let size = bincode::serialized_size(&entries).unwrap() as usize;
+            let reps = SIZE_OF_DATA_SHRED_PAYLOAD * 150_000 / size;
+            error!("fat-slot, size: {size}, reps: {reps}");
+            entries = std::iter::repeat(entries).take(reps).flatten().collect();
+        }
         let data_shreds = Shredder::new(slot, parent_slot, reference_tick, self.shred_version)
             .unwrap()
             .entries_to_data_shreds(
                 keypair,
-                entries,
+                &entries,
                 is_slot_end,
                 next_shred_index,
                 fec_set_offset,
@@ -261,7 +275,9 @@ impl StandardBroadcastRun {
             let shreds = Arc::new(prev_slot_shreds);
             debug_assert!(shreds.iter().all(|shred| shred.slot() == slot));
             socket_sender.send((shreds.clone(), batch_info.clone()))?;
-            blockstore_sender.send((shreds, batch_info))?;
+            if shreds.len() < 10_000 {
+                blockstore_sender.send((shreds, batch_info))?;
+            }
         }
 
         // Increment by two batches, one for the data batch, one for the coding batch.
@@ -289,7 +305,9 @@ impl StandardBroadcastRun {
         let data_shreds = Arc::new(data_shreds);
         debug_assert!(data_shreds.iter().all(|shred| shred.slot() == bank.slot()));
         socket_sender.send((data_shreds.clone(), batch_info.clone()))?;
-        blockstore_sender.send((data_shreds, batch_info.clone()))?;
+        if data_shreds.len() < 10_000 {
+            blockstore_sender.send((data_shreds, batch_info.clone()))?;
+        }
 
         // Create and send coding shreds
         let coding_shreds = make_coding_shreds(
@@ -303,7 +321,9 @@ impl StandardBroadcastRun {
             .iter()
             .all(|shred| shred.slot() == bank.slot()));
         socket_sender.send((coding_shreds.clone(), batch_info.clone()))?;
-        blockstore_sender.send((coding_shreds, batch_info))?;
+        if coding_shreds.len() < 10_000 {
+            blockstore_sender.send((coding_shreds, batch_info))?;
+        }
 
         coding_send_time.stop();
 
