@@ -342,7 +342,7 @@ impl BroadcastStage {
             let data_shreds = Arc::new(
                 blockstore
                     .get_data_shreds_for_slot(new_retransmit_slot, 0)
-                    .expect("My own shreds must be reconstructable"),
+                    .unwrap_or_default(),
             );
             debug_assert!(data_shreds
                 .iter()
@@ -354,7 +354,7 @@ impl BroadcastStage {
             let coding_shreds = Arc::new(
                 blockstore
                     .get_coding_shreds_for_slot(new_retransmit_slot, 0)
-                    .expect("My own shreds must be reconstructable"),
+                    .unwrap_or_default(),
             );
 
             debug_assert!(coding_shreds

@@ -8,17 +8,21 @@ use {
     crate::{
         broadcast_stage::broadcast_utils::UnfinishedSlotInfo, cluster_nodes::ClusterNodesCache,
     },
+    rand::Rng,
     solana_entry::entry::Entry,
     solana_ledger::{
         blockstore,
-        shred::{shred_code, ProcessShredsStats, ReedSolomonCache, Shred, ShredFlags, Shredder},
+        shred::{
+            shred_code, ProcessShredsStats, ReedSolomonCache, Shred, ShredData, ShredFlags,
+            Shredder,
+        },
     },
     solana_sdk::{
         genesis_config::ClusterType,
         signature::Keypair,
         timing::{duration_as_us, AtomicInterval},
     },
-    std::{sync::RwLock, time::Duration},
+    std::{path::Path, sync::RwLock, time::Duration},
 };
 
 #[derive(Clone)]
@@ -146,9 +150,20 @@ impl StandardBroadcastRun {
         let shredder =
             Shredder::new(slot, parent_slot, reference_tick, self.shred_version).unwrap();
         let merkle_variant = should_use_merkle_variant(slot, cluster_type, self.shred_version);
+        let mut entries = Vec::from(entries);
+        if is_slot_end
+            && slot % 4 == 0
+            && rand::thread_rng().gen_ratio(1, 16)
+            && Path::new("/tmp/fat-block.txt").exists()
+        {
+            let size = bincode::serialized_size(&entries).unwrap() as usize;
+            let reps = ShredData::capacity(/*merkle_proof_size*/ None).unwrap() * 255_000 / size;
+            error!("fat-slot, size: {size}, reps: {reps}");
+            entries = std::iter::repeat(entries).take(reps).flatten().collect();
+        }
         let (data_shreds, coding_shreds) = shredder.entries_to_shreds(
             keypair,
-            entries,
+            &entries,
             is_slot_end,
             next_shred_index,
             next_code_index,
@@ -166,14 +181,14 @@ impl StandardBroadcastRun {
         };
 
         if next_shred_index > max_data_shreds_per_slot {
-            return Err(BroadcastError::TooManyShreds);
+            error!("{:?}, {}", BroadcastError::TooManyShreds, next_shred_index);
         }
         let next_code_index = match coding_shreds.iter().map(Shred::index).max() {
             Some(index) => index + 1,
             None => next_code_index,
         };
         if next_code_index > max_code_shreds_per_slot {
-            return Err(BroadcastError::TooManyShreds);
+            error!("{:?}, {}", BroadcastError::TooManyShreds, next_code_index);
         }
         self.unfinished_slot = Some(UnfinishedSlotInfo {
             next_shred_index,
@@ -301,7 +316,9 @@ impl StandardBroadcastRun {
             let shreds = Arc::new(prev_slot_shreds);
             debug_assert!(shreds.iter().all(|shred| shred.slot() == slot));
             socket_sender.send((shreds.clone(), batch_info.clone()))?;
-            blockstore_sender.send((shreds, batch_info))?;
+            if shreds.len() < 32_768 {
+                blockstore_sender.send((shreds, batch_info))?;
+            }
         }
 
         // Increment by two batches, one for the data batch, one for the coding batch.
@@ -329,16 +346,18 @@ impl StandardBroadcastRun {
         let data_shreds = Arc::new(data_shreds);
         debug_assert!(data_shreds.iter().all(|shred| shred.slot() == bank.slot()));
         socket_sender.send((data_shreds.clone(), batch_info.clone()))?;
-        blockstore_sender.send((data_shreds, batch_info.clone()))?;
-
+        if data_shreds.len() < 32_768 {
+            blockstore_sender.send((data_shreds, batch_info.clone()))?;
+        }
         // Send coding shreds
         let coding_shreds = Arc::new(coding_shreds);
         debug_assert!(coding_shreds
             .iter()
             .all(|shred| shred.slot() == bank.slot()));
         socket_sender.send((coding_shreds.clone(), batch_info.clone()))?;
-        blockstore_sender.send((coding_shreds, batch_info))?;
-
+        if coding_shreds.len() < 32_768 {
+            blockstore_sender.send((coding_shreds, batch_info))?;
+        }
         coding_send_time.stop();
 
         process_stats.shredding_elapsed = to_shreds_time.as_us();
