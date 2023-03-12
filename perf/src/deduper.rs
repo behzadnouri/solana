@@ -22,9 +22,10 @@ pub struct Deduper {
 }
 
 impl Deduper {
-    pub fn new(size: u32, max_age: Duration) -> Self {
-        let mut filter: Vec<AtomicU64> = Vec::with_capacity(size as usize);
-        filter.resize_with(size as usize, Default::default);
+    pub fn new(size: usize, max_age: Duration) -> Self {
+        let filter = std::iter::repeat_with(AtomicU64::default)
+            .take(size)
+            .collect();
         let seed = thread_rng().gen();
         Self {
             filter,
@@ -41,9 +42,7 @@ impl Deduper {
         //false positive rate is 1/1000 at that point
         let saturated = self.saturated.load(Ordering::Relaxed);
         if saturated || now.duration_since(self.age) > self.max_age {
-            let len = self.filter.len();
-            self.filter.clear();
-            self.filter.resize_with(len, AtomicU64::default);
+            self.filter.fill_with(AtomicU64::default);
             self.seed = thread_rng().gen();
             self.age = now;
             self.saturated.store(false, Ordering::Relaxed);
@@ -60,12 +59,10 @@ impl Deduper {
         (h, pos)
     }
 
-    // Deduplicates packets and returns 1 if packet is to be discarded. Else, 0.
-    fn dedup_packet(&self, packet: &mut Packet) -> u64 {
-        // If this packet was already marked as discard, drop it
-        if packet.meta().discard() {
-            return 1;
-        }
+    // Returns true if the packet is duplicate.
+    #[must_use]
+    fn check_duplicate(&self, packet: &Packet) -> bool {
+        debug_assert!(!packet.meta().discard());
         let (hash, pos) = self.compute_hash(packet);
         // saturate each position with or
         let prev = self.filter[pos].fetch_or(hash, Ordering::Relaxed);
@@ -74,11 +71,7 @@ impl Deduper {
             //reset this value
             self.filter[pos].store(hash, Ordering::Relaxed);
         }
-        if hash == prev & hash {
-            packet.meta_mut().set_discard(true);
-            return 1;
-        }
-        0
+        hash == prev & hash
     }
 
     pub fn dedup_packets_and_count_discards(
@@ -90,11 +83,12 @@ impl Deduper {
         batches.iter_mut().for_each(|batch| {
             batch.iter_mut().for_each(|p| {
                 let removed_before_sigverify = p.meta().discard();
-                let is_duplicate = self.dedup_packet(p);
-                if is_duplicate == 1 {
+                let is_duplicate = !removed_before_sigverify && self.check_duplicate(p);
+                if is_duplicate {
+                    p.meta_mut().set_discard(true);
                     saturating_add_assign!(num_removed, 1);
                 }
-                process_received_packet(p, removed_before_sigverify, is_duplicate == 1);
+                process_received_packet(p, removed_before_sigverify, is_duplicate);
             })
         });
         num_removed
