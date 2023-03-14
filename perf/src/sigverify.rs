@@ -29,8 +29,9 @@ use {
     std::{
         convert::TryFrom,
         hash::Hasher,
+        iter::repeat_with,
         mem::size_of,
-        sync::atomic::{AtomicBool, AtomicU64, Ordering},
+        sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         time::{Duration, Instant},
     },
 };
@@ -569,6 +570,86 @@ impl Deduper {
     }
 }
 
+pub struct BloomDeduper<const K: usize> {
+    num_bits: usize,
+    bits: Vec<AtomicU64>,
+    seeds: [(u128, u128); K],
+    since: Instant,
+    ttl: Duration,
+    capacity: usize,
+    weight: AtomicUsize, // Hamming weight or number of bits set to one.
+}
+
+impl<const K: usize> BloomDeduper<K> {
+    pub fn new<R: Rng>(rng: &mut R, false_positive: f64, num_bits: usize, ttl: Duration) -> Self {
+        let bits = repeat_with(AtomicU64::default)
+            .take((num_bits + 63) / 64)
+            .collect();
+        let capacity = num_bits as f64 * false_positive.powf(1f64 / K as f64);
+        Self {
+            num_bits,
+            seeds: [(); K].map(|_| rng.gen()),
+            since: Instant::now(),
+            ttl,
+            bits,
+            capacity: capacity as usize,
+            weight: AtomicUsize::default(),
+        }
+    }
+
+    pub fn maybe_reset<R: Rng>(&mut self, rng: &mut R) {
+        let weight = self.weight.load(Ordering::Relaxed);
+        if weight >= self.capacity || self.since.elapsed() > self.ttl {
+            self.seeds = [(); K].map(|_| rng.gen());
+            self.since = Instant::now();
+            self.bits.fill_with(AtomicU64::default);
+            self.weight = AtomicUsize::default();
+        }
+    }
+
+    // Returns true if the packet is duplicate.
+    #[must_use]
+    fn dedup_packet(&self, packet: &Packet) -> bool {
+        debug_assert!(!packet.meta.discard());
+        let mut out = true;
+        for seed in self.seeds {
+            let mut hasher = AHasher::new_with_keys(seed.0, seed.1);
+            hasher.write(packet.data(..).unwrap_or_default());
+            let hash: u64 = hasher.finish() % self.num_bits as u64;
+            let index = (hash >> 6) as usize;
+            let mask: u64 = 1u64 << (hash & 63);
+            let old = self.bits[index].fetch_or(mask, Ordering::Relaxed);
+            if old & mask == 0u64 {
+                self.weight.fetch_add(1, Ordering::Relaxed);
+                out = false;
+            }
+        }
+        out
+    }
+
+    pub fn dedup_packets_and_count_discards(
+        &self,
+        batches: &mut [PacketBatch],
+        mut process_received_packet: impl FnMut(&mut Packet, bool, bool),
+    ) -> u64 {
+        batches
+            .iter_mut()
+            .flat_map(PacketBatch::iter_mut)
+            .map(|packet| {
+                if packet.meta.discard() {
+                    process_received_packet(packet, true, false);
+                } else if self.dedup_packet(packet) {
+                    packet.meta.set_discard(true);
+                    process_received_packet(packet, false, true);
+                } else {
+                    process_received_packet(packet, false, false);
+                }
+                u64::from(packet.meta.discard())
+            })
+            .sum()
+    }
+}
+
 //inplace shrink a batch of packets
 pub fn shrink_batches(batches: &mut Vec<PacketBatch>) {
     let mut valid_batch_ix = 0;
@@ -790,10 +871,12 @@ mod tests {
         },
         bincode::{deserialize, serialize},
         curve25519_dalek::{edwards::CompressedEdwardsY, scalar::Scalar},
-        rand::{thread_rng, Rng},
+        rand::{thread_rng, Rng, SeedableRng},
+        rand_chacha::ChaChaRng,
         solana_sdk::{
             instruction::CompiledInstruction,
             message::{Message, MessageHeader},
+            packet::Meta,
             signature::{Keypair, Signature, Signer},
             transaction::Transaction,
         },
@@ -1740,5 +1823,31 @@ mod tests {
             assert_eq!(shrunken_batch_count, *expect_batch_count);
             assert_eq!(count_valid_packets(&batches, |_| ()), *expect_valid_packets);
         }
+    }
+
+    #[test]
+    fn test_bloom_deduper() {
+        let mut rng = ChaChaRng::from_seed([0xa5; 32]);
+        let deduper = BloomDeduper::<2>::new(
+            &mut rng,
+            0.001,                       // false positives
+            6_400_013,                   // num_bits
+            Duration::from_secs(5 * 60), // ttl
+        );
+        assert_eq!(deduper.capacity, 202_386);
+        let mut packet = Packet::new([0u8; PACKET_DATA_SIZE], Meta::default());
+        let mut num_dups = 0usize;
+        for _ in 0..102_828 {
+            packet.meta.set_discard(false);
+            let size = rng.gen_range(0, PACKET_DATA_SIZE);
+            packet.meta.size = size;
+            rng.fill(&mut packet.buffer_mut()[0..size]);
+            if deduper.dedup_packet(&packet) {
+                num_dups += 1;
+            }
+            assert!(deduper.dedup_packet(&packet));
+        }
+        assert_eq!(num_dups, 126);
+        assert_eq!(deduper.weight.load(Ordering::Relaxed), 202_169);
     }
 }

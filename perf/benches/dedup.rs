@@ -24,10 +24,16 @@ fn test_packet_with_size(size: usize, rng: &mut ThreadRng) -> Vec<u8> {
 
 fn do_bench_dedup_packets(bencher: &mut Bencher, mut batches: Vec<PacketBatch>) {
     // verify packets
-    let mut deduper = sigverify::Deduper::new(1_000_000, Duration::from_millis(2_000));
+    let mut rng = rand::thread_rng();
+    let mut deduper = sigverify::BloomDeduper::<2>::new(
+        &mut rng,
+        0.001,                        // false_positive
+        1_000_000 * 64,               // num_bits
+        Duration::from_millis(2_000), // ttl
+    );
     bencher.iter(|| {
         let _ans = deduper.dedup_packets_and_count_discards(&mut batches, |_, _, _| ());
-        deduper.reset();
+        deduper.maybe_reset(&mut rng);
         batches
             .iter_mut()
             .for_each(|b| b.iter_mut().for_each(|p| p.meta.set_discard(false)));
@@ -112,8 +118,14 @@ fn bench_dedup_baseline(bencher: &mut Bencher) {
 #[bench]
 #[ignore]
 fn bench_dedup_reset(bencher: &mut Bencher) {
-    let mut deduper = sigverify::Deduper::new(1_000_000, Duration::from_millis(0));
+    let mut rng = rand::thread_rng();
+    let mut deduper = sigverify::BloomDeduper::<2>::new(
+        &mut rng,
+        0.001,                    // false_positive
+        1_000_000 * 64,           // num_bits
+        Duration::from_millis(0), // ttl
+    );
     bencher.iter(|| {
-        deduper.reset();
+        deduper.maybe_reset(&mut rng);
     });
 }

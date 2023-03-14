@@ -5676,6 +5676,7 @@ dependencies = [
  "matches",
  "nix",
  "rand 0.7.3",
+ "rand_chacha 0.2.2",
  "rayon",
  "serde",
  "solana-logger 1.13.7",
