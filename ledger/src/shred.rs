@@ -51,7 +51,10 @@
 
 pub use crate::shred_stats::{ProcessShredsStats, ShredFetchStats};
 use {
-    crate::{blockstore::MAX_DATA_SHREDS_PER_SLOT, erasure::Session},
+    crate::{
+        blockstore::{self, MAX_DATA_SHREDS_PER_SLOT},
+        erasure::Session,
+    },
     bincode::config::Options,
     num_enum::{IntoPrimitive, TryFromPrimitive},
     rayon::{prelude::*, ThreadPool},
@@ -130,6 +133,8 @@ pub enum ShredError {
 
     #[error("invalid payload")]
     InvalidPayload,
+    #[error("Invalid payload size: {0}")]
+    InvalidPayloadSize(/*payload size:*/ usize),
 }
 
 pub type Result<T> = std::result::Result<T, ShredError>;
@@ -665,6 +670,65 @@ impl Shred {
     }
 }
 
+// Helper methods to extract pieces of the shred from the payload
+// without deserializing the entire payload.
+mod layout {
+    use super::*;
+
+    fn get_shred_size(packet: &Packet) -> Option<usize> {
+        let size = packet.data(..)?.len();
+        if packet.meta.repair() {
+            size.checked_sub(SIZE_OF_NONCE)
+        } else {
+            Some(size)
+        }
+    }
+
+    pub(super) fn get_shred(packet: &Packet) -> Option<&[u8]> {
+        let size = get_shred_size(packet)?;
+        packet.data(..size)
+    }
+
+    #[inline]
+    pub(super) fn get_shred_type(shred: &[u8]) -> Result<ShredType> {
+        match shred.get(OFFSET_OF_SHRED_TYPE) {
+            None => Err(ShredError::InvalidPayloadSize(shred.len())),
+            Some(shred_type) => match ShredType::try_from(*shred_type) {
+                Err(_) => Err(ShredError::InvalidShredType),
+                Ok(shred_type) => Ok(shred_type),
+            },
+        }
+    }
+
+    #[inline]
+    pub(super) fn get_slot(shred: &[u8]) -> Option<Slot> {
+        <[u8; 8]>::try_from(shred.get(OFFSET_OF_SHRED_SLOT..)?.get(..8)?)
+            .map(Slot::from_le_bytes)
+            .ok()
+    }
+
+    #[inline]
+    pub(super) fn get_index(shred: &[u8]) -> Option<u32> {
+        <[u8; 4]>::try_from(shred.get(OFFSET_OF_SHRED_INDEX..)?.get(..4)?)
+            .map(u32::from_le_bytes)
+            .ok()
+    }
+
+    pub(super) fn get_version(shred: &[u8]) -> Option<u16> {
+        <[u8; 2]>::try_from(shred.get(77..79)?)
+            .map(u16::from_le_bytes)
+            .ok()
+    }
+
+    // The caller should verify first that the shred is data and not code!
+    pub(super) fn get_parent_offset(shred: &[u8]) -> Option<u16> {
+        debug_assert_eq!(get_shred_type(shred).unwrap(), ShredType::Data);
+        <[u8; 2]>::try_from(shred.get(83..85)?)
+            .map(u16::from_le_bytes)
+            .ok()
+    }
+}
+
 #[derive(Debug)]
 pub struct Shredder {
     pub slot: Slot,
@@ -1110,6 +1174,97 @@ pub fn get_shred_slot_index_type(
         Ok(shred_type) => shred_type,
     };
     Some((slot, index, shred_type))
+}
+
+// Accepts shreds in the slot range [root + 1, max_slot].
+#[must_use]
+pub fn should_discard_shred(
+    packet: &Packet,
+    root: Slot,
+    max_slot: Slot,
+    shred_version: u16,
+    stats: &mut ShredFetchStats,
+) -> bool {
+    debug_assert!(root < max_slot);
+    let shred = match layout::get_shred(packet) {
+        None => {
+            stats.index_overrun += 1;
+            return true;
+        }
+        Some(shred) => shred,
+    };
+    match layout::get_version(shred) {
+        None => {
+            stats.index_overrun += 1;
+            return true;
+        }
+        Some(version) => {
+            if version != shred_version {
+                stats.shred_version_mismatch += 1;
+                return true;
+            }
+        }
+    }
+    let shred_type = match layout::get_shred_type(shred) {
+        Ok(shred_type) => shred_type,
+        Err(_) => {
+            stats.bad_shred_type += 1;
+            return true;
+        }
+    };
+    let slot = match layout::get_slot(shred) {
+        Some(slot) => {
+            if slot > max_slot {
+                stats.slot_out_of_range += 1;
+                return true;
+            }
+            slot
+        }
+        None => {
+            stats.slot_bad_deserialize += 1;
+            return true;
+        }
+    };
+    let index = match layout::get_index(shred) {
+        Some(index) => index,
+        None => {
+            stats.index_bad_deserialize += 1;
+            return true;
+        }
+    };
+    if index >= MAX_DATA_SHREDS_PER_SLOT as u32 {
+        stats.index_out_of_bounds += 1;
+        return true;
+    }
+    match shred_type {
+        ShredType::Code => {
+            if slot <= root {
+                stats.slot_out_of_range += 1;
+                return true;
+            }
+        }
+        ShredType::Data => {
+            let parent_offset = match layout::get_parent_offset(shred) {
+                Some(parent_offset) => parent_offset,
+                None => {
+                    stats.bad_parent_offset += 1;
+                    return true;
+                }
+            };
+            let parent = match slot.checked_sub(Slot::from(parent_offset)) {
+                Some(parent) => parent,
+                None => {
+                    stats.bad_parent_offset += 1;
+                    return true;
+                }
+            };
+            if !blockstore::verify_shred_slots(slot, parent, root) {
+                stats.slot_out_of_range += 1;
+                return true;
+            }
+        }
+    }
+    false
 }
 
 pub fn max_ticks_per_n_shreds(num_shreds: u64, shred_data_size: Option<usize>) -> u64 {
