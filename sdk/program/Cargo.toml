@@ -28,7 +28,6 @@ rustversion = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_bytes = { workspace = true }
 serde_derive = { workspace = true }
-serde_json = { workspace = true }
 sha2 = { workspace = true }
 sha3 = { workspace = true }
 solana-frozen-abi = { workspace = true }
@@ -40,7 +39,6 @@ thiserror = { workspace = true }
 ark-bn254 = { workspace = true }
 ark-ec = { workspace = true }
 ark-ff = { workspace = true }
-array-bytes = { workspace = true }
 bitflags = { workspace = true }
 base64 = { workspace = true, features = ["alloc", "std"] }
 curve25519-dalek = { workspace = true, features = ["serde"] }
@@ -50,11 +48,11 @@ libsecp256k1 = { workspace = true }
 num-bigint = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
-tiny-bip39 = { workspace = true }
 wasm-bindgen = { workspace = true }
 zeroize = { workspace = true, features = ["default", "zeroize_derive"] }
 
 [target.'cfg(not(target_os = "solana"))'.dev-dependencies]
+array-bytes = { workspace = true }
 solana-logger = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -73,7 +71,6 @@ serde_json = { workspace = true }
 static_assertions = { workspace = true }
 
 [build-dependencies]
-cc = { workspace = true, features = ["jobserver", "parallel"] }
 rustc_version = { workspace = true }
 
 [package.metadata.docs.rs]

@@ -1558,18 +1558,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "enum_dispatch"
-version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0eb359f1476bf611266ac1f5355bc14aeca37b299d0ebccc038ee7058891c9cb"
-dependencies = [
- "once_cell",
- "proc-macro2 1.0.53",
- "quote 1.0.26",
- "syn 1.0.107",
-]
-
-[[package]]
 name = "env_logger"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5047,11 +5035,8 @@ dependencies = [
 name = "solana-cargo-build-bpf"
 version = "1.16.0"
 dependencies = [
- "cargo_metadata",
- "clap 3.1.8",
  "log",
  "solana-logger 1.16.0",
- "solana-sdk 1.16.0",
 ]
 
 [[package]]
@@ -5077,10 +5062,6 @@ dependencies = [
 [[package]]
 name = "solana-cargo-test-bpf"
 version = "1.16.0"
-dependencies = [
- "cargo_metadata",
- "clap 3.1.8",
-]
 
 [[package]]
 name = "solana-cargo-test-sbf"
@@ -5225,7 +5206,6 @@ dependencies = [
  "async-trait",
  "bincode",
  "crossbeam-channel",
- "enum_dispatch",
  "futures 0.3.24",
  "futures-util",
  "indexmap",
@@ -5236,7 +5216,6 @@ dependencies = [
  "rand_chacha 0.2.2",
  "rayon",
  "solana-connection-cache",
- "solana-logger 1.16.0",
  "solana-measure",
  "solana-metrics",
  "solana-net-utils",
@@ -5409,7 +5388,6 @@ dependencies = [
  "log",
  "rand 0.7.3",
  "serde",
- "serial_test",
  "solana-bench-tps",
  "solana-client",
  "solana-core",
@@ -5535,16 +5513,10 @@ dependencies = [
 name = "solana-frozen-abi"
 version = "1.16.0"
 dependencies = [
- "ahash",
- "blake3",
- "block-buffer 0.9.0",
  "bs58",
  "bv",
- "byteorder",
- "cc",
  "either",
  "generic-array 0.14.6",
- "getrandom 0.1.16",
  "hashbrown 0.12.3",
  "im",
  "lazy_static",
@@ -5556,7 +5528,6 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_derive",
- "serde_json",
  "sha2 0.10.6",
  "solana-frozen-abi-macro 1.16.0",
  "solana-logger 1.16.0",
@@ -6165,7 +6136,6 @@ dependencies = [
  "bs58",
  "bv",
  "bytemuck",
- "cc",
  "console_error_panic_hook",
  "console_log",
  "curve25519-dalek",
@@ -6197,7 +6167,6 @@ dependencies = [
  "solana-sdk-macro 1.16.0",
  "static_assertions",
  "thiserror",
- "tiny-bip39",
  "wasm-bindgen",
  "zeroize",
 ]
@@ -6212,7 +6181,6 @@ dependencies = [
  "enum-iterator",
  "itertools",
  "libc",
- "libloading",
  "log",
  "num-derive",
  "num-traits",
@@ -6303,7 +6271,6 @@ dependencies = [
  "solana-rpc-client-api",
  "solana-sdk 1.16.0",
  "solana-streamer",
- "solana-tpu-client",
  "thiserror",
  "tokio",
 ]
@@ -6612,7 +6579,6 @@ name = "solana-sdk"
 version = "1.16.0"
 dependencies = [
  "anyhow",
- "assert_matches",
  "base64 0.13.0",
  "bincode",
  "bitflags",
@@ -6728,7 +6694,6 @@ dependencies = [
  "proptest",
  "rustc_version 0.4.0",
  "solana-config-program",
- "solana-logger 1.16.0",
  "solana-program-runtime",
  "solana-sdk 1.16.0",
  "solana-vote-program",
@@ -6883,7 +6848,6 @@ dependencies = [
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk 1.16.0",
- "solana-tpu-client",
 ]
 
 [[package]]
@@ -6932,10 +6896,8 @@ dependencies = [
  "rand_chacha 0.2.2",
  "rayon",
  "solana-connection-cache",
- "solana-logger 1.16.0",
  "solana-measure",
  "solana-metrics",
- "solana-net-utils",
  "solana-pubsub-client",
  "solana-rpc-client",
  "solana-rpc-client-api",
@@ -7004,7 +6966,6 @@ dependencies = [
  "solana-net-utils",
  "solana-sdk 1.16.0",
  "solana-streamer",
- "solana-tpu-client",
  "thiserror",
  "tokio",
 ]
