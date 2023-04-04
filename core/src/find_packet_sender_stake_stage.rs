@@ -150,10 +150,6 @@ impl FindPacketSenderStakeStage {
             .iter_mut()
             .flat_map(|batch| batch.iter_mut())
             .for_each(|packet| {
-                packet.meta_mut().sender_stake = ip_to_stake
-                    .get(&packet.meta().addr)
-                    .copied()
-                    .unwrap_or_default();
             });
     }
 
