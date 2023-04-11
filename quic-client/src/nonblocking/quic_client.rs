@@ -5,7 +5,6 @@ use {
     async_mutex::Mutex,
     async_trait::async_trait,
     futures::future::join_all,
-    itertools::Itertools,
     log::*,
     quinn::{
         ClientConfig, ConnectError, Connection, ConnectionError, Endpoint, EndpointConfig,
@@ -172,7 +171,7 @@ struct QuicNewConnection {
 impl QuicNewConnection {
     /// Create a QuicNewConnection given the remote address 'addr'.
     async fn make_connection(
-        endpoint: Arc<QuicLazyInitializedEndpoint>,
+        endpoint: &QuicLazyInitializedEndpoint,
         addr: SocketAddr,
         stats: &ClientStats,
     ) -> Result<Self, QuicError> {
@@ -286,9 +285,32 @@ impl QuicClient {
         &self,
         data: &[u8],
         stats: &ClientStats,
-        connection_stats: Arc<ConnectionCacheStats>,
+        connection_stats: &ConnectionCacheStats,
     ) -> Result<Arc<Connection>, QuicError> {
         let mut connection_try_count = 0;
+
+        let connection = {
+            let mut connection = self.connection.lock().await;
+            match connection.as_ref() {
+                Some(connection) => {
+                    stats.connection_reuse.fetch_add(1, Ordering::Relaxed);
+                    connection.connection.clone()
+                }
+                None => {
+                    let connection =
+                        QuicNewConnection::make_connection(&self.endpoint, self.addr, stats)
+                            .await
+                            .map_err(|err| {
+                                info!("Cannot make connection to {}, error {err:}", self.addr);
+                                err
+                            })?;
+                    *connection = Some(connection.clone());
+                    connection_try_count += 1;
+                    connection.connection.clone()
+                }
+            }
+        };
+
         let mut last_connection_id = 0;
         let mut last_error = None;
 
@@ -329,12 +351,9 @@ impl QuicClient {
                         }
                     }
                     None => {
-                        let conn = QuicNewConnection::make_connection(
-                            self.endpoint.clone(),
-                            self.addr,
-                            stats,
-                        )
-                        .await;
+                        let conn =
+                            QuicNewConnection::make_connection(&self.endpoint, self.addr, stats)
+                                .await;
                         match conn {
                             Ok(conn) => {
                                 *conn_guard = Some(conn.clone());
@@ -385,26 +404,19 @@ impl QuicClient {
                 .update_stat(&self.stats.acks, new_stats.frame_tx.acks);
 
             last_connection_id = connection.stable_id();
-            match Self::_send_buffer_using_conn(data, &connection).await {
-                Ok(()) => {
-                    return Ok(connection);
+            last_error = match Self::_send_buffer_using_conn(data, &connection).await {
+                Ok(()) => return Ok(connection),
+                Err(err @ QuicError::ConnectionError(_)) => Some(err),
+                Err(err) => {
+                    info!(
+                        "Error sending to {} with id {}, error {err:?} thread: {:?}",
+                        self.addr,
+                        connection.stable_id(),
+                        thread::current().id(),
+                    );
+                    return Err(err);
                 }
-                Err(err) => match err {
-                    QuicError::ConnectionError(_) => {
-                        last_error = Some(err);
-                    }
-                    _ => {
-                        info!(
-                            "Error sending to {} with id {}, error {:?} thread: {:?}",
-                            self.addr,
-                            connection.stable_id(),
-                            err,
-                            thread::current().id(),
-                        );
-                        return Err(err);
-                    }
-                },
-            }
+            };
         }
 
         // if we come here, that means we have exhausted maximum retries, return the error
@@ -421,14 +433,13 @@ impl QuicClient {
         &self,
         data: T,
         stats: &ClientStats,
-        connection_stats: Arc<ConnectionCacheStats>,
+        connection_stats: &ConnectionCacheStats,
     ) -> Result<(), ClientErrorKind>
     where
         T: AsRef<[u8]>,
     {
         self._send_buffer(data.as_ref(), stats, connection_stats)
-            .await
-            .map_err(Into::<ClientErrorKind>::into)?;
+            .await?;
         Ok(())
     }
 
@@ -436,7 +447,7 @@ impl QuicClient {
         &self,
         buffers: &[T],
         stats: &ClientStats,
-        connection_stats: Arc<ConnectionCacheStats>,
+        connection_stats: &ConnectionCacheStats,
     ) -> Result<(), ClientErrorKind>
     where
         T: AsRef<[u8]>,
@@ -457,31 +468,25 @@ impl QuicClient {
         }
         let connection = self
             ._send_buffer(buffers[0].as_ref(), stats, connection_stats)
-            .await
-            .map_err(Into::<ClientErrorKind>::into)?;
+            .await?;
 
         // Used to avoid dereferencing the Arc multiple times below
         // by just getting a reference to the NewConnection once
         let connection_ref: &Connection = &connection;
 
-        let chunks = buffers[1..buffers.len()].iter().chunks(self.chunk_size);
-
-        let futures: Vec<_> = chunks
-            .into_iter()
+        let futures: Vec<_> = buffers[1..]
+            .chunks(self.chunk_size)
             .map(|buffs| {
                 join_all(
                     buffs
-                        .into_iter()
+                        .iter()
                         .map(|buf| Self::_send_buffer_using_conn(buf.as_ref(), connection_ref)),
                 )
             })
             .collect();
 
         for f in futures {
-            f.await
-                .into_iter()
-                .try_for_each(|res| res)
-                .map_err(Into::<ClientErrorKind>::into)?;
+            f.await.into_iter().collect::<Result<_, _>>()?;
         }
         Ok(())
     }
@@ -544,7 +549,7 @@ impl ClientConnection for QuicClientConnection {
         let len = buffers.len();
         let res = self
             .client
-            .send_batch(buffers, &stats, self.connection_stats.clone())
+            .send_batch(buffers, &stats, &self.connection_stats)
             .await;
         self.connection_stats
             .add_client_stats(&stats, len, res.is_ok());
@@ -556,7 +561,7 @@ impl ClientConnection for QuicClientConnection {
         let stats = Arc::new(ClientStats::default());
         let send_buffer = self
             .client
-            .send_buffer(data, &stats, self.connection_stats.clone());
+            .send_buffer(data, &stats, &self.connection_stats);
         if let Err(e) = send_buffer.await {
             warn!(
                 "Failed to send data async to {}, error: {:?} ",
