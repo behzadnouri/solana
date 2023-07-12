@@ -43,7 +43,7 @@ use {
         time::{Duration, Instant},
     },
     thiserror::Error,
-    tokio::sync::mpsc::Sender as AsyncSender,
+    tokio::sync::mpsc::{error::TrySendError, Sender as AsyncSender},
 };
 
 pub mod broadcast_duplicates_run;
@@ -475,9 +475,13 @@ pub fn broadcast_shreds(
     transmit_stats.total_packets += packets.len() + quic_packets.len();
     for (shred, addr) in quic_packets {
         let shred = Bytes::from(shred.clone());
-        if let Err(err) = quic_endpoint_sender.blocking_send((addr, shred)) {
+        if let Err(err) = quic_endpoint_sender.try_send((addr, shred)) {
+            match err {
+                TrySendError::Full(_) => error!("broadcast: TrySendError::Full"),
+                TrySendError::Closed(_) => error!("broadcast: TrySendError::Closed"),
+            };
             transmit_stats.dropped_packets_quic += 1;
-            result = Err(Error::from(err));
+            // result = Err(Error::from(err));
         }
     }
     result

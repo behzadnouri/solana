@@ -273,7 +273,10 @@ fn receive_quic_datagrams(
                 .while_some(),
         );
         let size = entries
-            .filter(|(_, _, bytes)| bytes.len() <= PACKET_DATA_SIZE)
+            .filter(|(_, _, bytes)| {
+                assert!(bytes.len() <= PACKET_DATA_SIZE);
+                bytes.len() <= PACKET_DATA_SIZE
+            })
             .zip(packet_batch.iter_mut())
             .map(|((_pubkey, addr, bytes), packet)| {
                 packet.buffer_mut()[..bytes.len()].copy_from_slice(&bytes);

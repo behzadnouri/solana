@@ -37,7 +37,7 @@ use {
         thread::{self, Builder, JoinHandle},
         time::{Duration, Instant},
     },
-    tokio::sync::mpsc::Sender as AsyncSender,
+    tokio::sync::mpsc::{error::TrySendError, Sender as AsyncSender},
 };
 
 const MAX_DUPLICATE_COUNT: usize = 2;
@@ -334,7 +334,17 @@ fn retransmit_shred(
             let shred = Bytes::copy_from_slice(shred);
             addrs
                 .into_iter()
-                .filter_map(|addr| quic_endpoint_sender.try_send((addr, shred.clone())).ok())
+                .filter_map(|addr| {
+                    if let Err(err) = quic_endpoint_sender.try_send((addr, shred.clone())) {
+                        match err {
+                            TrySendError::Full(_) => error!("retransmit: TrySendError::Full"),
+                            TrySendError::Closed(_) => error!("retransmit: TrySendError::Closed"),
+                        };
+                        None
+                    } else {
+                        Some(())
+                    }
+                })
                 .count()
         }
         Protocol::UDP => match multi_target_send(socket, shred, &addrs) {

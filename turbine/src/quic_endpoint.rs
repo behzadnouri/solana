@@ -4,13 +4,14 @@ use {
     futures::future::TryJoin,
     log::error,
     quinn::{
-        ClientConfig, ConnectError, Connecting, Connection, ConnectionError, Endpoint,
-        EndpointConfig, SendDatagramError, ServerConfig, TokioRuntime, TransportConfig, VarInt,
+        Chunk, ClientConfig, ConnectError, Connecting, Connection, ConnectionError, Endpoint,
+        EndpointConfig, ReadError, RecvStream, SendDatagramError, ServerConfig, TokioRuntime,
+        TransportConfig, VarInt, WriteError,
     },
     rcgen::RcgenError,
     rustls::{Certificate, PrivateKey},
     solana_quic_client::nonblocking::quic_client::SkipServerVerification,
-    solana_sdk::{pubkey::Pubkey, signature::Keypair},
+    solana_sdk::{packet::PACKET_DATA_SIZE, pubkey::Pubkey, signature::Keypair},
     solana_streamer::{
         quic::SkipClientVerification, tls_certificates::new_self_signed_tls_certificate,
     },
@@ -19,7 +20,10 @@ use {
         io::Error as IoError,
         net::{IpAddr, SocketAddr, UdpSocket},
         ops::Deref,
-        sync::Arc,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
     },
     thiserror::Error,
     tokio::{
@@ -31,7 +35,16 @@ use {
     },
 };
 
-const CLIENT_CHANNEL_CAPACITY: usize = 1 << 20;
+static HANDLE_CONNECTION_COUNT: AtomicUsize = AtomicUsize::new(0usize);
+
+const CLIENT_CHANNEL_CAPACITY: usize = 1 << 10;
+// switch to 1500u32 - 28 = 1472?!
+// max_datagram_size: this number - 38
+// 1500 > 1434
+// 1472 > 1434
+// 1280 > 1242 == 38
+// quinn_udp] sendmsg error: Os { code: 90, kind: Uncategorized, message:
+// "Message too long" }, Transmit: { len: 1452, segment_size: None }
 const INITIAL_MAXIMUM_TRANSMISSION_UNIT: u16 = 1280;
 const ALPN_TURBINE_PROTOCOL_ID: &[u8] = b"solana-turbine";
 const CONNECT_SERVER_NAME: &str = "solana-turbine";
@@ -59,14 +72,20 @@ pub enum Error {
     ConnectionError(#[from] ConnectionError),
     #[error("Channel Send Error")]
     ChannelSendError,
+    #[error("Invalid Chunk: {0:?}")]
+    InvalidChunk(Chunk),
     #[error("Invalid Identity: {0:?}")]
     InvalidIdentity(SocketAddr),
     #[error(transparent)]
     IoError(#[from] IoError),
     #[error(transparent)]
+    ReadError(#[from] ReadError),
+    #[error(transparent)]
     SendDatagramError(#[from] SendDatagramError),
     #[error(transparent)]
     TlsError(#[from] rustls::Error),
+    #[error(transparent)]
+    WriteError(#[from] WriteError),
 }
 
 #[allow(clippy::type_complexity)]
@@ -108,6 +127,8 @@ pub fn new_quic_endpoint(
 }
 
 pub fn close_quic_endpoint(endpoint: &Endpoint) {
+    error!("close_quic_endpoint");
+    error!("{:?}", std::backtrace::Backtrace::force_capture());
     endpoint.close(
         CONNECTION_CLOSE_ERROR_CODE_SHUTDOWN,
         CONNECTION_CLOSE_REASON_SHUTDOWN,
@@ -142,10 +163,17 @@ fn new_client_config(cert: Certificate, key: PrivateKey) -> Result<ClientConfig,
 
 fn new_transport_config() -> TransportConfig {
     let mut config = TransportConfig::default();
+    let mut mtu_discovery_config = quinn::MtuDiscoveryConfig::default();
+    mtu_discovery_config.upper_bound(INITIAL_MAXIMUM_TRANSMISSION_UNIT);
     config
         .max_concurrent_bidi_streams(VarInt::from(0u8))
-        .max_concurrent_uni_streams(VarInt::from(0u8))
-        .initial_mtu(INITIAL_MAXIMUM_TRANSMISSION_UNIT);
+        .max_concurrent_uni_streams(VarInt::from(10_000u32))
+        .initial_mtu(INITIAL_MAXIMUM_TRANSMISSION_UNIT)
+        // .datagram_receive_buffer_size(Some(usize::MAX / 3))
+        // .datagram_send_buffer_size(usize::MAX / 3)
+        .datagram_receive_buffer_size(None)
+        .datagram_send_buffer_size(0)
+        .mtu_discovery_config(Some(quinn::MtuDiscoveryConfig::default()));
     config
 }
 
@@ -170,11 +198,20 @@ async fn run_client(
     sender: Sender<(Pubkey, SocketAddr, Bytes)>,
     cache: Arc<RwLock<ConnectionCache>>,
 ) {
+    // 4 just misses with --tx_count 200!
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(512));
+    let mut count: usize = 0;
     while let Some((remote_address, bytes)) = receiver.recv().await {
-        tokio::task::spawn(send_datagram_task(
+        count += 1;
+        if count % 10_000 == 0 {
+            error!("run_client: {}", count / 10_000);
+        }
+        // use try_acquire_owned instead?!
+        tokio::task::spawn(send_stream_task(
             endpoint.clone(),
             remote_address,
             bytes,
+            semaphore.clone().acquire_owned().await.unwrap(),
             sender.clone(),
             cache.clone(),
         ));
@@ -222,6 +259,7 @@ async fn handle_connection_error(
     sender: Sender<(Pubkey, SocketAddr, Bytes)>,
     cache: Arc<RwLock<ConnectionCache>>,
 ) {
+    error!("max datagram size: {:?}", connection.max_datagram_size());
     cache_connection(remote_address, remote_pubkey, connection.clone(), &cache).await;
     if let Err(err) = handle_connection(
         &endpoint,
@@ -237,6 +275,7 @@ async fn handle_connection_error(
     }
 }
 
+#[allow(unreachable_code)]
 async fn handle_connection(
     endpoint: &Endpoint,
     remote_address: SocketAddr,
@@ -247,8 +286,32 @@ async fn handle_connection(
     // Assert that send won't block.
     debug_assert_eq!(sender.capacity(), None);
     loop {
+        match connection.accept_uni().await {
+            Ok(stream) => {
+                // TODO: Probably need semaphore here too!
+                tokio::task::spawn(handle_recv_stream_error(
+                    endpoint.clone(),
+                    stream,
+                    remote_address,
+                    remote_pubkey,
+                    sender.clone(),
+                ));
+            }
+            Err(err) => {
+                if let Some(err) = connection.close_reason() {
+                    return Err(Error::from(err));
+                }
+                error!("connection.read_datagram: {remote_pubkey}, {remote_address}, {err:?}");
+            }
+        }
+
+        continue;
         match connection.read_datagram().await {
             Ok(bytes) => {
+                let count = HANDLE_CONNECTION_COUNT.fetch_add(1, Ordering::Relaxed);
+                if count % 10_000 == 0 {
+                    error!("handle_connection: {}", count / 10_000);
+                }
                 if let Err(err) = sender.send((remote_pubkey, remote_address, bytes)) {
                     close_quic_endpoint(endpoint);
                     return Err(Error::from(err));
@@ -264,16 +327,67 @@ async fn handle_connection(
     }
 }
 
+async fn handle_recv_stream_error(
+    endpoint: Endpoint,
+    stream: RecvStream,
+    remote_address: SocketAddr,
+    remote_pubkey: Pubkey,
+    sender: Sender<(Pubkey, SocketAddr, Bytes)>,
+) {
+    if let Err(err) =
+        handle_recv_stream(&endpoint, stream, remote_address, remote_pubkey, &sender).await
+    {
+        error!("handle_recv_stream: {remote_pubkey}, {remote_address}, {err:?}");
+    }
+}
+
+async fn handle_recv_stream(
+    endpoint: &Endpoint,
+    mut stream: RecvStream,
+    remote_address: SocketAddr,
+    remote_pubkey: Pubkey,
+    sender: &Sender<(Pubkey, SocketAddr, Bytes)>,
+) -> Result<(), Error> {
+    let mut size = 0;
+    let mut buffer = [0u8; PACKET_DATA_SIZE];
+    loop {
+        let Some(chunk) = stream
+            .read_chunk(PACKET_DATA_SIZE, /*ordered:*/ false)
+            .await?
+        else {
+            let Err(err) = sender.send((remote_pubkey, remote_address, Bytes::copy_from_slice(&buffer[..size]))) else {
+                return Ok(());
+            };
+            close_quic_endpoint(endpoint);
+            return Err(Error::from(err));
+        };
+        let Ok(offset) = usize::try_from(chunk.offset) else {
+            return Err(Error::InvalidChunk(chunk));
+        };
+        let Some(end) = offset.checked_add(chunk.bytes.len()) else {
+            return Err(Error::InvalidChunk(chunk));
+        };
+        let Some(buffer) = buffer.get_mut(offset..end) else {
+            return Err(Error::InvalidChunk(chunk));
+        };
+        buffer.copy_from_slice(&chunk.bytes);
+        size = size.max(end);
+    }
+}
+
+#[allow(dead_code)]
 async fn send_datagram_task(
     endpoint: Endpoint,
     remote_address: SocketAddr,
     bytes: Bytes,
+    permit: tokio::sync::OwnedSemaphorePermit,
     sender: Sender<(Pubkey, SocketAddr, Bytes)>,
     cache: Arc<RwLock<ConnectionCache>>,
 ) {
     if let Err(err) = send_datagram(&endpoint, remote_address, bytes, sender, cache).await {
         error!("send_datagram: {remote_address}, {err:?}");
     }
+    drop(permit)
 }
 
 async fn send_datagram(
@@ -285,6 +399,34 @@ async fn send_datagram(
 ) -> Result<(), Error> {
     let connection = get_connection(endpoint, remote_address, sender, cache).await?;
     connection.send_datagram(bytes)?;
+    Ok(())
+}
+
+async fn send_stream_task(
+    endpoint: Endpoint,
+    remote_address: SocketAddr,
+    bytes: Bytes,
+    permit: tokio::sync::OwnedSemaphorePermit,
+    sender: Sender<(Pubkey, SocketAddr, Bytes)>,
+    cache: Arc<RwLock<ConnectionCache>>,
+) {
+    if let Err(err) = send_stream(&endpoint, remote_address, bytes, sender, cache).await {
+        error!("send_stream: {remote_address}, {err:?}");
+    }
+    drop(permit)
+}
+
+async fn send_stream(
+    endpoint: &Endpoint,
+    remote_address: SocketAddr,
+    bytes: Bytes,
+    sender: Sender<(Pubkey, SocketAddr, Bytes)>,
+    cache: Arc<RwLock<ConnectionCache>>,
+) -> Result<(), Error> {
+    let connection = get_connection(endpoint, remote_address, sender, cache).await?;
+    let mut stream = connection.open_uni().await?;
+    stream.write_all(&bytes).await?;
+    stream.finish().await?;
     Ok(())
 }
 
@@ -350,6 +492,7 @@ async fn cache_connection(
 ) {
     let entries: [Arc<RwLock<Option<Connection>>>; 2] = {
         let mut cache = cache.write().await;
+        error!("cache size: {}", cache.len());
         [Some(remote_pubkey), None].map(|remote_pubkey| {
             let key = (remote_address, remote_pubkey);
             cache.entry(key).or_default().clone()
@@ -406,6 +549,7 @@ mod tests {
 
     #[test]
     fn test_quic_endpoint() {
+        // solana_logger::setup();
         const NUM_ENDPOINTS: usize = 3;
         const RECV_TIMEOUT: Duration = Duration::from_secs(60);
         let runtime = tokio::runtime::Builder::new_multi_thread()
