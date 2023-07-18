@@ -25,4 +25,4 @@ case "$1" in
 esac
 
 set -x
-exec env RUSTFLAGS='-C force-frame-pointers=yes -g' cargo "+${toolchain}" "${@}"
+exec cargo "+${toolchain}" "${@}"
