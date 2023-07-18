@@ -25,11 +25,11 @@ use {
         system_transaction,
         timing::timestamp,
     },
-    solana_streamer::socket::SocketAddrSpace,
+    solana_streamer::{socket::SocketAddrSpace, streamer::StakedNodes},
     solana_turbine::retransmit_stage::retransmitter,
     std::{
         iter::repeat_with,
-        net::{Ipv4Addr, UdpSocket},
+        net::{IpAddr, Ipv4Addr, UdpSocket},
         sync::{
             atomic::{AtomicUsize, Ordering},
             Arc, RwLock,
@@ -97,8 +97,16 @@ fn bench_retransmitter(bencher: &mut Bencher) {
         .collect();
 
     let keypair = Keypair::new();
-    let (quic_endpoint_sender, _quic_endpoint_receiver) =
-        tokio::sync::mpsc::channel(/*capacity:*/ 128);
+    let quic_connection_cache = Arc::new(
+        solana_quic_client::new_quic_connection_cache(
+            "connection_cache_test",
+            &keypair,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            &Arc::<RwLock<StakedNodes>>::default(),
+            4, // connection_pool_size
+        )
+        .unwrap(),
+    );
     let slot = 0;
     let parent = 0;
     let shredder = Shredder::new(slot, parent, 0, 0).unwrap();
@@ -117,7 +125,7 @@ fn bench_retransmitter(bencher: &mut Bencher) {
 
     let retransmitter_handles = retransmitter(
         Arc::new(sockets),
-        quic_endpoint_sender,
+        quic_connection_cache,
         bank_forks,
         leader_schedule_cache,
         cluster_info,

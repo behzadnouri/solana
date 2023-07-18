@@ -12,13 +12,14 @@ use {
         genesis_utils::{create_genesis_config, GenesisConfigInfo},
         shred::{Shred, ShredFlags},
     },
+    solana_quic_client::new_quic_connection_cache,
     solana_runtime::{bank::Bank, bank_forks::BankForks},
     solana_sdk::{
         pubkey,
         signature::{Keypair, Signer},
         timing::{timestamp, AtomicInterval},
     },
-    solana_streamer::socket::SocketAddrSpace,
+    solana_streamer::{socket::SocketAddrSpace, streamer::StakedNodes},
     solana_turbine::{
         broadcast_stage::{
             broadcast_metrics::TransmitShredsStats, broadcast_shreds, BroadcastStage,
@@ -27,7 +28,7 @@ use {
     },
     std::{
         collections::HashMap,
-        net::UdpSocket,
+        net::{IpAddr, Ipv4Addr, UdpSocket},
         sync::{Arc, RwLock},
         time::Duration,
     },
@@ -38,8 +39,14 @@ use {
 fn broadcast_shreds_bench(bencher: &mut Bencher) {
     solana_logger::setup();
     let leader_keypair = Arc::new(Keypair::new());
-    let (quic_endpoint_sender, _quic_endpoint_receiver) =
-        tokio::sync::mpsc::channel(/*capacity:*/ 128);
+    let quic_connection_cache = new_quic_connection_cache(
+        "connection_cache_test",
+        &leader_keypair,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        &Arc::<RwLock<StakedNodes>>::default(),
+        4, // connection_pool_size
+    )
+    .unwrap();
     let leader_info = Node::new_localhost_with_pubkey(&leader_keypair.pubkey());
     let cluster_info = ClusterInfo::new(
         leader_info.info,
@@ -75,12 +82,12 @@ fn broadcast_shreds_bench(bencher: &mut Bencher) {
             &socket,
             &shreds,
             &cluster_nodes_cache,
+            &quic_connection_cache,
             &last_datapoint,
             &mut TransmitShredsStats::default(),
             &cluster_info,
             &bank_forks,
             &SocketAddrSpace::Unspecified,
-            &quic_endpoint_sender,
         )
         .unwrap();
     });
