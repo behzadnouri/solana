@@ -405,7 +405,7 @@ impl From<Pubkey> for NodeId {
 
 #[inline]
 pub(crate) fn get_broadcast_protocol(_: &ShredId) -> Protocol {
-    Protocol::UDP
+    Protocol::QUIC
 }
 
 pub fn make_test_cluster<R: Rng>(
