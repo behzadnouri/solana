@@ -1,0 +1,45 @@
+[package]
+name = "quinn-proto"
+version = "0.11.0"
+edition = { workspace = true }
+# rust-version = "1.63"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/quinn-rs/quinn"
+description = "State machine for the QUIC transport protocol"
+keywords = ["quic"]
+categories = [ "network-programming", "asynchronous" ]
+# workspace = ".."
+
+[package.metadata.docs.rs]
+all-features = true
+
+[badges]
+maintenance = { status = "experimental" }
+
+[features]
+default = ["tls-rustls", "log"]
+tls-rustls = ["rustls", "ring"]
+# Provides `ClientConfig::with_native_roots()` convenience method
+native-certs = ["rustls-native-certs"]
+# Write logs via the `log` crate when no `tracing` subscriber exists
+log = ["tracing/log"]
+
+[dependencies]
+arbitrary = { workspace = true, optional = true }
+bytes = { workspace = true }
+rustc-hash = { workspace = true }
+rand = "0.8"
+ring = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true }
+rustls-native-certs = { workspace = true, optional = true }
+slab = { workspace = true }
+thiserror = { workspace = true }
+tinyvec = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+assert_matches = { workspace = true }
+hex-literal = { workspace = true }
+rcgen = "0.11.1"
+tracing-subscriber = { workspace = true }
+lazy_static = { workspace = true }

@@ -1,0 +1,87 @@
+[package]
+name = "quinn"
+version = "0.11.0"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/quinn-rs/quinn"
+description = "Versatile QUIC transport protocol implementation"
+readme = "../README.md"
+keywords = ["quic"]
+categories = [ "network-programming", "asynchronous" ]
+# workspace = ".."
+edition = { workspace = true }
+# rust-version = "1.63"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = ["native-certs", "tls-rustls", "runtime-tokio", "log"]
+# Records how long locks are held, and warns if they are held >= 1ms
+lock_tracking = []
+# Provides `ClientConfig::with_native_roots()` convenience method
+native-certs = ["proto/native-certs"]
+tls-rustls = ["rustls", "proto/tls-rustls", "ring"]
+# Enables `Endpoint::client` and `Endpoint::server` conveniences
+ring = ["proto/ring"]
+runtime-tokio = ["tokio/time", "tokio/rt", "tokio/net"]
+runtime-async-std = ["async-io", "async-std"]
+# Write logs via the `log` crate when no `tracing` subscriber exists
+log = ["tracing/log", "proto/log", "udp/log"]
+
+[badges]
+codecov = { repository = "djc/quinn" }
+maintenance = { status = "experimental" }
+
+[dependencies]
+async-io = { workspace = true, optional = true }
+async-std = { workspace = true, optional = true }
+bytes = { workspace = true }
+# Enables futures::io::{AsyncRead, AsyncWrite} support for streams
+futures-io = { workspace = true, optional = true }
+rustc-hash = { workspace = true }
+pin-project-lite = { workspace = true }
+proto = { package = "quinn-proto", path = "../quinn-proto", version = "0.11", default-features = false }
+rustls = { workspace = true, default-features = false, features = ["quic"], optional = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+udp = { package = "quinn-udp", path = "../quinn-udp", version = "0.4", default-features = false }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+crc = { workspace = true }
+bencher = { workspace = true }
+directories-next = { workspace = true }
+rand = "0.8"
+rcgen = "0.11.1"
+rustls-pemfile = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "time", "macros", "sync"] }
+tracing-subscriber = { workspace = true, default-features = false, features = ["env-filter", "fmt", "ansi", "time", "local-time"] }
+tracing-futures = { workspace = true, default-features = false, features = ["std-future"] }
+url = { workspace = true }
+
+[[example]]
+name = "server"
+required-features = ["tls-rustls"]
+
+[[example]]
+name = "client"
+required-features = ["tls-rustls"]
+
+[[example]]
+name = "insecure_connection"
+required-features = ["rustls/dangerous_configuration"]
+
+[[example]]
+name = "single_socket"
+required-features = ["tls-rustls"]
+
+[[example]]
+name = "connection"
+required-features = ["tls-rustls"]
+
+[[bench]]
+name = "bench"
+harness = false
+required-features = ["tls-rustls"]

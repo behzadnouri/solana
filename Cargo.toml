@@ -68,6 +68,9 @@ members = [
     "programs/zk-token-proof-tests",
     "pubsub-client",
     "quic-client",
+    "quinn",
+    "quinn-proto",
+    "quinn-udp",
     "rayon-threadlimit",
     "rbpf-cli",
     "remote-wallet",
@@ -127,6 +130,7 @@ edition = "2021"
 aes-gcm-siv = "0.10.3"
 ahash = "0.8.3"
 anyhow = "1.0.72"
+arbitrary = { version = "1.0.1", features = ["derive"] }
 ark-bn254 = "0.4.0"
 ark-ec = "0.4.0"
 ark-ff = "0.4.0"
@@ -136,11 +140,14 @@ arrayref = "0.3.7"
 assert_cmd = "2.0"
 assert_matches = "1.5.0"
 async-channel = "1.9.0"
+async-io = { version = "1.6" }
 async-mutex = "1.4.0"
+async-std = { version = "1.11" }
 async-trait = "0.1.72"
 atty = "0.2.11"
 backoff = "0.4.0"
 base64 = "0.21.2"
+bencher = "0.1.5"
 bincode = "1.3.3"
 bitflags = { version = "2.3.3", features = ["serde"] }
 blake3 = "1.4.1"
@@ -165,6 +172,7 @@ console_error_panic_hook = "0.1.7"
 console_log = "0.2.2"
 const_format = "0.2.31"
 core_affinity = "0.5.10"
+crc = "3"
 criterion = "0.3.0"
 criterion-stats = "0.3.0"
 crossbeam-channel = "0.5.8"
@@ -176,6 +184,7 @@ derivation-path = { version = "0.2.0", default-features = false }
 dialoguer = "0.10.4"
 digest = "0.10.7"
 dir-diff = "0.3.2"
+directories-next = "2"
 dirs-next = "2.0.0"
 dlopen = "0.1.8"
 dlopen_derive = "0.1.4"
@@ -193,12 +202,14 @@ fnv = "1.0.7"
 fs_extra = "1.3.0"
 fs-err = "2.9.0"
 futures = "0.3.28"
+futures-io = { version = "0.3.19" }
 futures-util = "0.3.28"
 gag = "1.0.0"
 generic-array = { version = "0.14.7", default-features = false }
 gethostname = "0.2.3"
 getrandom = "0.1.14"
 goauth = "0.13.1"
+hex-literal = "0.4.0"
 hex = "0.4.3"
 hidapi = { version = "2.4.1", default-features = false }
 histogram = "0.6.9"
@@ -250,6 +261,7 @@ pbkdf2 = { version = "0.11.0", default-features = false }
 pem = "1.1.1"
 percentage = "0.1.0"
 pickledb = { version = "0.5.1", default-features = false }
+pin-project-lite = "0.2"
 pkcs8 = "0.8.0"
 predicates = "2.1"
 pretty-hex = "0.3.0"
@@ -259,8 +271,9 @@ prost = "0.11.9"
 prost-types = "0.11.9"
 protobuf-src = "1.1.0"
 qstring = "0.7.2"
-quinn = "0.10.1"
-quinn-proto = "0.10.1"
+quinn = { path = "quinn", version = "=0.11.0" }
+quinn-proto = { path = "quinn-proto", version = "=0.11.0" }
+quinn-udp = { path = "quinn-udp", version = "=0.4.0" }
 quote = "1.0"
 rand = "0.7.0"
 rand_chacha = "0.2.2"
@@ -270,11 +283,15 @@ rayon = "1.7.0"
 rcgen = "0.10.0"
 reed-solomon-erasure = "6.0.0"
 regex = "1.9.1"
+ring = { version = "0.16.7" }
 rolling-file = "0.2.0"
 reqwest = { version = "0.11.18", default-features = false }
 rpassword = "7.2"
 rustc_version = "0.4"
+rustc-hash = "1.1"
 rustls = { version = "0.21.5", default-features = false, features = ["quic"] }
+rustls-native-certs = { version = "0.6" }
+rustls-pemfile = "1.0.0"
 rustversion = "1.0.14"
 scopeguard = "1.2.0"
 semver = "1.0.18"
@@ -289,6 +306,7 @@ sha2 = "0.10.7"
 sha3 = "0.10.4"
 signal-hook = "0.3.17"
 siphasher = "0.3.10"
+slab = "0.4.8"
 smpl_jwt = "0.7.1"
 socket2 = "0.5.3"
 soketto = "0.7"
@@ -386,6 +404,7 @@ tempfile = "3.7.0"
 test-case = "3.1.0"
 thiserror = "1.0.44"
 tiny-bip39 = "0.8.2"
+tinyvec = { version = "1.1", features = ["alloc"] }
 tokio = "1.29.1"
 tokio-serde = "0.8"
 tokio-stream = "0.1.14"
@@ -393,6 +412,9 @@ tokio-tungstenite = "0.17.2"
 tokio-util = "0.6"
 tonic = "0.8.3"
 tonic-build = "0.8.4"
+tracing = "0.1.10"
+tracing-subscriber = { version = "0.3.0", default-features = false, features = ["env-filter", "fmt", "ansi", "time", "local-time"] }
+tracing-futures = { version = "0.2.0", default-features = false, features = ["std-future"] }
 trees = "0.4.2"
 tungstenite = "0.17.2"
 unix_socket2 = "0.5.4"
