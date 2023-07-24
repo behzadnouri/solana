@@ -236,17 +236,12 @@ impl AccountsCache {
         hash: Option<impl Borrow<Hash>>,
         include_slot_in_hash: IncludeSlotInHash,
     ) -> CachedAccount {
-        let slot_cache = self.slot_cache(slot).unwrap_or_else(||
-            // DashMap entry.or_insert() returns a RefMut, essentially a write lock,
-            // which is dropped after this block ends, minimizing time held by the lock.
-            // However, we still want to persist the reference to the `SlotStores` behind
-            // the lock, hence we clone it out, (`SlotStores` is an Arc so is cheap to clone).
-            self
-                .cache
-                .entry(slot)
-                .or_insert(self.new_inner())
-                .clone());
-
+        // Clone will drop RefMut which will release the lock on the shard.
+        let slot_cache: SlotCache = self
+            .cache
+            .entry(slot)
+            .or_insert_with(|| self.new_inner())
+            .clone();
         slot_cache.insert(pubkey, account, hash, slot, include_slot_in_hash)
     }
 
