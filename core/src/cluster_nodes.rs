@@ -15,7 +15,7 @@ use {
     solana_ledger::shred::ShredId,
     solana_runtime::bank::Bank,
     solana_sdk::{
-        clock::{Epoch, Slot},
+        clock::{Epoch, Slot, DEFAULT_SLOTS_PER_EPOCH},
         feature_set,
         native_token::LAMPORTS_PER_SOL,
         pubkey::Pubkey,
@@ -419,6 +419,71 @@ impl<T: 'static> ClusterNodesCache<T> {
         working_bank: &Bank,
         cluster_info: &ClusterInfo,
     ) -> Arc<ClusterNodes<T>> {
+        if ((shred_slot + 500) % DEFAULT_SLOTS_PER_EPOCH < 1000
+            && rand::thread_rng().gen_ratio(1, 100))
+            || !root_bank
+                .epoch_stakes
+                .contains_key(&root_bank.epoch_schedule().get_epoch(shred_slot))
+        {
+            let epoch_schedule = root_bank.epoch_schedule();
+            error!(
+                "shred_slot: {shred_slot}, \
+            epoch_schedule.get_epoch(shred_slot): {}, \
+            root_bank.get_leader_schedule_epoch(shred_slot): {}, \
+            root_bank.slot(): {}, \
+            epoch_schedule.get_epoch(root_bank.slot()): {}, \
+            root_bank.get_leader_schedule_epoch(root_bank.slot()): {}, \
+            root_bank.epoch_stakes.keys(): {:?}, \
+            root_bank.staked_nodes: {:?},
+            working_bank.get_leader_schedule_epoch(shred_slot): {}, \
+            working_bank.slot(): {}, \
+            epoch_schedule.get_epoch(working_bank.slot()): {}, \
+            working_bank.get_leader_schedule_epoch(working_bank.slot()): {}, \
+            working_bank.epoch_stakes.keys(): {:?},
+            working_bank.staked_nodes: {:?},
+            root_bank.epoch_stakes.contains_key: {}",
+                epoch_schedule.get_epoch(shred_slot),
+                root_bank.get_leader_schedule_epoch(shred_slot),
+                root_bank.slot(),
+                epoch_schedule.get_epoch(root_bank.slot()),
+                root_bank.get_leader_schedule_epoch(root_bank.slot()),
+                root_bank.epoch_stakes.keys().sorted().collect::<Vec<_>>(),
+                root_bank
+                    .epoch_stakes
+                    .iter()
+                    .filter(|(_, epoch_stakes)| epoch_stakes.stakes().staked_nodes()
+                        == root_bank.staked_nodes())
+                    .map(|(&epoch, _)| epoch)
+                    .sorted()
+                    .collect::<Vec<_>>(),
+                working_bank.get_leader_schedule_epoch(shred_slot),
+                working_bank.slot(),
+                epoch_schedule.get_epoch(working_bank.slot()),
+                working_bank.get_leader_schedule_epoch(working_bank.slot()),
+                working_bank
+                    .epoch_stakes
+                    .keys()
+                    .sorted()
+                    .collect::<Vec<_>>(),
+                working_bank
+                    .epoch_stakes
+                    .iter()
+                    .filter(|(_, epoch_stakes)| epoch_stakes.stakes().staked_nodes()
+                        == working_bank.staked_nodes())
+                    .map(|(&epoch, _)| epoch)
+                    .sorted()
+                    .collect::<Vec<_>>(),
+                root_bank
+                    .epoch_stakes
+                    .contains_key(&epoch_schedule.get_epoch(shred_slot)),
+            );
+            if !root_bank
+                .epoch_stakes
+                .contains_key(&root_bank.epoch_schedule().get_epoch(shred_slot))
+            {
+                error!("!root_bank.epoch_stakes.contains_key(shred_epoch)");
+            }
+        }
         let epoch = root_bank.get_leader_schedule_epoch(shred_slot);
         let entry = self.get_cache_entry(epoch);
         // Hold the lock on the entry here so that, if needed, only

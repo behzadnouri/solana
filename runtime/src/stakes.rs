@@ -421,7 +421,7 @@ impl StakesEnum {
         }
     }
 
-    pub(crate) fn staked_nodes(&self) -> Arc<HashMap<Pubkey, u64>> {
+    pub fn staked_nodes(&self) -> Arc<HashMap<Pubkey, u64>> {
         match self {
             StakesEnum::Accounts(stakes) => stakes.staked_nodes(),
             StakesEnum::Delegations(stakes) => stakes.staked_nodes(),

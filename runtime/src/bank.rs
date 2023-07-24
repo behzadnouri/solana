@@ -1023,7 +1023,7 @@ pub struct Bank {
 
     /// staked nodes on epoch boundaries, saved off when a bank.slot() is at
     ///   a leader schedule calculation boundary
-    epoch_stakes: HashMap<Epoch, EpochStakes>,
+    pub epoch_stakes: HashMap<Epoch, EpochStakes>,
 
     /// A boolean reflecting whether any entries were recorded into the PoH
     /// stream for the slot == self.slot
@@ -6876,6 +6876,7 @@ impl Bank {
                 // note that this could get timed to: self.rc.accounts.accounts_db.stats.stakes_cache_check_and_store_us,
                 //  but this code path is captured separately in ExecuteTimingType::UpdateStakesCacheUs
                 let message = tx.message();
+                // assert_eq!(message.account_keys().len(), loaded_transaction.accounts.len());
                 for (_i, (pubkey, account)) in
                     (0..message.account_keys().len()).zip(loaded_transaction.accounts.iter())
                 {
