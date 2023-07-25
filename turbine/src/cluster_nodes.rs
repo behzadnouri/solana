@@ -36,7 +36,7 @@ use {
     thiserror::Error,
 };
 
-const DATA_PLANE_FANOUT: usize = 200;
+const DATA_PLANE_FANOUT: usize = 3;
 pub(crate) const MAX_NUM_TURBINE_HOPS: usize = 4;
 
 #[derive(Debug, Error)]
@@ -362,7 +362,11 @@ impl<T: 'static> ClusterNodesCache<T> {
         working_bank: &Bank,
         cluster_info: &ClusterInfo,
     ) -> Arc<ClusterNodes<T>> {
-        let epoch = root_bank.get_leader_schedule_epoch(shred_slot);
+        let epoch = if false {
+            root_bank.epoch_schedule().get_epoch(shred_slot)
+        } else {
+            root_bank.get_leader_schedule_epoch(shred_slot)
+        };
         let entry = self.get_cache_entry(epoch);
         if let Some((_, nodes)) = entry
             .read()
@@ -382,7 +386,7 @@ impl<T: 'static> ClusterNodesCache<T> {
             .iter()
             .find_map(|bank| bank.epoch_staked_nodes(epoch));
         if epoch_staked_nodes.is_none() {
-            inc_new_counter_debug!("cluster_nodes-unknown_epoch_staked_nodes", 1);
+            inc_new_counter_error!("cluster_nodes-unknown_epoch_staked_nodes", 1);
             if epoch != root_bank.get_leader_schedule_epoch(root_bank.slot()) {
                 return self.get(root_bank.slot(), root_bank, working_bank, cluster_info);
             }
