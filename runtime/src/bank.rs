@@ -77,6 +77,7 @@ use {
     log::*,
     rayon::{
         iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
+        slice::ParallelSlice,
         ThreadPool, ThreadPoolBuilder,
     },
     solana_measure::{measure, measure::Measure},
@@ -1119,10 +1120,10 @@ pub struct CommitTransactionCounts {
     pub signature_count: u64,
 }
 
-struct StakeReward {
-    stake_pubkey: Pubkey,
+pub(crate) struct StakeReward {
+    pub(crate) stake_pubkey: Pubkey,
     stake_reward_info: RewardInfo,
-    stake_account: AccountSharedData,
+    pub(crate) stake_account: AccountSharedData,
 }
 
 impl StakeReward {
@@ -2766,7 +2767,17 @@ impl Bank {
         // store stake account even if stakers_reward is 0
         // because credits observed has changed
         let mut m = Measure::start("store_stake_account");
-        self.store_accounts((self.slot(), &stake_rewards[..]));
+        {
+            let slot = self.slot();
+            self.stakes_cache
+                .refresh_stake_delegations(thread_pool, &stake_rewards);
+            assert!(!self.freeze_started());
+            thread_pool.install(|| {
+                stake_rewards
+                    .par_chunks(512)
+                    .for_each(|chunk| self.rc.accounts.store_accounts_cached((slot, chunk)))
+            });
+        }
         m.stop();
         metrics
             .store_stake_accounts_us
