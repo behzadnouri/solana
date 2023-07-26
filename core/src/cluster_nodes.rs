@@ -434,13 +434,11 @@ impl<T: 'static> ClusterNodesCache<T> {
             epoch_schedule.get_epoch(root_bank.slot()): {}, \
             root_bank.get_leader_schedule_epoch(root_bank.slot()): {}, \
             root_bank.epoch_stakes.keys(): {:?}, \
-            root_bank.staked_nodes: {:?},
             working_bank.get_leader_schedule_epoch(shred_slot): {}, \
             working_bank.slot(): {}, \
             epoch_schedule.get_epoch(working_bank.slot()): {}, \
             working_bank.get_leader_schedule_epoch(working_bank.slot()): {}, \
             working_bank.epoch_stakes.keys(): {:?},
-            working_bank.staked_nodes: {:?},
             root_bank.epoch_stakes.contains_key: {}",
                 epoch_schedule.get_epoch(shred_slot),
                 root_bank.get_leader_schedule_epoch(shred_slot),
@@ -448,14 +446,6 @@ impl<T: 'static> ClusterNodesCache<T> {
                 epoch_schedule.get_epoch(root_bank.slot()),
                 root_bank.get_leader_schedule_epoch(root_bank.slot()),
                 root_bank.epoch_stakes.keys().sorted().collect::<Vec<_>>(),
-                root_bank
-                    .epoch_stakes
-                    .iter()
-                    .filter(|(_, epoch_stakes)| epoch_stakes.stakes().staked_nodes()
-                        == root_bank.staked_nodes())
-                    .map(|(&epoch, _)| epoch)
-                    .sorted()
-                    .collect::<Vec<_>>(),
                 working_bank.get_leader_schedule_epoch(shred_slot),
                 working_bank.slot(),
                 epoch_schedule.get_epoch(working_bank.slot()),
@@ -463,14 +453,6 @@ impl<T: 'static> ClusterNodesCache<T> {
                 working_bank
                     .epoch_stakes
                     .keys()
-                    .sorted()
-                    .collect::<Vec<_>>(),
-                working_bank
-                    .epoch_stakes
-                    .iter()
-                    .filter(|(_, epoch_stakes)| epoch_stakes.stakes().staked_nodes()
-                        == working_bank.staked_nodes())
-                    .map(|(&epoch, _)| epoch)
                     .sorted()
                     .collect::<Vec<_>>(),
                 root_bank

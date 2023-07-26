@@ -1774,7 +1774,28 @@ impl Bank {
             .stats
             .submit(parent.slot());
 
-        new
+        let bank = new;
+        let epoch_schedule = bank.epoch_schedule();
+        error!(
+            "bank.slot(): {}, \
+            epoch_schedule.get_epoch(bank.slot()): {}, \
+            bank.get_leader_schedule_epoch(bank.slot()): {}, \
+            bank.epoch_stakes.keys(): {:?}, \
+            bank.staked_nodes: {:?}",
+            bank.slot(),
+            epoch_schedule.get_epoch(bank.slot()),
+            bank.get_leader_schedule_epoch(bank.slot()),
+            bank.epoch_stakes.keys().sorted().collect::<Vec<_>>(),
+            bank.epoch_stakes
+                .iter()
+                .filter(
+                    |(_, epoch_stakes)| epoch_stakes.stakes().staked_nodes() == bank.staked_nodes()
+                )
+                .map(|(&epoch, _)| epoch)
+                .sorted()
+                .collect::<Vec<_>>(),
+        );
+        bank
     }
 
     pub fn byte_limit_for_scans(&self) -> Option<usize> {
