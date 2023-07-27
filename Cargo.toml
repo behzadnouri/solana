@@ -432,15 +432,3 @@ crossbeam-epoch = { git = "https://github.com/solana-labs/crossbeam", rev = "fd2
 # overrides in sync.
 solana-program = { path = "sdk/program" }
 solana-zk-token-sdk = { path = "zk-token-sdk" }
-
-[profile.release]
-debug = true
-# strip = false
-
-[profile.release.package."*"]
-debug = true
-# strip = false
-
-[profile.release.build-override]
-debug = true
-# strip = false

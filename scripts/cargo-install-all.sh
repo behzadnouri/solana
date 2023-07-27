@@ -138,13 +138,13 @@ mkdir -p "$installDir/bin"
 (
   set -x
   # shellcheck disable=SC2086 # Don't want to double quote $rust_version
-  RUSTFLAGS='-C force-frame-pointers=yes -g' "$cargo" $maybeRustVersion build $maybeReleaseFlag "${binArgs[@]}"
+  "$cargo" $maybeRustVersion build $maybeReleaseFlag "${binArgs[@]}"
 
   # Exclude `spl-token` binary for net.sh builds
   if [[ -z "$validatorOnly" ]]; then
     # the patch-related configs are needed for rust 1.69+ on Windows; see Cargo.toml
     # shellcheck disable=SC2086 # Don't want to double quote $rust_version
-    RUSTFLAGS='-C force-frame-pointers=yes -g' "$cargo" $maybeRustVersion \
+    "$cargo" $maybeRustVersion \
       --config 'patch.crates-io.ntapi.git="https://github.com/solana-labs/ntapi"' \
       --config 'patch.crates-io.ntapi.rev="97ede981a1777883ff86d142b75024b023f04fad"' \
       install --locked spl-token-cli --root "$installDir"
