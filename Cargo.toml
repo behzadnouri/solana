@@ -258,8 +258,8 @@ prost = "0.11.9"
 prost-types = "0.11.9"
 protobuf-src = "1.1.0"
 qstring = "0.7.2"
-quinn = "0.10.1"
-quinn-proto = "0.10.1"
+quinn = { path = "../repos/quinn/quinn", version = "0.11" }
+quinn-proto = { path = "../repos/quinn/quinn-proto", version = "0.11" }
 quote = "1.0"
 rand = "0.7.0"
 rand_chacha = "0.2.2"
