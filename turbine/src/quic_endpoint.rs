@@ -51,11 +51,13 @@ const CONNECT_SERVER_NAME: &str = "solana-turbine";
 
 // TODO: use TransportErrorCode here instead!
 const CONNECTION_CLOSE_ERROR_CODE_SHUTDOWN: VarInt = VarInt::from_u32(1);
+#[allow(unused)]
 const CONNECTION_CLOSE_ERROR_CODE_DROPPED: VarInt = VarInt::from_u32(2);
 const CONNECTION_CLOSE_ERROR_CODE_INVALID_IDENTITY: VarInt = VarInt::from_u32(3);
 const CONNECTION_CLOSE_ERROR_CODE_REPLACED: VarInt = VarInt::from_u32(4);
 
 const CONNECTION_CLOSE_REASON_SHUTDOWN: &[u8] = b"SHUTDOWN";
+#[allow(unused)]
 const CONNECTION_CLOSE_REASON_DROPPED: &[u8] = b"DROPPED";
 const CONNECTION_CLOSE_REASON_INVALID_IDENTITY: &[u8] = b"INVALID_IDENTITY";
 const CONNECTION_CLOSE_REASON_REPLACED: &[u8] = b"REPLACED";
@@ -93,7 +95,7 @@ pub enum Error {
 pub fn new_quic_endpoint(
     runtime: &tokio::runtime::Handle,
     keypair: &Keypair,
-    socket: UdpSocket,
+    server_socket: UdpSocket,
     address: IpAddr,
     sender: Sender<(Pubkey, SocketAddr, Bytes)>,
 ) -> Result<
@@ -107,24 +109,46 @@ pub fn new_quic_endpoint(
     let (cert, key) = new_self_signed_tls_certificate(keypair, address)?;
     let server_config = new_server_config(cert.clone(), key.clone())?;
     let client_config = new_client_config(cert, key)?;
-    let mut endpoint = {
+    let (_, client_socket) = solana_net_utils::bind_in_range(
+        std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+        solana_net_utils::VALIDATOR_PORT_RANGE,
+    )
+    .unwrap();
+    let (server_endpoint, mut client_endpoint) = {
         // Endpoint::new requires entering the runtime context,
         // otherwise the code below will panic.
         let _guard = runtime.enter();
-        Endpoint::new(
-            EndpointConfig::default(),
-            Some(server_config),
-            socket,
-            Arc::new(TokioRuntime),
-        )?
+        (
+            Endpoint::new(
+                EndpointConfig::default(),
+                Some(server_config),
+                server_socket,
+                Arc::new(TokioRuntime),
+            )?,
+            Endpoint::new(
+                EndpointConfig::default(),
+                None, // server_config
+                client_socket,
+                Arc::new(TokioRuntime),
+            )?,
+        )
     };
-    endpoint.set_default_client_config(client_config);
+    client_endpoint.set_default_client_config(client_config);
     let cache = Arc::<RwLock<ConnectionCache>>::default();
     let (client_sender, client_receiver) = tokio::sync::mpsc::channel(CLIENT_CHANNEL_CAPACITY);
-    let server_task = runtime.spawn(run_server(endpoint.clone(), sender.clone(), cache.clone()));
-    let client_task = runtime.spawn(run_client(endpoint.clone(), client_receiver, sender, cache));
+    let server_task = runtime.spawn(run_server(
+        server_endpoint.clone(),
+        sender.clone(),
+        cache.clone(),
+    ));
+    let client_task = runtime.spawn(run_client(
+        client_endpoint.clone(),
+        client_receiver,
+        sender,
+        cache,
+    ));
     let task = futures::future::try_join(server_task, client_task);
-    Ok((endpoint, client_sender, task))
+    Ok((server_endpoint, client_sender, task))
 }
 
 pub fn close_quic_endpoint(endpoint: &Endpoint) {
@@ -259,10 +283,11 @@ async fn handle_connection_error(
     remote_pubkey: Pubkey,
     connection: Connection,
     sender: Sender<(Pubkey, SocketAddr, Bytes)>,
+    #[allow(unused)]
     cache: Arc<RwLock<ConnectionCache>>,
 ) {
     error!("max datagram size: {:?}", connection.max_datagram_size());
-    cache_connection(remote_address, remote_pubkey, connection.clone(), &cache).await;
+    // cache_connection(remote_address, remote_pubkey, connection.clone(), &cache).await;
     if let Err(err) = handle_connection(
         &endpoint,
         remote_address,
@@ -272,7 +297,7 @@ async fn handle_connection_error(
     )
     .await
     {
-        drop_connection(remote_address, remote_pubkey, &connection, &cache).await;
+        // drop_connection(remote_address, remote_pubkey, &connection, &cache).await;
         error!("handle_connection: {remote_pubkey}, {remote_address}, {err:?}");
     }
 }
@@ -435,6 +460,7 @@ async fn send_stream(
 async fn get_connection(
     endpoint: &Endpoint,
     remote_address: SocketAddr,
+    #[allow(unused)]
     sender: Sender<(Pubkey, SocketAddr, Bytes)>,
     cache: Arc<RwLock<ConnectionCache>>,
 ) -> Result<Connection, Error> {
@@ -462,14 +488,21 @@ async fn get_connection(
             .await?;
         entry.insert(connection).clone()
     };
-    tokio::task::spawn(handle_connection_error(
-        endpoint.clone(),
+    cache_connection(
         connection.remote_address(),
         get_remote_pubkey(&connection)?,
         connection.clone(),
-        sender,
-        cache,
-    ));
+        &cache,
+    )
+    .await;
+    // tokio::task::spawn(handle_connection_error(
+    //     endpoint.clone(),
+    //     connection.remote_address(),
+    //     get_remote_pubkey(&connection)?,
+    //     connection.clone(),
+    //     sender,
+    //     cache,
+    // ));
     Ok(connection)
 }
 
@@ -511,6 +544,7 @@ async fn cache_connection(
     }
 }
 
+#[allow(unused)]
 async fn drop_connection(
     remote_address: SocketAddr,
     remote_pubkey: Pubkey,
