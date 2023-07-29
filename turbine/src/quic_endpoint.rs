@@ -133,7 +133,7 @@ pub fn new_quic_endpoint(
             )?,
         )
     };
-    client_endpoint.set_default_client_config(client_config);
+    client_endpoint.set_default_client_config(client_config.clone());
     let cache = Arc::<RwLock<ConnectionCache>>::default();
     let (client_sender, client_receiver) = tokio::sync::mpsc::channel(CLIENT_CHANNEL_CAPACITY);
     let server_task = runtime.spawn(run_server(
@@ -143,6 +143,7 @@ pub fn new_quic_endpoint(
     ));
     let client_task = runtime.spawn(run_client(
         client_endpoint.clone(),
+        client_config,
         client_receiver,
         sender,
         cache,
@@ -220,12 +221,13 @@ async fn run_server(
 
 async fn run_client(
     endpoint: Endpoint,
+    client_config: ClientConfig,
     mut receiver: AsyncReceiver<(SocketAddr, Bytes)>,
     sender: Sender<(Pubkey, SocketAddr, Bytes)>,
     cache: Arc<RwLock<ConnectionCache>>,
 ) {
     // 4 just misses with --tx_count 200!
-    let semaphore = Arc::new(tokio::sync::Semaphore::new(512));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(5120));
     let mut count: usize = 0;
     while let Some((remote_address, bytes)) = receiver.recv().await {
         count += 1;
@@ -235,6 +237,7 @@ async fn run_client(
         // use try_acquire_owned instead?!
         tokio::task::spawn(send_datagram_task(
             endpoint.clone(),
+            client_config.clone(),
             remote_address,
             bytes,
             semaphore.clone().acquire_owned().await.unwrap(),
@@ -283,8 +286,7 @@ async fn handle_connection_error(
     remote_pubkey: Pubkey,
     connection: Connection,
     sender: Sender<(Pubkey, SocketAddr, Bytes)>,
-    #[allow(unused)]
-    cache: Arc<RwLock<ConnectionCache>>,
+    #[allow(unused)] cache: Arc<RwLock<ConnectionCache>>,
 ) {
     error!("max datagram size: {:?}", connection.max_datagram_size());
     // cache_connection(remote_address, remote_pubkey, connection.clone(), &cache).await;
@@ -404,13 +406,14 @@ async fn handle_recv_stream(
 
 async fn send_datagram_task(
     endpoint: Endpoint,
+    client_config: ClientConfig,
     remote_address: SocketAddr,
     bytes: Bytes,
     permit: tokio::sync::OwnedSemaphorePermit,
     sender: Sender<(Pubkey, SocketAddr, Bytes)>,
     cache: Arc<RwLock<ConnectionCache>>,
 ) {
-    if let Err(err) = send_datagram(&endpoint, remote_address, bytes, sender, cache).await {
+    if let Err(err) = send_datagram(&endpoint, &client_config, remote_address, bytes, sender, cache).await {
         error!("send_datagram: {remote_address}, {err:?}");
     }
     drop(permit)
@@ -418,12 +421,13 @@ async fn send_datagram_task(
 
 async fn send_datagram(
     endpoint: &Endpoint,
+    client_config: &ClientConfig,
     remote_address: SocketAddr,
     bytes: Bytes,
     sender: Sender<(Pubkey, SocketAddr, Bytes)>,
     cache: Arc<RwLock<ConnectionCache>>,
 ) -> Result<(), Error> {
-    let connection = get_connection(endpoint, remote_address, sender, cache).await?;
+    let connection = get_connection(endpoint, client_config, remote_address, sender, cache).await?;
     connection.send_datagram(bytes)?;
     Ok(())
 }
@@ -431,13 +435,14 @@ async fn send_datagram(
 #[allow(dead_code)]
 async fn send_stream_task(
     endpoint: Endpoint,
+    client_config: ClientConfig,
     remote_address: SocketAddr,
     bytes: Bytes,
     permit: tokio::sync::OwnedSemaphorePermit,
     sender: Sender<(Pubkey, SocketAddr, Bytes)>,
     cache: Arc<RwLock<ConnectionCache>>,
 ) {
-    if let Err(err) = send_stream(&endpoint, remote_address, bytes, sender, cache).await {
+    if let Err(err) = send_stream(&endpoint, &client_config, remote_address, bytes, sender, cache).await {
         error!("send_stream: {remote_address}, {err:?}");
     }
     drop(permit)
@@ -445,12 +450,13 @@ async fn send_stream_task(
 
 async fn send_stream(
     endpoint: &Endpoint,
+    client_config: &ClientConfig,
     remote_address: SocketAddr,
     bytes: Bytes,
     sender: Sender<(Pubkey, SocketAddr, Bytes)>,
     cache: Arc<RwLock<ConnectionCache>>,
 ) -> Result<(), Error> {
-    let connection = get_connection(endpoint, remote_address, sender, cache).await?;
+    let connection = get_connection(endpoint, client_config, remote_address, sender, cache).await?;
     let mut stream = connection.open_uni().await?;
     stream.write_all(&bytes).await?;
     stream.finish().await?;
@@ -458,10 +464,10 @@ async fn send_stream(
 }
 
 async fn get_connection(
-    endpoint: &Endpoint,
+    #[allow(unused)] endpoint: &Endpoint,
+    client_config: &ClientConfig,
     remote_address: SocketAddr,
-    #[allow(unused)]
-    sender: Sender<(Pubkey, SocketAddr, Bytes)>,
+    #[allow(unused)] sender: Sender<(Pubkey, SocketAddr, Bytes)>,
     cache: Arc<RwLock<ConnectionCache>>,
 ) -> Result<Connection, Error> {
     let key = (remote_address, /*remote_pubkey:*/ None);
@@ -483,6 +489,18 @@ async fn get_connection(
                 return Ok(connection.clone());
             }
         }
+        let (_, client_socket) = solana_net_utils::bind_in_range(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+            solana_net_utils::VALIDATOR_PORT_RANGE,
+        )
+        .unwrap();
+        let mut endpoint = Endpoint::new(
+            EndpointConfig::default(),
+            None, // server_config
+            client_socket,
+            Arc::new(TokioRuntime),
+        )?;
+        endpoint.set_default_client_config(client_config.clone());
         let connection = endpoint
             .connect(remote_address, CONNECT_SERVER_NAME)?
             .await?;
