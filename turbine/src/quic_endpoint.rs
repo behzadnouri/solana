@@ -8,6 +8,7 @@ use {
         EndpointConfig, ReadError, RecvStream, SendDatagramError, ServerConfig, TokioRuntime,
         TransportConfig, VarInt, WriteError,
     },
+    rand::seq::SliceRandom,
     rcgen::RcgenError,
     rustls::{Certificate, PrivateKey},
     solana_quic_client::nonblocking::quic_client::SkipServerVerification,
@@ -37,7 +38,7 @@ use {
 
 static HANDLE_CONNECTION_COUNT: AtomicUsize = AtomicUsize::new(0usize);
 
-const CLIENT_CHANNEL_CAPACITY: usize = 1 << 10;
+const CLIENT_CHANNEL_CAPACITY: usize = 1 << 20;
 // switch to 1500u32 - 28 = 1472?!
 // max_datagram_size: this number - 38
 // 1500 > 1434
@@ -54,16 +55,20 @@ const CONNECTION_CLOSE_ERROR_CODE_SHUTDOWN: VarInt = VarInt::from_u32(1);
 #[allow(unused)]
 const CONNECTION_CLOSE_ERROR_CODE_DROPPED: VarInt = VarInt::from_u32(2);
 const CONNECTION_CLOSE_ERROR_CODE_INVALID_IDENTITY: VarInt = VarInt::from_u32(3);
+#[allow(unused)]
 const CONNECTION_CLOSE_ERROR_CODE_REPLACED: VarInt = VarInt::from_u32(4);
 
 const CONNECTION_CLOSE_REASON_SHUTDOWN: &[u8] = b"SHUTDOWN";
 #[allow(unused)]
 const CONNECTION_CLOSE_REASON_DROPPED: &[u8] = b"DROPPED";
 const CONNECTION_CLOSE_REASON_INVALID_IDENTITY: &[u8] = b"INVALID_IDENTITY";
+#[allow(unused)]
 const CONNECTION_CLOSE_REASON_REPLACED: &[u8] = b"REPLACED";
 
+const NUM_CONNECTIONS: usize = 20;
+
 pub type AsyncTryJoinHandle = TryJoin<JoinHandle<()>, JoinHandle<()>>;
-type ConnectionCache = HashMap<(SocketAddr, Option<Pubkey>), Arc<RwLock<Option<Connection>>>>;
+type ConnectionCache = HashMap<(SocketAddr, Option<Pubkey>), Arc<RwLock<Vec<Connection>>>>;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -471,24 +476,41 @@ async fn get_connection(
     cache: Arc<RwLock<ConnectionCache>>,
 ) -> Result<Connection, Error> {
     let key = (remote_address, /*remote_pubkey:*/ None);
+    // XXX this should be read then write!
     let entry = cache.write().await.entry(key).or_default().clone();
     {
-        let connection: Option<Connection> = entry.read().await.clone();
-        if let Some(connection) = connection {
-            if connection.close_reason().is_none() {
-                return Ok(connection);
+        let connections = entry.read().await;
+        if connections.len() >= NUM_CONNECTIONS {
+            if let Some(connection) = connections.choose(&mut rand::thread_rng()) {
+                if connection.close_reason().is_none() {
+                    return Ok(connection.clone());
+                }
             }
         }
+        // let connection: Option<Connection> = entry.read().await.clone();
+        // if let Some(connection) = connection {
+        //     if connection.close_reason().is_none() {
+        //         return Ok(connection);
+        //     }
+        // }
     }
     let connection = {
         // Need to write lock here so that only one task initiates
         // a new connection to the same remote_address.
         let mut entry = entry.write().await;
-        if let Some(connection) = entry.deref() {
-            if connection.close_reason().is_none() {
-                return Ok(connection.clone());
+        entry.retain(|connection| connection.close_reason().is_none());
+        if entry.deref().len() >= NUM_CONNECTIONS {
+            if let Some(connection) = entry.choose(&mut rand::thread_rng()) {
+                if connection.close_reason().is_none() {
+                    return Ok(connection.clone());
+                }
             }
         }
+        // if let Some(connection) = entry.deref() {
+        //     if connection.close_reason().is_none() {
+        //         return Ok(connection.clone());
+        //     }
+        // }
         let (_, client_socket) = solana_net_utils::bind_in_range(
             std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
             solana_net_utils::VALIDATOR_PORT_RANGE,
@@ -504,7 +526,9 @@ async fn get_connection(
         let connection = endpoint
             .connect(remote_address, CONNECT_SERVER_NAME)?
             .await?;
-        entry.insert(connection).clone()
+        entry.push(connection.clone());
+        error!("entry size: {}", entry.len());
+        connection
     };
     cache_connection(
         connection.remote_address(),
@@ -543,7 +567,7 @@ async fn cache_connection(
     connection: Connection,
     cache: &RwLock<ConnectionCache>,
 ) {
-    let entries: [Arc<RwLock<Option<Connection>>>; 2] = {
+    let entries: [Arc<RwLock<Vec<Connection>>>; 2] = {
         let mut cache = cache.write().await;
         error!("cache size: {}", cache.len());
         [Some(remote_pubkey), None].map(|remote_pubkey| {
@@ -552,14 +576,15 @@ async fn cache_connection(
         })
     };
     let mut entry = entries[0].write().await;
-    *entries[1].write().await = Some(connection.clone());
-    if let Some(old) = entry.replace(connection) {
-        drop(entry);
-        old.close(
-            CONNECTION_CLOSE_ERROR_CODE_REPLACED,
-            CONNECTION_CLOSE_REASON_REPLACED,
-        );
-    }
+    entries[1].write().await.push(connection.clone());
+    entry.push(connection);
+    // if let Some(old) = entry.replace(connection) {
+    //     drop(entry);
+    //     old.close(
+    //         CONNECTION_CLOSE_ERROR_CODE_REPLACED,
+    //         CONNECTION_CLOSE_REASON_REPLACED,
+    //     );
+    // }
 }
 
 #[allow(unused)]
@@ -577,11 +602,11 @@ async fn drop_connection(
     }
     let key = (remote_address, Some(remote_pubkey));
     if let Entry::Occupied(entry) = cache.write().await.entry(key) {
-        if matches!(entry.get().read().await.deref(),
-                    Some(entry) if entry.stable_id() == connection.stable_id())
-        {
-            entry.remove();
-        }
+        // if matches!(entry.get().read().await.deref(),
+        //             Some(entry) if entry.stable_id() == connection.stable_id())
+        // {
+        //     entry.remove();
+        // }
     }
     // Cache entry for (remote_address, None) will be lazily evicted.
 }
