@@ -50,7 +50,6 @@ const INITIAL_MAXIMUM_TRANSMISSION_UNIT: u16 = 1280;
 const ALPN_TURBINE_PROTOCOL_ID: &[u8] = b"solana-turbine";
 const CONNECT_SERVER_NAME: &str = "solana-turbine";
 
-// TODO: use TransportErrorCode here instead!
 const CONNECTION_CLOSE_ERROR_CODE_SHUTDOWN: VarInt = VarInt::from_u32(1);
 #[allow(unused)]
 const CONNECTION_CLOSE_ERROR_CODE_DROPPED: VarInt = VarInt::from_u32(2);
@@ -198,14 +197,13 @@ fn new_transport_config() -> TransportConfig {
     mtu_discovery_config.upper_bound(INITIAL_MAXIMUM_TRANSMISSION_UNIT);
     config
         .max_concurrent_bidi_streams(VarInt::from(0u8))
-        .max_concurrent_uni_streams(VarInt::from(0u8))
+        .max_concurrent_uni_streams(VarInt::from(10_000u32))
         .initial_mtu(INITIAL_MAXIMUM_TRANSMISSION_UNIT)
-        .datagram_receive_buffer_size(Some(usize::MAX / 3))
-        .datagram_send_buffer_size(usize::MAX / 3)
-        // .datagram_receive_buffer_size(None)
-        // .datagram_send_buffer_size(0)
-        // .mtu_discovery_config(Some(quinn::MtuDiscoveryConfig::default()));
-        .mtu_discovery_config(None);
+        // .datagram_receive_buffer_size(Some(usize::MAX / 3))
+        // .datagram_send_buffer_size(usize::MAX / 3)
+        .datagram_receive_buffer_size(None)
+        .datagram_send_buffer_size(0)
+        .mtu_discovery_config(Some(quinn::MtuDiscoveryConfig::default()));
     config
 }
 
@@ -240,7 +238,7 @@ async fn run_client(
             error!("run_client: {}", count / 10_000);
         }
         // use try_acquire_owned instead?!
-        tokio::task::spawn(send_datagram_task(
+        tokio::task::spawn(send_stream_task(
             endpoint.clone(),
             client_config.clone(),
             remote_address,
@@ -309,6 +307,7 @@ async fn handle_connection_error(
     }
 }
 
+#[allow(unreachable_code)]
 async fn handle_connection(
     endpoint: &Endpoint,
     remote_address: SocketAddr,
@@ -319,26 +318,26 @@ async fn handle_connection(
     // Assert that send won't block.
     debug_assert_eq!(sender.capacity(), None);
     loop {
-        // match connection.accept_uni().await {
-        //     Ok(stream) => {
-        //         // TODO: Probably need semaphore here too!
-        //         tokio::task::spawn(handle_recv_stream_error(
-        //             endpoint.clone(),
-        //             stream,
-        //             remote_address,
-        //             remote_pubkey,
-        //             sender.clone(),
-        //         ));
-        //     }
-        //     Err(err) => {
-        //         if let Some(err) = connection.close_reason() {
-        //             return Err(Error::from(err));
-        //         }
-        //         error!("connection.read_datagram: {remote_pubkey}, {remote_address}, {err:?}");
-        //     }
-        // }
-        // continue;
+        match connection.accept_uni().await {
+            Ok(stream) => {
+                // TODO: Probably need semaphore here too!
+                tokio::task::spawn(handle_recv_stream_error(
+                    endpoint.clone(),
+                    stream,
+                    remote_address,
+                    remote_pubkey,
+                    sender.clone(),
+                ));
+            }
+            Err(err) => {
+                if let Some(err) = connection.close_reason() {
+                    return Err(Error::from(err));
+                }
+                error!("connection.read_datagram: {remote_pubkey}, {remote_address}, {err:?}");
+            }
+        }
 
+        continue;
         match connection.read_datagram().await {
             Ok(bytes) => {
                 let count = HANDLE_CONNECTION_COUNT.fetch_add(1, Ordering::Relaxed);
@@ -360,7 +359,6 @@ async fn handle_connection(
     }
 }
 
-#[allow(dead_code)]
 async fn handle_recv_stream_error(
     endpoint: Endpoint,
     stream: RecvStream,
@@ -409,6 +407,7 @@ async fn handle_recv_stream(
     }
 }
 
+#[allow(dead_code)]
 async fn send_datagram_task(
     endpoint: Endpoint,
     client_config: ClientConfig,
@@ -437,7 +436,6 @@ async fn send_datagram(
     Ok(())
 }
 
-#[allow(dead_code)]
 async fn send_stream_task(
     endpoint: Endpoint,
     client_config: ClientConfig,
