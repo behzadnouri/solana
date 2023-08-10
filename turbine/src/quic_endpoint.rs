@@ -175,6 +175,8 @@ async fn run_client(
     sender: Sender<(Pubkey, SocketAddr, Bytes)>,
     cache: Arc<RwLock<ConnectionCache>>,
 ) {
+    let mut num_datagrams: usize = 0;
+    let mut now = std::time::Instant::now();
     while let Some((remote_address, bytes)) = receiver.recv().await {
         // This has to be a tokio::spawn::task becasue creating a new
         // connection might take time, or the remote node might be down.
@@ -189,6 +191,15 @@ async fn run_client(
             cache.clone(),
         )
         .await;
+        num_datagrams += 1;
+        if now.elapsed() > std::time::Duration::from_secs(1) {
+            now = std::time::Instant::now();
+            datapoint_info!(
+                "turbine_quic_endpoint",
+                ("num_datagrams", num_datagrams, i64),
+            );
+            num_datagrams = 0;
+        }
     }
     close_quic_endpoint(&endpoint);
 }

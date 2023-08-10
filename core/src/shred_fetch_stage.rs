@@ -256,6 +256,8 @@ fn receive_quic_datagrams(
     exit: Arc<AtomicBool>,
 ) {
     const RECV_TIMEOUT: Duration = Duration::from_secs(1);
+    let mut num_datagrams: usize = 0;
+    let mut now = Instant::now();
     while !exit.load(Ordering::Relaxed) {
         let entry = match quic_endpoint_receiver.recv_timeout(RECV_TIMEOUT) {
             Ok(entry) => entry,
@@ -290,6 +292,15 @@ fn receive_quic_datagrams(
             if sender.send(packet_batch).is_err() {
                 return;
             }
+        }
+        num_datagrams += size;
+        if now.elapsed() > Duration::from_secs(1) {
+            now = Instant::now();
+            datapoint_info!(
+                "turbine_receive_quic_datagrams",
+                ("num_datagrams", num_datagrams, i64),
+            );
+            num_datagrams = 0;
         }
     }
 }
