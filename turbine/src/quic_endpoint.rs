@@ -176,13 +176,19 @@ async fn run_client(
     cache: Arc<RwLock<ConnectionCache>>,
 ) {
     while let Some((remote_address, bytes)) = receiver.recv().await {
-        tokio::task::spawn(send_datagram_task(
+        // This has to be a tokio::spawn::task becasue creating a new
+        // connection might take time, or the remote node might be down.
+        // Ideally packets for each remote node should be pushed to the node's
+        // queue async and processed in sequence but different queues shoudl be
+        // processed in parallel.
+        send_datagram_task(
             endpoint.clone(),
             remote_address,
             bytes,
             sender.clone(),
             cache.clone(),
-        ));
+        )
+        .await;
     }
     close_quic_endpoint(&endpoint);
 }
