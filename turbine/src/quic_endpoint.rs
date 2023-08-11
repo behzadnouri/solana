@@ -5,7 +5,8 @@ use {
     log::error,
     quinn::{
         ClientConfig, ConnectError, Connecting, Connection, ConnectionError, Endpoint,
-        EndpointConfig, SendDatagramError, ServerConfig, TokioRuntime, TransportConfig, VarInt,
+        EndpointConfig, IdleTimeout, SendDatagramError, ServerConfig, TokioRuntime,
+        TransportConfig, VarInt,
     },
     rcgen::RcgenError,
     rustls::{Certificate, PrivateKey},
@@ -20,6 +21,7 @@ use {
         net::{IpAddr, SocketAddr, UdpSocket},
         ops::Deref,
         sync::Arc,
+        time::Duration,
     },
     thiserror::Error,
     tokio::{
@@ -35,6 +37,7 @@ const CLIENT_CHANNEL_CAPACITY: usize = 1 << 20;
 const INITIAL_MAXIMUM_TRANSMISSION_UNIT: u16 = 1280;
 const ALPN_TURBINE_PROTOCOL_ID: &[u8] = b"solana-turbine";
 const CONNECT_SERVER_NAME: &str = "solana-turbine";
+const MAX_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 const CONNECTION_CLOSE_ERROR_CODE_SHUTDOWN: VarInt = VarInt::from_u32(1);
 const CONNECTION_CLOSE_ERROR_CODE_DROPPED: VarInt = VarInt::from_u32(2);
@@ -145,6 +148,8 @@ fn new_transport_config() -> TransportConfig {
     config
         .max_concurrent_bidi_streams(VarInt::from(0u8))
         .max_concurrent_uni_streams(VarInt::from(0u8))
+        .max_idle_timeout(IdleTimeout::try_from(MAX_IDLE_TIMEOUT).ok())
+        .keep_alive_interval(Some(MAX_IDLE_TIMEOUT / 4))
         .initial_mtu(INITIAL_MAXIMUM_TRANSMISSION_UNIT);
     config
 }
