@@ -244,7 +244,10 @@ async fn handle_connection_error(
     sender: Sender<(Pubkey, SocketAddr, Bytes)>,
     cache: Arc<RwLock<ConnectionCache>>,
 ) {
-    error!("connection.max_datagram_size: {:?}", connection.max_datagram_size());
+    error!(
+        "connection.max_datagram_size: {:?}",
+        connection.max_datagram_size()
+    );
     cache_connection(remote_address, remote_pubkey, connection.clone(), &cache).await;
     if let Err(err) = handle_connection(
         &endpoint,
@@ -294,8 +297,17 @@ async fn send_datagram_task(
     sender: Sender<(Pubkey, SocketAddr, Bytes)>,
     cache: Arc<RwLock<ConnectionCache>>,
 ) {
-    if let Err(err) = send_datagram(&endpoint, remote_address, bytes, sender, cache).await {
-        error!("send_datagram: {remote_address}, {err:?}");
+    let size = bytes.len();
+    if let Err(err) = send_datagram(&endpoint, remote_address, bytes, sender, cache.clone()).await {
+        let max_datagram_size: Option<usize> = {
+            let entry = get_cache_entry(remote_address, &cache).await;
+            let connection = entry.read().await.clone();
+            connection.and_then(|connection| connection.max_datagram_size())
+        };
+        error!(
+            "send_datagram: {remote_address}, bytes: {size}, \
+        max_datagram_size: {max_datagram_size:?}, {err:?}"
+        );
     }
 }
 
