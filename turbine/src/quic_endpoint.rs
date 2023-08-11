@@ -222,6 +222,7 @@ async fn handle_connection_error(
     sender: Sender<(Pubkey, SocketAddr, Bytes)>,
     cache: Arc<RwLock<ConnectionCache>>,
 ) {
+    error!("connection.max_datagram_size: {:?}", connection.max_datagram_size());
     cache_connection(remote_address, remote_pubkey, connection.clone(), &cache).await;
     if let Err(err) = handle_connection(
         &endpoint,
