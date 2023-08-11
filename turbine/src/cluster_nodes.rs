@@ -362,7 +362,7 @@ impl<T: 'static> ClusterNodesCache<T> {
         working_bank: &Bank,
         cluster_info: &ClusterInfo,
     ) -> Arc<ClusterNodes<T>> {
-        let epoch = root_bank.get_leader_schedule_epoch(shred_slot);
+        let epoch = root_bank.epoch_schedule().get_epoch(shred_slot);
         let entry = self.get_cache_entry(epoch);
         if let Some((_, nodes)) = entry
             .read()
