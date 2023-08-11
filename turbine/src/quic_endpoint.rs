@@ -150,6 +150,7 @@ fn new_transport_config() -> TransportConfig {
         .max_concurrent_uni_streams(VarInt::from(0u8))
         .max_idle_timeout(IdleTimeout::try_from(MAX_IDLE_TIMEOUT).ok())
         .keep_alive_interval(Some(MAX_IDLE_TIMEOUT / 4))
+        .min_mtu(INITIAL_MAXIMUM_TRANSMISSION_UNIT)
         .initial_mtu(INITIAL_MAXIMUM_TRANSMISSION_UNIT);
     config
 }
@@ -320,6 +321,7 @@ async fn send_datagram(
 ) -> Result<(), Error> {
     let connection = get_connection(endpoint, remote_address, sender, cache).await?;
     connection.send_datagram(bytes)?;
+    // TODO: close connection if max datagram size is small?
     Ok(())
 }
 
