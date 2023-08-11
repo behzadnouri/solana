@@ -476,7 +476,7 @@ impl AddAssign for RetransmitSlotStats {
 }
 
 impl RetransmitStats {
-    const SLOT_STATS_CACHE_CAPACITY: usize = 750;
+    const SLOT_STATS_CACHE_CAPACITY: usize = 8;
 
     fn new(now: Instant) -> Self {
         Self {
