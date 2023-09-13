@@ -37,7 +37,7 @@ struct AsyncTaskSemaphore {
 }
 
 impl AsyncTaskSemaphore {
-    pub fn new(permits: u64) -> Self {
+    pub const fn new(permits: u64) -> Self {
         Self {
             counter: Mutex::new(0),
             cond_var: Condvar::new(),
@@ -65,9 +65,9 @@ impl AsyncTaskSemaphore {
     }
 }
 
+static ASYNC_TASK_SEMAPHORE: AsyncTaskSemaphore = AsyncTaskSemaphore::new(MAX_OUTSTANDING_TASK);
+
 lazy_static! {
-    static ref ASYNC_TASK_SEMAPHORE: AsyncTaskSemaphore =
-        AsyncTaskSemaphore::new(MAX_OUTSTANDING_TASK);
     static ref RUNTIME: Runtime = tokio::runtime::Builder::new_multi_thread()
         .thread_name("quic-client")
         .enable_all()

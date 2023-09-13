@@ -219,9 +219,7 @@ pub struct AppendVec {
     file_size: u64,
 }
 
-lazy_static! {
-    pub static ref APPEND_VEC_MMAPPED_FILES_OPEN: AtomicU64 = AtomicU64::default();
-}
+pub(crate) static APPEND_VEC_MMAPPED_FILES_OPEN: AtomicU64 = AtomicU64::new(0u64);
 
 impl Drop for AppendVec {
     fn drop(&mut self) {
