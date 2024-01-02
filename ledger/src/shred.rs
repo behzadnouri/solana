@@ -49,6 +49,7 @@
 //! So, given a) - c), we must restrict data shred's payload length such that the entire coding
 //! payload can fit into one coding shred / packet.
 
+pub(crate) use self::merkle::SIZE_OF_MERKLE_ROOT;
 #[cfg(test)]
 pub(crate) use self::shred_code::MAX_CODE_SHREDS_PER_SLOT;
 use {
@@ -79,6 +80,7 @@ pub use {
     crate::shredder::{ReedSolomonCache, Shredder},
 };
 
+mod chained;
 mod common;
 mod legacy;
 mod merkle;
@@ -193,8 +195,10 @@ enum ShredVariant {
     LegacyCode, // 0b0101_1010
     LegacyData, // 0b1010_0101
     // proof_size is the number of merkle proof entries.
-    MerkleCode(/*proof_size:*/ u8), // 0b0100_????
-    MerkleData(/*proof_size:*/ u8), // 0b1000_????
+    MerkleCode(/*proof_size:*/ u8),  // 0b0100_????
+    MerkleData(/*proof_size:*/ u8),  // 0b1000_????
+    ChainedCode(/*proof_size:*/ u8), // 0b0110_????
+    ChainedData(/*proof_size:*/ u8), // 0b1001_????
 }
 
 /// A common header that is present in data and code shred headers
@@ -390,6 +394,12 @@ impl Shred {
             ShredVariant::MerkleData(_) => {
                 let shred = merkle::ShredData::from_payload(shred)?;
                 Self::from(ShredData::from(shred))
+            }
+            ShredVariant::ChainedCode(_) => {
+                todo!() // XXX
+            }
+            ShredVariant::ChainedData(_) => {
+                todo!() // XXX
             }
         })
     }
@@ -654,6 +664,12 @@ pub mod layout {
                 let merkle_root = self::merkle::ShredData::get_merkle_root(shred, proof_size)?;
                 SignedData::MerkleRoot(merkle_root)
             }
+            ShredVariant::ChainedCode(_proof_size) => {
+                todo!() // XXX
+            }
+            ShredVariant::ChainedData(_proof_size) => {
+                todo!() // XXX
+            }
         };
         Some(data)
     }
@@ -670,6 +686,8 @@ pub mod layout {
             // stored the payload.
             ShredVariant::MerkleCode(_) => None,
             ShredVariant::MerkleData(_) => None,
+            ShredVariant::ChainedCode(_) => None,
+            ShredVariant::ChainedData(_) => None,
         }
     }
 
@@ -692,6 +710,12 @@ pub mod layout {
             ShredVariant::MerkleData(proof_size) => {
                 merkle::ShredData::get_merkle_root(shred, proof_size)
             }
+            ShredVariant::ChainedCode(_proof_size) => {
+                todo!() // XXX
+            }
+            ShredVariant::ChainedData(_proof_size) => {
+                todo!() // XXX
+            }
         }
     }
 
@@ -713,6 +737,9 @@ pub mod layout {
             ShredVariant::MerkleCode(proof_size) | ShredVariant::MerkleData(proof_size) => {
                 Some(proof_size)
             }
+            ShredVariant::ChainedCode(proof_size) | ShredVariant::ChainedData(proof_size) => {
+                Some(proof_size)
+            }
         };
         let coin_flip: bool = rng.gen();
         if coin_flip {
@@ -724,6 +751,7 @@ pub mod layout {
                 .map(|merkle_proof_size| {
                     // Need to corrupt the merkle proof.
                     // Proof entries are each 20 bytes at the end of shreds.
+                    // XXX is this still true for chained shreds?!
                     let offset = usize::from(merkle_proof_size) * 20;
                     shred.len() - offset..shred.len()
                 })
@@ -795,6 +823,8 @@ impl From<ShredVariant> for ShredType {
             ShredVariant::LegacyData => ShredType::Data,
             ShredVariant::MerkleCode(_) => ShredType::Code,
             ShredVariant::MerkleData(_) => ShredType::Data,
+            ShredVariant::ChainedCode(_) => ShredType::Code,
+            ShredVariant::ChainedData(_) => ShredType::Data,
         }
     }
 }
@@ -806,6 +836,9 @@ impl From<ShredVariant> for u8 {
             ShredVariant::LegacyData => u8::from(ShredType::Data),
             ShredVariant::MerkleCode(proof_size) => proof_size | 0x40,
             ShredVariant::MerkleData(proof_size) => proof_size | 0x80,
+            // XXX need roundtrip tests for this!
+            ShredVariant::ChainedCode(proof_size) => proof_size | 0x60,
+            ShredVariant::ChainedData(proof_size) => proof_size | 0x90,
         }
     }
 }
@@ -821,6 +854,9 @@ impl TryFrom<u8> for ShredVariant {
             match shred_variant & 0xF0 {
                 0x40 => Ok(ShredVariant::MerkleCode(shred_variant & 0x0F)),
                 0x80 => Ok(ShredVariant::MerkleData(shred_variant & 0x0F)),
+                // XXX need roundtrip tests for this!
+                0x60 => Ok(ShredVariant::ChainedCode(shred_variant & 0x0F)),
+                0x90 => Ok(ShredVariant::ChainedData(shred_variant & 0x0F)),
                 _ => Err(Error::InvalidShredVariant),
             }
         }
@@ -849,6 +885,9 @@ pub(crate) fn recover(
                 .into_iter()
                 .map(Shred::from)
                 .collect())
+        }
+        ShredVariant::ChainedCode(_) | ShredVariant::ChainedData(_) => {
+            todo!() // XXX
         }
     }
 }
@@ -980,6 +1019,9 @@ pub fn should_discard_shred(
         }
         ShredVariant::MerkleData(_) => {
             stats.num_shreds_merkle_data = stats.num_shreds_merkle_data.saturating_add(1);
+        }
+        ShredVariant::ChainedCode(_) | ShredVariant::ChainedData(_) => {
+            // XXX add feature here! and metrics!
         }
     }
     false

@@ -35,8 +35,10 @@ use {
     },
 };
 
+const_assert_eq!(SIZE_OF_MERKLE_ROOT, 32);
+pub(crate) const SIZE_OF_MERKLE_ROOT: usize = std::mem::size_of::<Hash>();
 const_assert_eq!(SIZE_OF_MERKLE_PROOF_ENTRY, 20);
-const SIZE_OF_MERKLE_PROOF_ENTRY: usize = std::mem::size_of::<MerkleProofEntry>();
+pub(super) const SIZE_OF_MERKLE_PROOF_ENTRY: usize = std::mem::size_of::<MerkleProofEntry>();
 const_assert_eq!(ShredData::SIZE_OF_PAYLOAD, 1203);
 
 // Defense against second preimage attack:
@@ -46,7 +48,7 @@ const_assert_eq!(ShredData::SIZE_OF_PAYLOAD, 1203);
 const MERKLE_HASH_PREFIX_LEAF: &[u8] = b"\x00SOLANA_MERKLE_SHREDS_LEAF";
 const MERKLE_HASH_PREFIX_NODE: &[u8] = b"\x01SOLANA_MERKLE_SHREDS_NODE";
 
-type MerkleProofEntry = [u8; 20];
+pub(super) type MerkleProofEntry = [u8; 20];
 
 // Layout: {common, data} headers | data buffer | merkle proof
 // The slice past signature and before the merkle proof is erasure coded.
@@ -107,7 +109,10 @@ impl Shred {
 
     fn from_payload(shred: Vec<u8>) -> Result<Self, Error> {
         match shred::layout::get_shred_variant(&shred)? {
-            ShredVariant::LegacyCode | ShredVariant::LegacyData => Err(Error::InvalidShredVariant),
+            ShredVariant::LegacyCode
+            | ShredVariant::LegacyData
+            | ShredVariant::ChainedCode(_)
+            | ShredVariant::ChainedData(_) => Err(Error::InvalidShredVariant),
             ShredVariant::MerkleCode(_) => Ok(Self::ShredCode(ShredCode::from_payload(shred)?)),
             ShredVariant::MerkleData(_) => Ok(Self::ShredData(ShredData::from_payload(shred)?)),
         }
@@ -546,7 +551,7 @@ fn join_nodes<S: AsRef<[u8]>, T: AsRef<[u8]>>(node: S, other: T) -> Hash {
 
 // Recovers root of the merkle tree from a leaf node
 // at the given index and the respective proof.
-fn get_merkle_root<'a, I>(index: usize, node: Hash, proof: I) -> Result<Hash, Error>
+pub(super) fn get_merkle_root<'a, I>(index: usize, node: Hash, proof: I) -> Result<Hash, Error>
 where
     I: IntoIterator<Item = &'a MerkleProofEntry>,
 {
@@ -565,7 +570,7 @@ where
         .ok_or(Error::InvalidMerkleProof)
 }
 
-fn get_merkle_proof(
+pub(super) fn get_merkle_proof(
     shred: &[u8],
     proof_offset: usize, // Where the merkle proof starts.
     proof_size: u8,      // Number of proof entries.
@@ -579,7 +584,7 @@ fn get_merkle_proof(
         .map(Result::unwrap))
 }
 
-fn get_merkle_node(shred: &[u8], offsets: Range<usize>) -> Result<Hash, Error> {
+pub(super) fn get_merkle_node(shred: &[u8], offsets: Range<usize>) -> Result<Hash, Error> {
     let node = shred
         .get(offsets)
         .ok_or(Error::InvalidPayloadSize(shred.len()))?;
@@ -646,7 +651,11 @@ pub(super) fn recover(
     debug_assert_matches!(common_header.shred_variant, ShredVariant::MerkleCode(_));
     let proof_size = match common_header.shred_variant {
         ShredVariant::MerkleCode(proof_size) => proof_size,
-        ShredVariant::MerkleData(_) | ShredVariant::LegacyCode | ShredVariant::LegacyData => {
+        ShredVariant::MerkleData(_)
+        | ShredVariant::LegacyCode
+        | ShredVariant::LegacyData
+        | ShredVariant::ChainedCode(_)
+        | ShredVariant::ChainedData(_) => {
             return Err(Error::InvalidShredVariant);
         }
     };

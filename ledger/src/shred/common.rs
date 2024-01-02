@@ -59,6 +59,9 @@ macro_rules! impl_shred_common {
                 ShredVariant::MerkleCode(_) | ShredVariant::MerkleData(_) => {
                     panic!("Not Implemented!");
                 }
+                ShredVariant::ChainedCode(_) | ShredVariant::ChainedData(_) => {
+                    panic!("Not Implemented!");
+                }
             }
         }
 
@@ -70,6 +73,9 @@ macro_rules! impl_shred_common {
                     bincode::serialize_into(&mut self.payload[..], &self.common_header).unwrap();
                 }
                 ShredVariant::MerkleCode(_) | ShredVariant::MerkleData(_) => {
+                    panic!("Not Implemented!");
+                }
+                ShredVariant::ChainedCode(_) | ShredVariant::ChainedData(_) => {
                     panic!("Not Implemented!");
                 }
             }
