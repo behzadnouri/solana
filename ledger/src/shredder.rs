@@ -129,7 +129,8 @@ impl Shredder {
         serialize_time.stop();
 
         let mut gen_data_time = Measure::start("shred_gen_data_time");
-        let data_buffer_size = ShredData::capacity(/*merkle_proof_size:*/ None).unwrap();
+        let data_buffer_size =
+            ShredData::capacity(/*merkle_proof_size:*/ None, /*chained:*/ false).unwrap();
         process_stats.data_buffer_residual +=
             (data_buffer_size - serialized_shreds.len() % data_buffer_size) % data_buffer_size;
         // Integer division to ensure we have enough shreds to fit all the data
@@ -404,7 +405,8 @@ impl Shredder {
             // For backward compatibility. This is needed when the data shred
             // payload is None, so that deserializing to Vec<Entry> results in
             // an empty vector.
-            let data_buffer_size = ShredData::capacity(/*merkle_proof_size:*/ None).unwrap();
+            let data_buffer_size =
+                ShredData::capacity(/*merkle_proof_size:*/ None, /*chained:*/ false).unwrap();
             Ok(vec![0u8; data_buffer_size])
         } else {
             Ok(data)

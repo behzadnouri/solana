@@ -647,11 +647,15 @@ pub mod layout {
                 SignedData::Chunk(chunk)
             }
             ShredVariant::MerkleCode(proof_size) => {
-                let merkle_root = self::merkle::ShredCode::get_merkle_root(shred, proof_size)?;
+                // XXX chained!
+                let merkle_root = self::merkle::ShredCode::get_merkle_root(shred, proof_size, /*chained:*/false)?;
                 SignedData::MerkleRoot(merkle_root)
             }
             ShredVariant::MerkleData(proof_size) => {
-                let merkle_root = self::merkle::ShredData::get_merkle_root(shred, proof_size)?;
+                // XXX chained!
+                let merkle_root = self::merkle::ShredData::get_merkle_root(
+                    shred, proof_size, /*chained:*/ false,
+                )?;
                 SignedData::MerkleRoot(merkle_root)
             }
         };
@@ -687,10 +691,12 @@ pub mod layout {
         match get_shred_variant(shred).ok()? {
             ShredVariant::LegacyCode | ShredVariant::LegacyData => None,
             ShredVariant::MerkleCode(proof_size) => {
-                merkle::ShredCode::get_merkle_root(shred, proof_size)
+                // XXX chained!
+                merkle::ShredCode::get_merkle_root(shred, proof_size, /*chained:*/ false)
             }
             ShredVariant::MerkleData(proof_size) => {
-                merkle::ShredData::get_merkle_root(shred, proof_size)
+                // XXX chained!
+                merkle::ShredData::get_merkle_root(shred, proof_size, /*chained:*/ false)
             }
         }
     }
@@ -997,7 +1003,7 @@ pub fn max_entries_per_n_shred(
 ) -> u64 {
     // Default 32:32 erasure batches yields 64 shreds; log2(64) = 6.
     let merkle_proof_size = Some(6);
-    let data_buffer_size = ShredData::capacity(merkle_proof_size).unwrap();
+    let data_buffer_size = ShredData::capacity(merkle_proof_size, /*chained:*/ false).unwrap();
     let shred_data_size = shred_data_size.unwrap_or(data_buffer_size) as u64;
     let vec_size = bincode::serialized_size(&vec![entry]).unwrap();
     let entry_size = bincode::serialized_size(entry).unwrap();
