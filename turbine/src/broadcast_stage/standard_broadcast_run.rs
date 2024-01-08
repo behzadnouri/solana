@@ -85,7 +85,7 @@ impl StandardBroadcastRun {
                     keypair,
                     &[],  // entries
                     true, // is_last_in_slot,
-                    None, // chained_merkle_root
+                    state.chained_merkle_root,
                     state.next_shred_index,
                     state.next_code_index,
                     true, // merkle_variant
@@ -121,8 +121,12 @@ impl StandardBroadcastRun {
         BroadcastError,
     > {
         let (slot, parent_slot) = self.current_slot_and_parent.unwrap();
-        let (next_shred_index, next_code_index) = match &self.unfinished_slot {
-            Some(state) => (state.next_shred_index, state.next_code_index),
+        let (chained_merkle_root, next_shred_index, next_code_index) = match &self.unfinished_slot {
+            Some(state) => (
+                state.chained_merkle_root,
+                state.next_shred_index,
+                state.next_code_index,
+            ),
             None => {
                 // If the blockstore has shreds for the slot, it should not
                 // recreate the slot:
@@ -135,7 +139,7 @@ impl StandardBroadcastRun {
                         return Ok((Vec::default(), Vec::default()));
                     }
                 }
-                (0u32, 0u32)
+                (None, 0u32, 0u32)
             }
         };
         let shredder =
@@ -144,7 +148,7 @@ impl StandardBroadcastRun {
             keypair,
             entries,
             is_slot_end,
-            None, // chained_merkle_root
+            chained_merkle_root,
             next_shred_index,
             next_code_index,
             true, // merkle_variant
@@ -169,6 +173,7 @@ impl StandardBroadcastRun {
             return Err(BroadcastError::TooManyShreds);
         }
         self.unfinished_slot = Some(UnfinishedSlotInfo {
+            chained_merkle_root: None,
             next_shred_index,
             next_code_index,
             slot,
@@ -569,6 +574,7 @@ mod test {
         let slot = 1;
         let parent = 0;
         run.unfinished_slot = Some(UnfinishedSlotInfo {
+            chained_merkle_root: None,
             next_shred_index,
             next_code_index: 17,
             slot,

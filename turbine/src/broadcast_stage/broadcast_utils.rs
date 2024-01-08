@@ -6,7 +6,7 @@ use {
     solana_ledger::shred::ShredData,
     solana_poh::poh_recorder::WorkingBankEntry,
     solana_runtime::bank::Bank,
-    solana_sdk::clock::Slot,
+    solana_sdk::{clock::Slot, hash::Hash},
     std::{
         sync::Arc,
         time::{Duration, Instant},
@@ -25,6 +25,7 @@ pub(super) struct ReceiveResults {
 
 #[derive(Clone)]
 pub struct UnfinishedSlotInfo {
+    pub(crate) chained_merkle_root: Option<Hash>,
     pub next_shred_index: u32,
     pub(crate) next_code_index: u32,
     pub slot: Slot,

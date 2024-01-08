@@ -92,7 +92,7 @@ impl BroadcastRun for FailEntryVerificationBroadcastRun {
             keypair,
             &receive_results.entries,
             last_tick_height == bank.max_tick_height() && last_entries.is_none(),
-            None, // chained_merkle_root
+            None, // chained_merkle_root XXX should be testcased
             self.next_shred_index,
             self.next_code_index,
             true, // merkle_variant
@@ -109,7 +109,7 @@ impl BroadcastRun for FailEntryVerificationBroadcastRun {
                 keypair,
                 &[good_last_entry],
                 true,
-                None, // chained_merkle_root
+                None, // chained_merkle_root XXX should be testcased
                 self.next_shred_index,
                 self.next_code_index,
                 true, // merkle_variant
@@ -123,7 +123,7 @@ impl BroadcastRun for FailEntryVerificationBroadcastRun {
                 keypair,
                 &[bad_last_entry],
                 false,
-                None, // chained_merkle_root
+                None, // chained_merkle_root XXX should be testcased
                 self.next_shred_index,
                 self.next_code_index,
                 true, // merkle_variant

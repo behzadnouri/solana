@@ -53,7 +53,7 @@ fn test_multi_fec_block_coding() {
         &keypair,
         &entries,
         true,  // is_last_in_slot
-        None,  // chained_merkle_root
+        None,  // chained_merkle_root XXX should be testcased
         0,     // next_shred_index
         0,     // next_code_index
         false, // merkle_variant
