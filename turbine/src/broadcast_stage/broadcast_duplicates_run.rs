@@ -37,6 +37,7 @@ pub struct BroadcastDuplicatesConfig {
 pub(super) struct BroadcastDuplicatesRun {
     config: BroadcastDuplicatesConfig,
     current_slot: Slot,
+    chained_merkle_root: Option<Hash>,
     next_shred_index: u32,
     next_code_index: u32,
     shred_version: u16,
@@ -57,6 +58,7 @@ impl BroadcastDuplicatesRun {
         ));
         Self {
             config,
+            chained_merkle_root: None,
             next_shred_index: u32::MAX,
             next_code_index: 0,
             shred_version,
@@ -173,6 +175,7 @@ impl BroadcastRun for BroadcastDuplicatesRun {
             keypair,
             &receive_results.entries,
             last_tick_height == bank.max_tick_height() && last_entries.is_none(),
+            self.chained_merkle_root,
             self.next_shred_index,
             self.next_code_index,
             false, // merkle_variant
@@ -190,6 +193,7 @@ impl BroadcastRun for BroadcastDuplicatesRun {
                     keypair,
                     &[original_last_entry],
                     true,
+                    self.chained_merkle_root,
                     self.next_shred_index,
                     self.next_code_index,
                     false, // merkle_variant
@@ -203,6 +207,7 @@ impl BroadcastRun for BroadcastDuplicatesRun {
                     keypair,
                     &duplicate_extra_last_entries,
                     true,
+                    self.chained_merkle_root,
                     self.next_shred_index,
                     self.next_code_index,
                     false, // merkle_variant

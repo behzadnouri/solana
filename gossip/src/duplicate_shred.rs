@@ -403,10 +403,12 @@ pub(crate) mod tests {
         })
         .take(num_entries)
         .collect();
+        let chained_merkle_root = Some(Hash::new_from_array(rng.gen()));
         shredder.entries_to_shreds(
             keypair,
             &entries,
             is_last_in_slot,
+            chained_merkle_root,
             next_shred_index,
             next_code_index, // next_code_index
             merkle_variant,

@@ -10,6 +10,7 @@ pub(super) struct BroadcastFakeShredsRun {
     last_blockhash: Hash,
     partition: usize,
     shred_version: u16,
+    chained_merkle_root: Option<Hash>,
     next_code_index: u32,
     reed_solomon_cache: Arc<ReedSolomonCache>,
 }
@@ -20,6 +21,7 @@ impl BroadcastFakeShredsRun {
             last_blockhash: Hash::default(),
             partition,
             shred_version,
+            chained_merkle_root: None,
             next_code_index: 0,
             reed_solomon_cache: Arc::<ReedSolomonCache>::default(),
         }
@@ -60,6 +62,7 @@ impl BroadcastRun for BroadcastFakeShredsRun {
             keypair,
             &receive_results.entries,
             last_tick_height == bank.max_tick_height(),
+            self.chained_merkle_root,
             next_shred_index,
             self.next_code_index,
             true, // merkle_variant
@@ -81,6 +84,7 @@ impl BroadcastRun for BroadcastFakeShredsRun {
             keypair,
             &fake_entries,
             last_tick_height == bank.max_tick_height(),
+            self.chained_merkle_root,
             next_shred_index,
             self.next_code_index,
             true, // merkle_variant

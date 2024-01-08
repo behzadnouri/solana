@@ -15,6 +15,7 @@ pub(super) struct FailEntryVerificationBroadcastRun {
     shred_version: u16,
     good_shreds: Vec<Shred>,
     current_slot: Slot,
+    chained_merkle_root: Option<Hash>,
     next_shred_index: u32,
     next_code_index: u32,
     cluster_nodes_cache: Arc<ClusterNodesCache<BroadcastStage>>,
@@ -31,6 +32,7 @@ impl FailEntryVerificationBroadcastRun {
             shred_version,
             good_shreds: vec![],
             current_slot: 0,
+            chained_merkle_root: None,
             next_shred_index: 0,
             next_code_index: 0,
             cluster_nodes_cache,
@@ -54,6 +56,7 @@ impl BroadcastRun for FailEntryVerificationBroadcastRun {
         let last_tick_height = receive_results.last_tick_height;
 
         if bank.slot() != self.current_slot {
+            self.chained_merkle_root = None;
             self.next_shred_index = 0;
             self.next_code_index = 0;
             self.current_slot = bank.slot();
@@ -92,6 +95,7 @@ impl BroadcastRun for FailEntryVerificationBroadcastRun {
             keypair,
             &receive_results.entries,
             last_tick_height == bank.max_tick_height() && last_entries.is_none(),
+            self.chained_merkle_root,
             self.next_shred_index,
             self.next_code_index,
             true, // merkle_variant
@@ -108,6 +112,7 @@ impl BroadcastRun for FailEntryVerificationBroadcastRun {
                 keypair,
                 &[good_last_entry],
                 true,
+                self.chained_merkle_root,
                 self.next_shred_index,
                 self.next_code_index,
                 true, // merkle_variant
@@ -121,6 +126,7 @@ impl BroadcastRun for FailEntryVerificationBroadcastRun {
                 keypair,
                 &[bad_last_entry],
                 false,
+                self.chained_merkle_root,
                 self.next_shred_index,
                 self.next_code_index,
                 true, // merkle_variant
