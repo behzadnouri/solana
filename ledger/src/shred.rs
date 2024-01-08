@@ -197,6 +197,27 @@ enum ShredVariant {
     MerkleData(/*proof_size:*/ u8), // 0b1000_????
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
+enum ShredVariant2 {
+    Legacy(ShredType),
+    Merkle {
+        shred_type: ShredType,
+        proof_size: u8,
+        chained: bool,
+        resigned: bool,
+    },
+}
+
+fn dummy(shred_variant: ShredVariant2) -> i8 {
+    match shred_variant {
+        ShredVariant2::Merkle {
+            shred_type: ShredType::Data,
+            ..
+        } => 2,
+        _ => 0,
+    }
+}
+
 /// A common header that is present in data and code shred headers
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 struct ShredCommonHeader {
@@ -648,7 +669,9 @@ pub mod layout {
             }
             ShredVariant::MerkleCode(proof_size) => {
                 // XXX chained!
-                let merkle_root = self::merkle::ShredCode::get_merkle_root(shred, proof_size, /*chained:*/false)?;
+                let merkle_root = self::merkle::ShredCode::get_merkle_root(
+                    shred, proof_size, /*chained:*/ false,
+                )?;
                 SignedData::MerkleRoot(merkle_root)
             }
             ShredVariant::MerkleData(proof_size) => {

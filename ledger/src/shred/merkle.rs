@@ -204,7 +204,7 @@ impl ShredData {
             return Err(Error::InvalidShredVariant);
         };
         // XXX chained should be read from shred_variant.
-        if ShredCode::capacity(proof_size, /*chained:*/false)? != shard_size {
+        if ShredCode::capacity(proof_size, /*chained:*/ false)? != shard_size {
             return Err(Error::InvalidShardSize(shard_size));
         }
         let data_header = deserialize_from_with_limit(&mut cursor)?;
@@ -324,7 +324,7 @@ impl ShredCode {
         };
         let shard_size = shard.len();
         // XXX chained should be read from the shred_variant.
-        if Self::capacity(proof_size, /*chained:*/false)? != shard_size {
+        if Self::capacity(proof_size, /*chained:*/ false)? != shard_size {
             return Err(Error::InvalidShardSize(shard_size));
         }
         if shard_size + Self::SIZE_OF_HEADERS > Self::SIZE_OF_PAYLOAD {
