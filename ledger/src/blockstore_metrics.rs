@@ -14,7 +14,7 @@ use {
     },
 };
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct BlockstoreInsertionMetrics {
     pub insert_lock_elapsed_us: u64,
     pub insert_shreds_elapsed_us: u64,

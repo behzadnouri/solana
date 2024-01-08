@@ -1213,6 +1213,7 @@ impl Blockstore {
         is_trusted: bool,
     ) -> Result<Vec<CompletedDataSetInfo>> {
         let shreds_len = shreds.len();
+        let mut metrics = BlockstoreInsertionMetrics::default();
         let insert_results = self.do_insert_shreds(
             shreds,
             vec![false; shreds_len],
@@ -1220,8 +1221,9 @@ impl Blockstore {
             is_trusted,
             None, // retransmit-sender
             &ReedSolomonCache::default(),
-            &mut BlockstoreInsertionMetrics::default(),
+            &mut metrics,
         )?;
+        dbg!(&metrics);
         Ok(insert_results.completed_data_set_infos)
     }
 
@@ -1500,6 +1502,7 @@ impl Blockstore {
                 shred_source,
                 duplicate_shreds,
             ) {
+                dbg!("should_insert_data_shred");
                 return Err(InsertDataShredError::InvalidShred);
             }
 
@@ -1514,6 +1517,7 @@ impl Blockstore {
                     &shred,
                     duplicate_shreds,
                 ) {
+                    dbg!("check_merkle_root_consistency");
                     return Err(InsertDataShredError::InvalidShred);
                 }
             }
@@ -4729,12 +4733,12 @@ pub fn make_chaining_slot_entries(
     slots_shreds_and_entries
 }
 
-#[cfg(not(unix))]
+#[cfg(not(unixx))]
 fn adjust_ulimit_nofile(_enforce_ulimit_nofile: bool) -> Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(unixx)]
 fn adjust_ulimit_nofile(enforce_ulimit_nofile: bool) -> Result<()> {
     // Rocks DB likes to have many open files.  The default open file descriptor limit is
     // usually not enough
@@ -7444,7 +7448,8 @@ pub mod tests {
     #[test]
     fn test_insert_multiple_is_last() {
         solana_logger::setup();
-        let (shreds, _) = make_slot_entries(0, 0, 20, /*merkle_variant:*/ true);
+        let (shreds, _) = make_slot_entries(0, 0, 19, /*merkle_variant:*/ true);
+        dbg!(shreds.len());
         let num_shreds = shreds.len() as u64;
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let blockstore = Blockstore::open(ledger_path.path()).unwrap();
@@ -7458,6 +7463,8 @@ pub mod tests {
         assert!(slot_meta.is_full());
 
         let (shreds, _) = make_slot_entries(0, 0, 22, /*merkle_variant:*/ true);
+        assert!(shreds.len() > num_shreds as usize);
+        dbg!(shreds.len());
         blockstore.insert_shreds(shreds, None, false).unwrap();
         let slot_meta = blockstore.meta(0).unwrap().unwrap();
 
@@ -10339,7 +10346,11 @@ pub mod tests {
         let num_unique_entries = max_ticks_per_n_shreds(1, None) + 1;
         let (mut original_shreds, original_entries) =
             make_slot_entries(0, 0, num_unique_entries, /*merkle_variant:*/ true);
-
+        let mut duplicate_shreds = original_shreds.clone();
+        // Mutate signature so that shreds are not the same as originals.
+        for shred in &mut duplicate_shreds {
+            shred.sign(&Keypair::new());
+        }
         // Discard first shred, so that the slot is not full
         assert!(original_shreds.len() > 1);
         let last_index = original_shreds.last().unwrap().index() as u64;
@@ -10361,14 +10372,6 @@ pub mod tests {
             assert!(!blockstore.is_full(0));
         }
 
-        let duplicate_shreds = entries_to_test_shreds(
-            &original_entries,
-            0,    // slot
-            0,    // parent_slot
-            true, // is_full_slot
-            0,    // version
-            true, // merkle_variant
-        );
         let num_shreds = duplicate_shreds.len() as u64;
         blockstore
             .insert_shreds(duplicate_shreds, None, false)
