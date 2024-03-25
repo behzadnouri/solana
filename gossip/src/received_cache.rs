@@ -1,6 +1,6 @@
 use {
     itertools::Itertools,
-    lru::LruCache,
+    lazy_lru::LruCache,
     solana_sdk::pubkey::Pubkey,
     std::{cmp::Reverse, collections::HashMap},
 };

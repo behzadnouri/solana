@@ -1,6 +1,6 @@
 use {
     bincode::{serialize, Error},
-    lru::LruCache,
+    lazy_lru::LruCache,
     rand::{CryptoRng, Fill, Rng},
     serde::Serialize,
     solana_sdk::{

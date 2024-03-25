@@ -38,7 +38,7 @@ use {
         map::{rayon::ParValues, Entry, IndexMap},
         set::IndexSet,
     },
-    lru::LruCache,
+    lazy_lru::LruCache,
     rayon::{prelude::*, ThreadPool},
     solana_sdk::{
         clock::Slot,

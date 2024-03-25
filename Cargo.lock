@@ -331,6 +331,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "allocator-api2"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0942ffc6dcaadf03badf6e6a2d0228460359d5e34b57ccdc720b7382dfbd5ec5"
+
+[[package]]
 name = "android-tzdata"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2563,6 +2569,10 @@ name = "hashbrown"
 version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "290f1a1d9242c78d09ce40a5e87e7554ee637af1351968159f4952f028f75604"
+dependencies = [
+ "ahash 0.8.10",
+ "allocator-api2",
+]
 
 [[package]]
 name = "headers"
@@ -3114,6 +3124,15 @@ checksum = "7507624b29483431c0ba2d82aece8ca6cdba9382bff4ddd0f7490560c056098d"
 dependencies = [
  "winapi 0.2.8",
  "winapi-build",
+]
+
+[[package]]
+name = "lazy-lru"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb1e2399c6a043e458bce24d7b449e54946c1eed9096ce521e137cdcf7dead05"
+dependencies = [
+ "hashbrown 0.14.3",
 ]
 
 [[package]]
@@ -6261,8 +6280,8 @@ dependencies = [
  "flate2",
  "indexmap 2.2.5",
  "itertools",
+ "lazy-lru",
  "log",
- "lru",
  "num-traits",
  "num_cpus",
  "rand 0.8.5",
