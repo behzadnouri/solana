@@ -3,7 +3,7 @@ use {
     crossbeam_channel::{unbounded, Receiver, Sender},
     dashmap::DashMap,
     log::*,
-    lru::LruCache,
+    lazy_lru::LruCache,
     solana_measure::measure,
     solana_sdk::{
         clock::{BankId, Slot},

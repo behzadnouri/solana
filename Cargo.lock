@@ -3128,9 +3128,7 @@ dependencies = [
 
 [[package]]
 name = "lazy-lru"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb1e2399c6a043e458bce24d7b449e54946c1eed9096ce521e137cdcf7dead05"
+version = "0.2.0"
 dependencies = [
  "hashbrown 0.14.3",
 ]
@@ -5984,9 +5982,9 @@ dependencies = [
  "futures 0.3.30",
  "histogram",
  "itertools",
+ "lazy-lru",
  "lazy_static",
  "log",
- "lru",
  "min-max-heap",
  "num_enum",
  "prio-graph",
@@ -6352,6 +6350,7 @@ dependencies = [
  "fs_extra",
  "futures 0.3.30",
  "itertools",
+ "lazy-lru",
  "lazy_static",
  "libc",
  "log",
@@ -7017,11 +7016,11 @@ dependencies = [
  "im",
  "index_list",
  "itertools",
+ "lazy-lru",
  "lazy_static",
  "libc",
  "libsecp256k1",
  "log",
- "lru",
  "lz4",
  "memmap2",
  "memoffset 0.9.0",
@@ -7500,6 +7499,7 @@ dependencies = [
  "crossbeam-channel",
  "futures 0.3.30",
  "itertools",
+ "lazy-lru",
  "log",
  "lru",
  "quinn",

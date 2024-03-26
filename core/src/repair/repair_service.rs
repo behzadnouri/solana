@@ -22,7 +22,7 @@ use {
         },
     },
     crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender},
-    lru::LruCache,
+    lazy_lru::LruCache,
     rand::seq::SliceRandom,
     solana_client::connection_cache::Protocol,
     solana_gossip::cluster_info::ClusterInfo,

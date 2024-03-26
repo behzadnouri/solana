@@ -12,7 +12,7 @@ use {
     },
     bincode::{serialize, Options},
     crossbeam_channel::{Receiver, RecvTimeoutError, Sender},
-    lru::LruCache,
+    lazy_lru::LruCache,
     rand::{
         distributions::{Distribution, WeightedError, WeightedIndex},
         Rng,

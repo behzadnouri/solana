@@ -4,7 +4,7 @@ use {
     },
     itertools::Itertools,
     lazy_static::lazy_static,
-    lru::LruCache,
+    lazy_lru::LruCache,
     rayon::{prelude::*, ThreadPool},
     reed_solomon_erasure::{
         galois_8::ReedSolomon,
@@ -425,7 +425,7 @@ impl ReedSolomonCache {
     ) -> Result<Arc<ReedSolomon>, reed_solomon_erasure::Error> {
         let key = (data_shards, parity_shards);
         {
-            let mut cache = self.0.lock().unwrap();
+            let cache = self.0.lock().unwrap();
             if let Some(entry) = cache.get(&key) {
                 return Ok(entry.clone());
             }

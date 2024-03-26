@@ -27,10 +27,10 @@ fnv = { workspace = true }
 im = { workspace = true, features = ["rayon", "serde"] }
 index_list = { workspace = true }
 itertools = { workspace = true }
+lazy-lru = { workspace = true }
 lazy_static = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }
-lru = { workspace = true }
 lz4 = { workspace = true }
 memmap2 = { workspace = true }
 mockall = { workspace = true }
