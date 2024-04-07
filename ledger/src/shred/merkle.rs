@@ -1771,6 +1771,9 @@ mod test {
         let mut rng = rand::thread_rng();
         let reed_solomon_cache = ReedSolomonCache::default();
         for data_size in 0..=PACKET_DATA_SIZE * 4 * 64 {
+            if data_size % 100 == 0 {
+                eprintln!("chained: {chained:5}, is_last_in_slot: {is_last_in_slot:5}, data_size: {data_size}");
+            }
             run_make_shreds_from_data(
                 &mut rng,
                 data_size,
