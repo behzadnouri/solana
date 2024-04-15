@@ -1,11 +1,17 @@
 use {
-    crate::crds_gossip::CrdsGossip,
+    crate::{
+        contact_info::{ContactInfo, Protocol},
+        crds_gossip::CrdsGossip,
+        legacy_contact_info::LegacyContactInfo,
+    },
     itertools::Itertools,
+    rand::Rng,
     solana_measure::measure::Measure,
     solana_sdk::{clock::Slot, pubkey::Pubkey},
     std::{
         cmp::Reverse,
         collections::HashMap,
+        net::{IpAddr, SocketAddr},
         ops::{Deref, DerefMut},
         sync::atomic::{AtomicU64, Ordering},
         time::Instant,
@@ -199,6 +205,46 @@ pub(crate) fn submit_gossip_stats(
             gossip.pull.failed_inserts_size(),
         )
     };
+    if rand::thread_rng().gen_ratio(1, 300) {
+        let crds = gossip.crds.read().unwrap();
+        let pubkeys: Vec<_> = crds
+            .get_nodes_contact_info()
+            .map(LegacyContactInfo::pubkey)
+            .collect();
+        let mut missing: Vec<_> = pubkeys
+            .iter()
+            .filter(|&&&pubkey| crds.get::<&ContactInfo>(pubkey).is_none())
+            .map(|pubkey| (pubkey, stakes.get(pubkey).copied()))
+            .collect();
+        missing.sort_unstable_by_key(|&(_, stake)| Reverse(stake));
+        error!(
+            "legacy contact infos: {}, missing: {}, stake: {}",
+            pubkeys.len(),
+            missing.len(),
+            missing
+                .iter()
+                .map(|(_, stake)| stake.unwrap_or_default())
+                .sum::<u64>()
+        );
+        for (pubkey, stake) in missing.into_iter().filter(|&(_, stake)| stake > None) {
+            error!("legacy {pubkey}, stake: {}", stake.unwrap());
+        }
+        for (addr, nodes) in crds
+            .get_nodes_contact_info()
+            .fold(HashMap::<IpAddr, Vec<u64>>::new(), |mut counts, node| {
+                if let Ok(addr) = node.tvu(Protocol::UDP).as_ref().map(SocketAddr::ip) {
+                    let stake = stakes.get(node.pubkey()).copied().unwrap_or_default();
+                    counts.entry(addr).or_default().push(stake)
+                }
+                counts
+            })
+            .into_iter()
+            .filter(|(_, nodes)| nodes.len() > 1)
+            .sorted_by_key(|(_, nodes)| Reverse(nodes.iter().sum::<u64>()))
+        {
+            error!("dup tvu: {addr}, {nodes:?}")
+        }
+    }
     let num_nodes_staked = stakes.values().filter(|stake| **stake > 0).count();
     datapoint_info!(
         "cluster_info_stats",
