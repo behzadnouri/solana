@@ -21,6 +21,7 @@ use {
             self, max_ticks_per_n_shreds, ErasureSetId, ProcessShredsStats, ReedSolomonCache,
             Shred, ShredData, ShredId, ShredType, Shredder, DATA_SHREDS_PER_FEC_BLOCK,
         },
+        shredder,
         slot_stats::{ShredSource, SlotsStats},
         transaction_address_lookup_table_scanner::scan_transaction,
     },
@@ -2300,21 +2301,21 @@ impl Blockstore {
                 parent_slot = current_slot - 1;
                 remaining_ticks_in_slot = ticks_per_slot;
                 let current_entries = std::mem::take(&mut slot_entries);
-                let start_index = {
-                    if all_shreds.is_empty() {
-                        start_index
-                    } else {
-                        0
+                let mut cursor = if all_shreds.is_empty() {
+                    shredder::Cursor {
+                        next_shred_index: start_index,
+                        next_code_index: start_index,
                     }
+                } else {
+                    shredder::Cursor::default()
                 };
                 let (mut data_shreds, mut coding_shreds) = shredder.entries_to_shreds(
                     keypair,
                     &current_entries,
                     true, // is_last_in_slot
                     chained_merkle_root,
-                    start_index, // next_shred_index
-                    start_index, // next_code_index
-                    true,        // merkle_variant
+                    &mut cursor,
+                    true, // merkle_variant
                     &reed_solomon_cache,
                     &mut ProcessShredsStats::default(),
                 );
@@ -2342,8 +2343,7 @@ impl Blockstore {
                 &slot_entries,
                 is_full_slot,
                 chained_merkle_root,
-                0,    // next_shred_index
-                0,    // next_code_index
+                &mut shredder::Cursor::default(),
                 true, // merkle_variant
                 &reed_solomon_cache,
                 &mut ProcessShredsStats::default(),
@@ -4717,8 +4717,7 @@ pub fn create_new_ledger(
         true, // is_last_in_slot
         // chained_merkle_root
         Some(Hash::new_from_array(rand::thread_rng().gen())),
-        0,    // next_shred_index
-        0,    // next_code_index
+        &mut shredder::Cursor::default(),
         true, // merkle_variant
         &ReedSolomonCache::default(),
         &mut ProcessShredsStats::default(),
@@ -4981,8 +4980,7 @@ pub fn entries_to_test_shreds(
             is_full_slot,
             // chained_merkle_root
             Some(Hash::new_from_array(rand::thread_rng().gen())),
-            0, // next_shred_index,
-            0, // next_code_index
+            &mut shredder::Cursor::default(),
             merkle_variant,
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
@@ -10333,9 +10331,11 @@ pub mod tests {
             &entries,
             is_last_in_slot,
             chained_merkle_root,
-            fec_set_index, // next_shred_index
-            fec_set_index, // next_code_index
-            true,          // merkle_variant
+            &mut shredder::Cursor {
+                next_shred_index: fec_set_index,
+                next_code_index: fec_set_index,
+            },
+            true, // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
         );
@@ -10400,8 +10400,7 @@ pub mod tests {
             &entries1,
             true, // is_last_in_slot
             chained_merkle_root,
-            0,    // next_shred_index
-            0,    // next_code_index,
+            &mut shredder::Cursor::default(),
             true, // merkle_variant
             &reed_solomon_cache,
             &mut ProcessShredsStats::default(),
@@ -10411,8 +10410,7 @@ pub mod tests {
             &entries2,
             true, // is_last_in_slot
             chained_merkle_root,
-            0,    // next_shred_index
-            0,    // next_code_index
+            &mut shredder::Cursor::default(),
             true, // merkle_variant
             &reed_solomon_cache,
             &mut ProcessShredsStats::default(),

@@ -487,7 +487,7 @@ mod tests {
         super::*,
         crate::{
             shred::{ProcessShredsStats, Shred, ShredFlags, LEGACY_SHRED_DATA_CAPACITY},
-            shredder::{ReedSolomonCache, Shredder},
+            shredder::{self, ReedSolomonCache, Shredder},
         },
         assert_matches::assert_matches,
         rand::{seq::SliceRandom, Rng},
@@ -784,6 +784,10 @@ mod tests {
         keypairs: &HashMap<Slot, Keypair>,
     ) -> Vec<Shred> {
         let reed_solomon_cache = ReedSolomonCache::default();
+        let mut cursor = shredder::Cursor {
+            next_shred_index: rng.gen_range(0..2671),
+            next_code_index: rng.gen_range(0..2781),
+        };
         let mut shreds: Vec<_> = keypairs
             .iter()
             .flat_map(|(&slot, keypair)| {
@@ -802,9 +806,8 @@ mod tests {
                     is_last_in_slot,
                     // chained_merkle_root
                     chained.then(|| Hash::new_from_array(rng.gen())),
-                    rng.gen_range(0..2671), // next_shred_index
-                    rng.gen_range(0..2781), // next_code_index
-                    rng.gen(),              // merkle_variant,
+                    &mut cursor,
+                    rng.gen(), // merkle_variant,
                     &reed_solomon_cache,
                     &mut ProcessShredsStats::default(),
                 );

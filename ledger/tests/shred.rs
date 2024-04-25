@@ -2,8 +2,8 @@
 use {
     solana_entry::entry::Entry,
     solana_ledger::shred::{
-        max_entries_per_n_shred, verify_test_data_shred, ProcessShredsStats, ReedSolomonCache,
-        Shred, Shredder, DATA_SHREDS_PER_FEC_BLOCK, LEGACY_SHRED_DATA_CAPACITY,
+        max_entries_per_n_shred, verify_test_data_shred, Cursor, ProcessShredsStats,
+        ReedSolomonCache, Shred, Shredder, DATA_SHREDS_PER_FEC_BLOCK, LEGACY_SHRED_DATA_CAPACITY,
     },
     solana_sdk::{
         clock::Slot,
@@ -55,9 +55,8 @@ fn test_multi_fec_block_coding(is_last_in_slot: bool) {
         &keypair,
         &entries,
         is_last_in_slot,
-        None,  // chained_merkle_root
-        0,     // next_shred_index
-        0,     // next_code_index
+        None, // chained_merkle_root
+        &mut Cursor::default(),
         false, // merkle_variant
         &reed_solomon_cache,
         &mut ProcessShredsStats::default(),
@@ -214,8 +213,7 @@ fn setup_different_sized_fec_blocks(
         .collect();
 
     // Run the shredder twice, generate data and coding shreds
-    let mut next_shred_index = 0;
-    let mut next_code_index = 0;
+    let mut cursor = Cursor::default();
     let mut fec_data = BTreeMap::new();
     let mut fec_coding = BTreeMap::new();
     let mut data_slot_and_index = HashSet::new();
@@ -230,8 +228,7 @@ fn setup_different_sized_fec_blocks(
             &entries,
             is_last,
             None, // chained_merkle_root
-            next_shred_index,
-            next_code_index,
+            &mut cursor,
             false, // merkle_variant
             &reed_solomon_cache,
             &mut ProcessShredsStats::default(),
@@ -248,8 +245,6 @@ fn setup_different_sized_fec_blocks(
             }
         }
         assert_eq!(data_shreds.len(), num_shreds_per_iter);
-        next_shred_index = data_shreds.last().unwrap().index() + 1;
-        next_code_index = coding_shreds.last().unwrap().index() + 1;
         sort_data_coding_into_fec_sets(
             data_shreds,
             coding_shreds,

@@ -50,6 +50,12 @@ pub struct Shredder {
     reference_tick: u8,
 }
 
+#[derive(Default)]
+pub struct Cursor {
+    pub next_shred_index: u32,
+    pub next_code_index: u32,
+}
+
 impl Shredder {
     pub fn new(
         slot: Slot,
@@ -76,8 +82,7 @@ impl Shredder {
         entries: &[Entry],
         is_last_in_slot: bool,
         chained_merkle_root: Option<Hash>,
-        next_shred_index: u32,
-        next_code_index: u32,
+        cursor: &mut Cursor,
         merkle_variant: bool,
         reed_solomon_cache: &ReedSolomonCache,
         stats: &mut ProcessShredsStats,
@@ -96,8 +101,8 @@ impl Shredder {
                 self.reference_tick,
                 is_last_in_slot,
                 chained_merkle_root,
-                next_shred_index,
-                next_code_index,
+                cursor.next_shred_index, // XXX
+                cursor.next_code_index,  // XXX
                 reed_solomon_cache,
                 stats,
             )
@@ -105,12 +110,17 @@ impl Shredder {
             .into_iter()
             .partition(Shred::is_data);
         }
-        let data_shreds =
-            self.entries_to_data_shreds(keypair, entries, is_last_in_slot, next_shred_index, stats);
+        let data_shreds = self.entries_to_data_shreds(
+            keypair,
+            entries,
+            is_last_in_slot,
+            &mut cursor.next_shred_index,
+            stats,
+        );
         let coding_shreds = Self::data_shreds_to_coding_shreds(
             keypair,
             &data_shreds,
-            next_code_index,
+            &mut cursor.next_code_index,
             reed_solomon_cache,
             stats,
         )
@@ -123,7 +133,7 @@ impl Shredder {
         keypair: &Keypair,
         entries: &[Entry],
         is_last_in_slot: bool,
-        next_shred_index: u32,
+        next_shred_index: &mut u32,
         process_stats: &mut ProcessShredsStats,
     ) -> Vec<Shred> {
         let mut serialize_time = Measure::start("shred_serialize");
@@ -137,7 +147,7 @@ impl Shredder {
             (data_buffer_size - serialized_shreds.len() % data_buffer_size) % data_buffer_size;
         // Integer division to ensure we have enough shreds to fit all the data
         let num_shreds = (serialized_shreds.len() + data_buffer_size - 1) / data_buffer_size;
-        let last_shred_index = next_shred_index + num_shreds as u32 - 1;
+        let last_shred_index = *next_shred_index + num_shreds as u32 - 1;
         // 1) Generate data shreds
         let make_data_shred = |data, shred_index: u32, fec_set_index: u32| {
             let flags = if shred_index != last_shred_index {
@@ -172,12 +182,13 @@ impl Shredder {
                 .zip(fec_set_offsets)
                 .enumerate()
                 .map(|(i, (shred, offset))| {
-                    let shred_index = next_shred_index + i as u32;
-                    let fec_set_index = next_shred_index + offset as u32;
+                    let shred_index = *next_shred_index + i as u32;
+                    let fec_set_index = *next_shred_index + offset as u32;
                     make_data_shred(shred, shred_index, fec_set_index)
                 })
                 .collect()
         });
+        *next_shred_index += u32::try_from(shreds.len()).unwrap();
         gen_data_time.stop();
 
         process_stats.serialize_elapsed += serialize_time.as_us();
@@ -190,7 +201,7 @@ impl Shredder {
     fn data_shreds_to_coding_shreds(
         keypair: &Keypair,
         data_shreds: &[Shred],
-        next_code_index: u32,
+        next_code_index: &mut u32,
         reed_solomon_cache: &ReedSolomonCache,
         process_stats: &mut ProcessShredsStats,
     ) -> Result<Vec<Shred>, Error> {
@@ -204,11 +215,11 @@ impl Shredder {
             .into_iter()
             .map(|(_, shreds)| shreds.collect())
             .collect();
-        let next_code_index: Vec<_> = std::iter::once(next_code_index)
+        let next_code_indices: Vec<_> = std::iter::once(*next_code_index)
             .chain(
                 chunks
                     .iter()
-                    .scan(next_code_index, |next_code_index, chunk| {
+                    .scan(*next_code_index, |next_code_index, chunk| {
                         let num_data_shreds = chunk.len();
                         let is_last_in_slot = chunk
                             .last()
@@ -226,7 +237,7 @@ impl Shredder {
         let mut coding_shreds: Vec<_> = if chunks.len() <= 1 {
             chunks
                 .into_iter()
-                .zip(next_code_index)
+                .zip(next_code_indices)
                 .flat_map(|(shreds, next_code_index)| {
                     Shredder::generate_coding_shreds(&shreds, next_code_index, reed_solomon_cache)
                 })
@@ -235,7 +246,7 @@ impl Shredder {
             PAR_THREAD_POOL.install(|| {
                 chunks
                     .into_par_iter()
-                    .zip(next_code_index)
+                    .zip(next_code_indices)
                     .flat_map(|(shreds, next_code_index)| {
                         Shredder::generate_coding_shreds(
                             &shreds,
@@ -246,6 +257,7 @@ impl Shredder {
                     .collect()
             })
         };
+        *next_code_index += u32::try_from(coding_shreds.len()).unwrap();
         gen_coding_time.stop();
 
         let mut sign_coding_time = Measure::start("sign_coding_shreds");
@@ -557,9 +569,11 @@ mod tests {
             is_last_in_slot,
             // chained_merkle_root
             chained.then(|| Hash::new_from_array(rand::thread_rng().gen())),
-            start_index, // next_shred_index
-            start_index, // next_code_index
-            true,        // merkle_variant
+            &mut Cursor {
+                next_shred_index: start_index,
+                next_code_index: start_index,
+            },
+            true, // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
         );
@@ -648,8 +662,10 @@ mod tests {
             is_last_in_slot,
             // chained_merkle_root
             chained.then(|| Hash::new_from_array(rand::thread_rng().gen())),
-            369,  // next_shred_index
-            776,  // next_code_index
+            &mut Cursor {
+                next_shred_index: 369,
+                next_code_index: 776,
+            },
             true, // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
@@ -685,8 +701,7 @@ mod tests {
             is_last_in_slot,
             // chained_merkle_root
             chained.then(|| Hash::new_from_array(rand::thread_rng().gen())),
-            0,    // next_shred_index
-            0,    // next_code_index
+            &mut Cursor::default(),
             true, // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
@@ -727,8 +742,7 @@ mod tests {
             is_last_in_slot,
             // chained_merkle_root
             chained.then(|| Hash::new_from_array(rand::thread_rng().gen())),
-            0,    // next_shred_index
-            0,    // next_code_index
+            &mut Cursor::default(),
             true, // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
@@ -775,8 +789,7 @@ mod tests {
             is_last_in_slot,
             // chained_merkle_root
             chained.then(|| Hash::new_from_array(rand::thread_rng().gen())),
-            0,    // next_shred_index
-            0,    // next_code_index
+            &mut Cursor::default(),
             true, // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
@@ -835,9 +848,8 @@ mod tests {
             &keypair,
             &entries,
             is_last_in_slot,
-            None,  // chained_merkle_root
-            0,     // next_shred_index
-            0,     // next_code_index
+            None, // chained_merkle_root
+            &mut Cursor::default(),
             false, // merkle_variant
             &reed_solomon_cache,
             &mut ProcessShredsStats::default(),
@@ -973,9 +985,11 @@ mod tests {
             &keypair,
             &entries,
             is_last_in_slot,
-            None,  // chained_merkle_root
-            25,    // next_shred_index,
-            25,    // next_code_index
+            None, // chained_merkle_root
+            &mut Cursor {
+                next_shred_index: 25,
+                next_code_index: 25,
+            },
             false, // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
@@ -1064,16 +1078,18 @@ mod tests {
             rng.gen(),                   // version
         )
         .unwrap();
-        let next_shred_index = rng.gen_range(1..1024);
+        let mut cursor = Cursor {
+            next_shred_index: rng.gen_range(1..1024),
+            next_code_index: rng.gen_range(1..1024),
+        };
         let reed_solomon_cache = ReedSolomonCache::default();
         let (data_shreds, coding_shreds) = shredder.entries_to_shreds(
             &keypair,
             &[entry],
             is_last_in_slot,
             None, // chained_merkle_root
-            next_shred_index,
-            next_shred_index, // next_code_index
-            false,            // merkle_variant
+            &mut cursor,
+            false, // merkle_variant
             &reed_solomon_cache,
             &mut ProcessShredsStats::default(),
         );
@@ -1138,8 +1154,7 @@ mod tests {
             is_last_in_slot,
             // chained_merkle_root
             chained.then(|| Hash::new_from_array(rand::thread_rng().gen())),
-            0,    // next_shred_index
-            0,    // next_code_index
+            &mut Cursor::default(),
             true, // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
@@ -1177,9 +1192,11 @@ mod tests {
             is_last_in_slot,
             // chained_merkle_root
             chained.then(|| Hash::new_from_array(rand::thread_rng().gen())),
-            start_index, // next_shred_index
-            start_index, // next_code_index
-            true,        // merkle_variant
+            &mut Cursor {
+                next_shred_index: start_index,
+                next_code_index: start_index,
+            },
+            true, // merkle_variant
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
         );
@@ -1232,16 +1249,16 @@ mod tests {
             .collect();
 
         let mut stats = ProcessShredsStats::default();
-        let start_index = 0x12;
+        let mut start_index = 0x12;
         let data_shreds = shredder.entries_to_data_shreds(
             &keypair,
             &entries,
             is_last_in_slot,
-            start_index,
+            &mut start_index,
             &mut stats,
         );
 
-        let next_code_index = data_shreds[0].index();
+        let mut next_code_index = data_shreds[0].index();
         let reed_solomon_cache = ReedSolomonCache::default();
 
         for size in (1..data_shreds.len()).step_by(5) {
@@ -1249,7 +1266,7 @@ mod tests {
             let coding_shreds = Shredder::data_shreds_to_coding_shreds(
                 &keypair,
                 data_shreds,
-                next_code_index,
+                &mut next_code_index,
                 &reed_solomon_cache,
                 &mut stats,
             )

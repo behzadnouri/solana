@@ -77,7 +77,7 @@ pub use {
         shred_data::ShredData,
         stats::{ProcessShredsStats, ShredFetchStats},
     },
-    crate::shredder::{ReedSolomonCache, Shredder},
+    crate::shredder::{Cursor, ReedSolomonCache, Shredder},
 };
 
 mod common;
