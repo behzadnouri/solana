@@ -81,10 +81,7 @@ impl Shredder {
         merkle_variant: bool,
         reed_solomon_cache: &ReedSolomonCache,
         stats: &mut ProcessShredsStats,
-    ) -> (
-        Vec<Shred>, // data shreds
-        Vec<Shred>, // coding shreds
-    ) {
+    ) -> Vec<Shred> {
         if merkle_variant {
             return shred::make_merkle_shreds_from_entries(
                 &PAR_THREAD_POOL,
@@ -102,12 +99,10 @@ impl Shredder {
                 stats,
             )
             .unwrap()
-            .into_iter()
-            .partition(Shred::is_data);
         }
         let data_shreds =
             self.entries_to_data_shreds(keypair, entries, is_last_in_slot, next_shred_index, stats);
-        let coding_shreds = Self::data_shreds_to_coding_shreds(
+        let mut coding_shreds = Self::data_shreds_to_coding_shreds(
             keypair,
             &data_shreds,
             next_code_index,
@@ -115,7 +110,8 @@ impl Shredder {
             stats,
         )
         .unwrap();
-        (data_shreds, coding_shreds)
+        data_shreds.append(&mut coding_shreds);
+        data_shreds
     }
 
     fn entries_to_data_shreds(

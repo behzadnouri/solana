@@ -2305,7 +2305,7 @@ impl Blockstore {
                         0
                     }
                 };
-                let (mut data_shreds, mut coding_shreds) = shredder.entries_to_shreds(
+                let mut shreds = shredder.entries_to_shreds(
                     keypair,
                     &current_entries,
                     true, // is_last_in_slot
@@ -2316,9 +2316,8 @@ impl Blockstore {
                     &reed_solomon_cache,
                     &mut ProcessShredsStats::default(),
                 );
-                all_shreds.append(&mut data_shreds);
-                all_shreds.append(&mut coding_shreds);
-                chained_merkle_root = Some(coding_shreds.last().unwrap().merkle_root().unwrap());
+                chained_merkle_root = Some(shreds.last().unwrap().merkle_root().unwrap());
+                all_shreds.append(&mut shreds);
                 shredder = Shredder::new(
                     current_slot,
                     parent_slot,
