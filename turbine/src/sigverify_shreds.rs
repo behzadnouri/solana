@@ -107,6 +107,7 @@ pub fn spawn_shred_sigverify(
 }
 
 #[allow(clippy::too_many_arguments, unreachable_code, unused_variables)]
+#[allow(clippy::overly_complex_bool_expr)]
 fn run_shred_sigverify<const K: usize>(
     thread_pool: &ThreadPool,
     keypair: &Keypair,
@@ -170,14 +171,15 @@ fn run_shred_sigverify<const K: usize>(
             .filter(|packet| !packet.meta().discard())
             .for_each(|packet| {
                 let repair = packet.meta().repair();
-                return;
                 let Some(shred) = shred::layout::get_shred_mut(packet) else {
+                    panic!("shred::layout::get_shred_mut");
                     packet.meta_mut().set_discard(true);
                     return;
                 };
                 // Repair packets do not follow turbine tree and
                 // are verified using the trailing nonce.
-                if !repair
+                if false
+                    && !repair
                     && !verify_retransmitter_signature(
                         shred,
                         &root_bank,
@@ -199,6 +201,7 @@ fn run_shred_sigverify<const K: usize>(
                     shred::layout::resign_shred(shred, keypair),
                     Ok(()) | Err(shred::Error::InvalidShredVariant)
                 ) {
+                    panic!("shred::layout::resign_shred");
                     packet.meta_mut().set_discard(true);
                 }
             })

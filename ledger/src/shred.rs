@@ -790,7 +790,23 @@ pub mod layout {
         shred: &mut [u8],
         signature: &Signature,
     ) -> Result<(), Error> {
-        let offset = get_retransmitter_signature_offset(shred)?;
+        let offset = match get_shred_variant(shred)? {
+            ShredVariant::LegacyCode | ShredVariant::LegacyData => Err(Error::InvalidShredVariant),
+            ShredVariant::MerkleCode {
+                proof_size,
+                chained,
+                resigned,
+            } => {
+                merkle::ShredCode::get_retransmitter_signature_offset(proof_size, chained, resigned)
+            }
+            ShredVariant::MerkleData {
+                proof_size,
+                chained,
+                resigned,
+            } => {
+                merkle::ShredData::get_retransmitter_signature_offset(proof_size, chained, resigned)
+            }
+        }?;
         let Some(buffer) = shred.get_mut(offset..offset + SIZE_OF_SIGNATURE) else {
             return Err(Error::InvalidPayloadSize(shred.len()));
         };
