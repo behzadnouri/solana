@@ -154,7 +154,7 @@ fn run_shred_sigverify<const K: usize>(
     verify_packets(
         thread_pool,
         &keypair.pubkey(),
-        &working_bank,
+        bank_forks,
         leader_schedule_cache,
         recycler_cache,
         &mut packets,
@@ -272,14 +272,15 @@ fn verify_retransmitter_signature(
 fn verify_packets(
     thread_pool: &ThreadPool,
     self_pubkey: &Pubkey,
-    working_bank: &Bank,
+    bank_forks: &RwLock<BankForks>,
     leader_schedule_cache: &LeaderScheduleCache,
     recycler_cache: &RecyclerCache,
     packets: &mut [PacketBatch],
     cache: &RwLock<LruCache>,
 ) {
+    let working_bank = bank_forks.read().unwrap().working_bank();
     let leader_slots: HashMap<Slot, Pubkey> =
-        get_slot_leaders(self_pubkey, packets, leader_schedule_cache, working_bank)
+        get_slot_leaders(self_pubkey, packets, leader_schedule_cache, &working_bank)
             .into_iter()
             .filter_map(|(slot, pubkey)| Some((slot, pubkey?)))
             .chain(std::iter::once((Slot::MAX, Pubkey::default())))
@@ -479,11 +480,10 @@ mod tests {
 
         let cache = RwLock::new(LruCache::new(/*capacity:*/ 128));
         let thread_pool = ThreadPoolBuilder::new().num_threads(3).build().unwrap();
-        let working_bank = bank_forks.read().unwrap().working_bank();
         verify_packets(
             &thread_pool,
             &Pubkey::new_unique(), // self_pubkey
-            &working_bank,
+            &bank_forks,
             &leader_schedule_cache,
             &RecyclerCache::warmed(),
             &mut batches,
