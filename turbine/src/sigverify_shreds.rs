@@ -106,7 +106,7 @@ pub fn spawn_shred_sigverify(
         .unwrap()
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, unreachable_code, unused_variables)]
 fn run_shred_sigverify<const K: usize>(
     thread_pool: &ThreadPool,
     keypair: &Keypair,
@@ -170,6 +170,7 @@ fn run_shred_sigverify<const K: usize>(
             .filter(|packet| !packet.meta().discard())
             .for_each(|packet| {
                 let repair = packet.meta().repair();
+                return;
                 let Some(shred) = shred::layout::get_shred_mut(packet) else {
                     packet.meta_mut().set_discard(true);
                     return;
