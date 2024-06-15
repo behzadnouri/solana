@@ -170,6 +170,17 @@ fn run_shred_sigverify<const K: usize>(
             .flatten()
             .filter(|packet| !packet.meta().discard())
             .for_each(|packet| {
+                if let Some(shred) = shred::layout::get_shred_mut(packet) {
+                    // We can ignore Error::InvalidShredVariant because that
+                    // basically means that the shred is of a variant which
+                    // cannot be signed by the retransmitter node.
+                    if !matches!(
+                        shred::layout::resign_shred(shred, keypair),
+                        Ok(()) | Err(shred::Error::InvalidShredVariant)
+                    ) {
+                        packet.meta_mut().set_discard(true);
+                    }
+                }
                 let repair = packet.meta().repair();
                 let Some(shred) = shred::layout::get_shred_mut(packet) else {
                     panic!("shred::layout::get_shred_mut");
@@ -193,16 +204,6 @@ fn run_shred_sigverify<const K: usize>(
                     stats
                         .num_invalid_retransmitter
                         .fetch_add(1, Ordering::Relaxed);
-                }
-                // We can ignore Error::InvalidShredVariant because that
-                // basically means that the shred is of a variant which
-                // cannot be signed by the retransmitter node.
-                if !matches!(
-                    shred::layout::resign_shred(shred, keypair),
-                    Ok(()) | Err(shred::Error::InvalidShredVariant)
-                ) {
-                    panic!("shred::layout::resign_shred");
-                    packet.meta_mut().set_discard(true);
                 }
             })
     });
