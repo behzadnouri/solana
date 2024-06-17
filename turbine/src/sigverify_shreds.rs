@@ -181,6 +181,7 @@ fn run_shred_sigverify<const K: usize>(
                         packet.meta_mut().set_discard(true);
                     }
                 }
+                return;
                 let repair = packet.meta().repair();
                 let Some(shred) = shred::layout::get_shred_mut(packet) else {
                     panic!("shred::layout::get_shred_mut");
