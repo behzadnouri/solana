@@ -3542,12 +3542,9 @@ impl Blockstore {
         slot: Slot,
         start_index: u64,
     ) -> Result<(CompletedRanges, Option<SlotMeta>)> {
-        let slot_meta = self.meta_cf.get(slot)?;
-        if slot_meta.is_none() {
-            return Ok((vec![], slot_meta));
-        }
-
-        let slot_meta = slot_meta.unwrap();
+        let Some(slot_meta) = self.meta_cf.get(slot)? else {
+            return Ok((vec![], None));
+        };
         // Find all the ranges for the completed data blocks
         let completed_ranges = Self::get_completed_data_ranges(
             start_index as u32,
