@@ -16,7 +16,7 @@ use {
         cluster_info::{Ping, CRDS_UNIQUE_PUBKEY_CAPACITY},
         crds::{Crds, CrdsError, Cursor, GossipRoute},
         crds_gossip,
-        crds_value::CrdsValue,
+        crds_value::{CrdsData, CrdsValue},
         ping_pong::PingCache,
         push_active_set::PushActiveSet,
         received_cache::ReceivedCache,
@@ -191,13 +191,25 @@ impl CrdsGossipPush {
         let crds = crds.read().unwrap();
         let entries = crds
             .get_entries(crds_cursor.deref_mut())
+            .inspect(|entry| {
+                if &entry.value.pubkey() == pubkey
+                    && matches!(&entry.value.data, CrdsData::ContactInfo(_))
+                {
+                    error!("new_push_messages_inspect_entry: {entry:?}")
+                }
+            })
             .map(|entry| &entry.value)
-            .filter(|value| wallclock_window.contains(&value.wallclock()));
+            .filter(|value| wallclock_window.contains(&value.wallclock()))
+            .inspect(|value| {
+                if &value.pubkey() == pubkey && matches!(&value.data, CrdsData::ContactInfo(_)) {
+                    error!("new_push_messages_inspect_value: {value:?}")
+                }
+            });
         for value in entries {
             let serialized_size = serialized_size(&value).unwrap();
             total_bytes = total_bytes.saturating_add(serialized_size as usize);
-            if total_bytes > self.max_bytes {
-                break;
+            if total_bytes > self.max_bytes && &value.pubkey() != pubkey {
+                continue;
             }
             num_values += 1;
             let origin = value.pubkey();
@@ -207,10 +219,22 @@ impl CrdsGossipPush {
                 |node| value.should_force_push(node),
                 stakes,
             );
+            let old_num_pushes = num_pushes;
             for node in nodes.take(self.push_fanout) {
                 push_messages.entry(*node).or_default().push(value.clone());
                 num_pushes += 1;
             }
+            if &origin == pubkey && matches!(&value.data, CrdsData::ContactInfo(_)) {
+                error!(
+                    "new_push_messages_contact_info: {}, {value:?}",
+                    num_pushes - old_num_pushes
+                );
+            }
+        }
+        {
+            let mut cursor: Cursor = crds_cursor.clone();
+            let count = crds.get_entries(&mut cursor).count();
+            error!("new_push_messages_entries_left: {count}");
         }
         drop(crds);
         drop(crds_cursor);

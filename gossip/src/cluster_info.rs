@@ -87,7 +87,7 @@ use {
         iter::repeat,
         net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, UdpSocket},
         num::NonZeroUsize,
-        ops::{Deref, Div},
+        ops::{Deref, DerefMut, Div},
         path::{Path, PathBuf},
         result::Result,
         sync::{
@@ -181,6 +181,7 @@ pub struct ClusterInfo {
     instance: RwLock<NodeInstance>,
     contact_info_path: PathBuf,
     socket_addr_space: SocketAddrSpace,
+    cursor: Mutex<Cursor>,
 }
 
 #[cfg_attr(feature = "frozen-abi", derive(AbiExample))]
@@ -479,6 +480,7 @@ impl ClusterInfo {
             contact_info_path: PathBuf::default(),
             contact_save_interval: 0, // disabled
             socket_addr_space,
+            cursor: Mutex::default(),
         };
         me.refresh_my_gossip_contact_info();
         me
@@ -1460,17 +1462,32 @@ impl ClusterInfo {
             LegacyContactInfo::try_from(&node)
                 .map(CrdsData::LegacyContactInfo)
                 .expect("Operator must spin up node with valid contact-info"),
-            CrdsData::ContactInfo(node),
+            CrdsData::ContactInfo(node.clone()),
             CrdsData::NodeInstance(instance),
         ]
         .into_iter()
         .map(|entry| CrdsValue::new_signed(entry, &keypair))
         .collect();
+        error!("refresh_my_gossip_contact_info: {entries:?}");
         let mut gossip_crds = self.gossip.crds.write().unwrap();
+        let mut cursor = self.cursor.lock().unwrap();
+        let _count = gossip_crds.get_entries(cursor.deref_mut()).count();
         for entry in entries {
             if let Err(err) = gossip_crds.insert(entry, timestamp(), GossipRoute::LocalMessage) {
                 error!("Insert self failed: {err:?}");
             }
+        }
+        let other: Option<&ContactInfo> = gossip_crds.get(keypair.pubkey());
+        if other != Some(&node) {
+            error!("contact_info_mismatch: {node:?}, {other:?}");
+        }
+        let node = CrdsData::ContactInfo(node);
+        if gossip_crds
+            .get_entries(cursor.deref_mut())
+            .find(|entry| &entry.value.data == &node)
+            .is_none()
+        {
+            error!("contact_info_not_found!");
         }
     }
 
@@ -1728,6 +1745,33 @@ impl ClusterInfo {
             stakes,
             generate_pull_requests,
         );
+        let key = self.id();
+        for (addr, msg) in &reqs {
+            match msg {
+                Protocol::PullRequest(_, _) => (),
+                Protocol::PullResponse(_, values) => {
+                    for value in values {
+                        if matches!(&value.data, CrdsData::ContactInfo(node) if node.pubkey() == &key)
+                        {
+                            let size = bincode::serialized_size(msg).unwrap();
+                            error!("run_gossip_pull_response: {addr:?}, {size}, {msg:?}");
+                        }
+                    }
+                }
+                Protocol::PushMessage(_, values) => {
+                    for value in values {
+                        if matches!(&value.data, CrdsData::ContactInfo(node) if node.pubkey() == &key)
+                        {
+                            let size = bincode::serialized_size(msg).unwrap();
+                            error!("run_gossip_push_message: {addr:?}, {size}, {msg:?}");
+                        }
+                    }
+                }
+                Protocol::PruneMessage(..) => (),
+                Protocol::PingMessage(_) => (),
+                Protocol::PongMessage(_) => (),
+            }
+        }
         if !reqs.is_empty() {
             let packet_batch = PacketBatch::new_unpinned_with_recycler_data_and_dests(
                 recycler,
