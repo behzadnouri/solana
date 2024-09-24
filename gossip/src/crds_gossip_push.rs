@@ -193,12 +193,9 @@ impl CrdsGossipPush {
             .get_entries(crds_cursor.deref_mut())
             .map(|entry| &entry.value)
             .filter(|value| wallclock_window.contains(&value.wallclock()));
-        for value in entries {
+        'outer: for value in entries {
             let serialized_size = serialized_size(&value).unwrap();
             total_bytes = total_bytes.saturating_add(serialized_size as usize);
-            if total_bytes > self.max_bytes {
-                break;
-            }
             num_values += 1;
             let origin = value.pubkey();
             let nodes = active_set.get_nodes(
@@ -210,11 +207,20 @@ impl CrdsGossipPush {
             for node in nodes.take(self.push_fanout) {
                 push_messages.entry(*node).or_default().push(value.clone());
                 num_pushes += 1;
+                // 10_000: ok
+                // 5_000: ok
+                if num_pushes > 10_000 {
+                    break 'outer;
+                }
             }
         }
         drop(crds);
         drop(crds_cursor);
         drop(active_set);
+        error!(
+            "new_push_messages: {num_values} values, {num_pushes} pushes, {} packets",
+            (total_bytes + PACKET_DATA_SIZE - 1) / PACKET_DATA_SIZE
+        );
         self.num_pushes.fetch_add(num_pushes, Ordering::Relaxed);
         (push_messages, num_values, num_pushes)
     }
