@@ -2058,7 +2058,6 @@ pub fn main() {
     // false duplicate nodes error.
     // Below line refreshes the timestamp on contact-info so that it overrides
     // the one pushed by bootstrap.
-    assert_eq!(node.info.pubkey(), &identity_keypair.pubkey());
     node.info.hot_swap_pubkey(identity_keypair.pubkey());
 
     let validator = match Validator::new(
