@@ -1374,9 +1374,26 @@ impl ClusterInfo {
     /// all validators that have a valid tvu port regardless of `shred_version`.
     pub fn all_tvu_peers(&self) -> Vec<ContactInfo> {
         let self_pubkey = self.id();
-        self.time_gossip_read_lock("all_tvu_peers", &self.stats.all_tvu_peers)
-            .get_nodes_contact_info()
+        let crds = self.time_gossip_read_lock("all_tvu_peers", &self.stats.all_tvu_peers);
+        let now = timestamp();
+        crds.get_nodes_contact_info()
             .filter(|node| {
+                if node.version().major != 1 && node.shred_version() == 33276 {
+                    error!(
+                        "all_tvu_peers: {}, shred_version: {}, age: {}s, version: {}, gossip: {:?}, tvu: {:?}, check: {}",
+                        node.pubkey(),
+                        node.shred_version(),
+                        now.saturating_sub(node.wallclock()) / 1_000,
+                        node.version(),
+                        node.gossip().ok(),
+                        node.tvu(contact_info::Protocol::UDP).ok(),
+                        self.check_socket_addr_space(&node.tvu(contact_info::Protocol::UDP)),
+                    );
+                    // error!("all_tvu_peers: {:?}",LegacyContactInfo::try_from(*node));
+                    if let Some(other) = crds.get::<&LegacyContactInfo>(*node.pubkey()) {
+                        error!("all_tvu_peers: {}, {other:?}", self.check_socket_addr_space(&other.tvu(contact_info::Protocol::UDP)));
+                    }
+                }
                 node.pubkey() != &self_pubkey
                     && self.check_socket_addr_space(&node.tvu(contact_info::Protocol::UDP))
             })

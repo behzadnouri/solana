@@ -2598,6 +2598,11 @@ fn get_stake_percent_in_gossip(bank: &Bank, cluster_info: &ClusterInfo, log: boo
     let my_id = cluster_info.id();
 
     for (activated_stake, vote_account) in bank.vote_accounts().values() {
+        error!(
+            "node_pubkey: {}, activated_stake: {}",
+            vote_account.node_pubkey(),
+            activated_stake
+        );
         let activated_stake = *activated_stake;
         total_activated_stake += activated_stake;
 
@@ -2613,19 +2618,35 @@ fn get_stake_percent_in_gossip(bank: &Bank, cluster_info: &ClusterInfo, log: boo
                     vote_state_node_pubkey,
                     activated_stake
                 );
+                error!(
+                    "gossip peer: {}, activated_stake: {}",
+                    peer.pubkey(),
+                    activated_stake
+                );
                 online_stake += activated_stake;
             } else {
+                error!(
+                    "activated_stake: {activated_stake}, peer: {}, shred_version: {}, age: {}s, version: {}, gossip: {:?}, tvu: {:?}",
+                    peer.pubkey(),
+                    peer.shred_version(),
+                    timestamp().saturating_sub(peer.wallclock()) / 1_000,
+                    peer.version(),
+                    peer.gossip().ok(),
+                    peer.tvu(solana_gossip::contact_info::Protocol::UDP).ok(),
+                );
                 wrong_shred_stake += activated_stake;
                 wrong_shred_nodes.push((activated_stake, vote_state_node_pubkey));
             }
         } else if vote_state_node_pubkey == my_id {
             online_stake += activated_stake; // This node is online
         } else {
+            error!("offline peer: {vote_state_node_pubkey}, activated_stake: {activated_stake}");
             offline_stake += activated_stake;
             offline_nodes.push((activated_stake, vote_state_node_pubkey));
         }
     }
 
+    error!("online_stake: {online_stake}, total_activated_stake: {total_activated_stake}");
     let online_stake_percentage = (online_stake as f64 / total_activated_stake as f64) * 100.;
     if log {
         info!(

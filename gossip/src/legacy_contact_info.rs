@@ -3,7 +3,8 @@ use crate::contact_info::{get_quic_socket, sanitize_socket};
 use {
     crate::{
         contact_info::{
-            sanitize_quic_offset, ContactInfo, Error, Protocol, SOCKET_ADDR_UNSPECIFIED,
+            sanitize_quic_offset, sanitize_socket, ContactInfo, Error, Protocol,
+            SOCKET_ADDR_UNSPECIFIED,
         },
         crds_value::MAX_WALLCLOCK,
     },
@@ -63,7 +64,6 @@ macro_rules! get_socket {
         }
     };
     ($name:ident, $quic:ident) => {
-        #[cfg(test)]
         pub(crate) fn $name(&self, protocol: Protocol) -> Result<SocketAddr, Error> {
             let socket = match protocol {
                 Protocol::QUIC => &self.$quic,

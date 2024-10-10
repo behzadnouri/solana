@@ -52,6 +52,7 @@ use {
         collections::{hash_map, BTreeMap, HashMap, VecDeque},
         ops::{Bound, Index, IndexMut},
         sync::Mutex,
+        str::FromStr,
     },
 };
 
@@ -241,6 +242,11 @@ impl Crds {
         now: u64,
         route: GossipRoute,
     ) -> Result<(), CrdsError> {
+        let offline = Pubkey::from_str("FT9QgTVo375TgDAQusTgpsfXqTosCJLfrBpoVdcbnhtS").unwrap();
+        let offline = matches!(&value.data, CrdsData::ContactInfo(_)) && value.pubkey() == offline;
+        if offline {
+            error!("{value:?}");
+        }
         let label = value.label();
         let pubkey = value.pubkey();
         let value = VersionedCrdsValue::new(value, self.cursor, now, route);
@@ -273,6 +279,9 @@ impl Crds {
                 Ok(())
             }
             Entry::Occupied(mut entry) if overrides(&value.value, entry.get()) => {
+                if offline {
+                    error!("overrides entry: {:?}", entry.get());
+                }
                 stats.record_insert(&value, route);
                 let entry_index = entry.index();
                 self.shards.remove(entry_index, entry.get());
@@ -309,6 +318,9 @@ impl Crds {
                 Ok(())
             }
             Entry::Occupied(mut entry) => {
+                if offline {
+                    error!("duplicate entry: {:?}", entry.get());
+                }
                 stats.record_fail(&value, route);
                 trace!(
                     "INSERT FAILED data: {} new.wallclock: {}",
