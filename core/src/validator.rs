@@ -2390,6 +2390,7 @@ fn get_stake_percent_in_gossip(bank: &Bank, cluster_info: &ClusterInfo, log: boo
     let my_id = cluster_info.id();
 
     for (activated_stake, vote_account) in bank.vote_accounts().values() {
+        error!("node_pubkey: {:?}, activated_stake: {activated_stake}", vote_account.node_pubkey());
         let activated_stake = *activated_stake;
         total_activated_stake += activated_stake;
 
@@ -2405,6 +2406,7 @@ fn get_stake_percent_in_gossip(bank: &Bank, cluster_info: &ClusterInfo, log: boo
                     vote_state_node_pubkey,
                     activated_stake
                 );
+                error!("gossip peer: {}, activated_stake: {}", peer.pubkey(), activated_stake);
                 online_stake += activated_stake;
             } else {
                 wrong_shred_stake += activated_stake;
@@ -2418,6 +2420,7 @@ fn get_stake_percent_in_gossip(bank: &Bank, cluster_info: &ClusterInfo, log: boo
         }
     }
 
+    error!("online_stake: {online_stake}, total_activated_stake: {total_activated_stake}");
     let online_stake_percentage = (online_stake as f64 / total_activated_stake as f64) * 100.;
     if log {
         info!(
