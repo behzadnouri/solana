@@ -235,6 +235,30 @@ impl Crds {
         }
     }
 
+    fn error_crds_value_size(value: &CrdsValue) {
+        use rand::Rng;
+        if !rand::thread_rng().gen_ratio(1, 10_000) {
+            return;
+        }
+        let name: &str = match &value.data {
+            CrdsData::LegacyContactInfo(..) => "LegacyContactInfo",
+            CrdsData::Vote(..) => "Vote",
+            CrdsData::LowestSlot(..) => "LowestSlot",
+            CrdsData::LegacySnapshotHashes(..) => "LegacySnapshotHashes",
+            CrdsData::AccountsHashes(..) => "AccountsHashes",
+            CrdsData::EpochSlots(..) => "EpochSlots",
+            CrdsData::LegacyVersion(..) => "LegacyVersion",
+            CrdsData::Version(..) => "Version",
+            CrdsData::NodeInstance(..) => "NodeInstance",
+            CrdsData::DuplicateShred(..) => "DuplicateShred",
+            CrdsData::SnapshotHashes(..) => "SnapshotHashes",
+            CrdsData::ContactInfo(..) => "ContactInfo",
+            CrdsData::RestartLastVotedForkSlots(..) => "RestartLastVotedForkSlots",
+            CrdsData::RestartHeaviestFork(..) => "RestartHeaviestFork",
+        };
+        error!("crds_value_size: {name}, {}", bincode::serialized_size(value).unwrap());
+    }
+
     pub fn insert(
         &mut self,
         value: CrdsValue,
@@ -247,6 +271,7 @@ impl Crds {
         let mut stats = self.stats.lock().unwrap();
         match self.table.entry(label) {
             Entry::Vacant(entry) => {
+                Self::error_crds_value_size(&value.value);
                 stats.record_insert(&value, route);
                 let entry_index = entry.index();
                 self.shards.insert(entry_index, &value);
@@ -273,6 +298,7 @@ impl Crds {
                 Ok(())
             }
             Entry::Occupied(mut entry) if overrides(&value.value, entry.get()) => {
+                Self::error_crds_value_size(&value.value);
                 stats.record_insert(&value, route);
                 let entry_index = entry.index();
                 self.shards.remove(entry_index, entry.get());
