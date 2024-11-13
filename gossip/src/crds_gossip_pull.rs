@@ -166,16 +166,16 @@ impl CrdsFilterSet {
         Self { filters, mask_bits }
     }
 
-    fn add(&self, hash_value: Hash) {
+    fn add(&self, hash_value: &Hash) {
         let shift = u64::BITS.checked_sub(self.mask_bits).unwrap();
         let index = usize::try_from(
-            CrdsFilter::hash_as_u64(&hash_value)
+            CrdsFilter::hash_as_u64(hash_value)
                 .checked_shr(shift)
                 .unwrap_or_default(),
         )
         .unwrap();
         if let Some(filter) = &self.filters[index] {
-            filter.add(&hash_value);
+            filter.add(hash_value);
         }
     }
 }
@@ -427,13 +427,13 @@ impl CrdsGossipPull {
         thread_pool.install(|| {
             crds.par_values()
                 .with_min_len(PAR_MIN_LENGTH)
-                .map(|v| *v.value.hash())
+                .map(|v| v.value.hash())
                 .chain(crds.purged().with_min_len(PAR_MIN_LENGTH))
                 .chain(
                     failed_inserts
                         .par_iter()
                         .with_min_len(PAR_MIN_LENGTH)
-                        .map(|(v, _)| *v),
+                        .map(|(v, _)| v),
                 )
                 .for_each(|v| filters.add(v));
         });
@@ -729,7 +729,7 @@ pub(crate) mod tests {
         .collect();
         assert_eq!(crds_filter_set.filters.len(), 8192);
         for hash_value in &hash_values {
-            crds_filter_set.add(*hash_value);
+            crds_filter_set.add(hash_value);
         }
         let filters: Vec<CrdsFilter> = crds_filter_set.into();
         let mut num_hits = 0;
@@ -813,7 +813,7 @@ pub(crate) mod tests {
         let purged: Vec<_> = thread_pool.install(|| crds.purged().collect());
         let hash_values: Vec<_> = crds
             .values()
-            .map(|v| *v.value.hash())
+            .map(|v| v.value.hash())
             .chain(purged)
             .collect();
         // CrdsValue::new_rand may generate exact same value twice in which
@@ -828,13 +828,13 @@ pub(crate) mod tests {
         for hash_value in hash_values {
             let mut hit = false;
             for filter in &filters {
-                if filter.test_mask(&hash_value) {
+                if filter.test_mask(hash_value) {
                     num_hits += 1;
                     assert!(!hit);
                     hit = true;
-                    assert!(filter.contains(&hash_value));
-                    assert!(filter.filter.contains(&hash_value));
-                } else if filter.filter.contains(&hash_value) {
+                    assert!(filter.contains(hash_value));
+                    assert!(filter.filter.contains(hash_value));
+                } else if filter.filter.contains(hash_value) {
                     false_positives += 1;
                 }
             }

@@ -447,8 +447,8 @@ impl Crds {
         self.purged.len()
     }
 
-    pub(crate) fn purged(&self) -> impl IndexedParallelIterator<Item = Hash> + '_ {
-        self.purged.par_iter().map(|(hash, _)| *hash)
+    pub(crate) fn purged(&self) -> impl IndexedParallelIterator<Item = &Hash> + '_ {
+        self.purged.par_iter().map(|(hash, _)| hash)
     }
 
     /// Drops purged value hashes with timestamp less than the given one.
