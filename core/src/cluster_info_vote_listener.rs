@@ -277,6 +277,8 @@ impl ClusterInfoVoteListener {
         votes: Vec<Transaction>,
         root_bank_cache: &mut RootBankCache,
     ) -> (Vec<Transaction>, Vec<PacketBatch>) {
+        // Why chunk_size == 1?!
+        // this is quite wasteful to copy votes into packets for cpu sigverify?!
         let mut packet_batches = packet::to_packet_batches(&votes, 1);
 
         // Votes should already be filtered by this point.
@@ -296,6 +298,7 @@ impl ClusterInfoVoteListener {
                 !packet_batch[0].meta().discard()
             })
             .filter_map(|(tx, packet_batch)| {
+                // Gossip votes are already parsed in crds_data::Vote::new!
                 let (vote_account_key, vote, ..) = vote_parser::parse_vote_transaction(&tx)?;
                 let slot = vote.last_voted_slot()?;
                 let epoch = epoch_schedule.get_epoch(slot);

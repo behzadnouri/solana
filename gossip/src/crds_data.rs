@@ -344,7 +344,7 @@ impl Vote {
         &self.transaction
     }
 
-    pub(crate) fn slot(&self) -> Option<Slot> {
+    pub(crate) fn xslot(&self) -> Option<Slot> {
         self.slot
     }
 }

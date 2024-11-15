@@ -16,6 +16,7 @@ use {
     },
 };
 
+// Why this doesn't use an atomic?
 // Used to notify bank hash cache that slots have been dumped by replay
 pub type DumpedSlotSubscription = Arc<Mutex<bool>>;
 

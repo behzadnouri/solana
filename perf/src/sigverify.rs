@@ -335,6 +335,7 @@ fn get_packet_offsets(
             return offsets;
         }
     }
+    // what the fuck?
     // force sigverify to fail by returning zeros
     PacketOffsets::new(0, 0, 0, 0, 0)
 }
