@@ -489,11 +489,6 @@ impl WindowService {
         let handle_error = || {
             inc_new_counter_error!("solana-window-insert-error", 1, 1);
         };
-        let thread_pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(get_thread_count().min(8))
-            .thread_name(|i| format!("solWinInsert{i:02}"))
-            .build()
-            .unwrap();
         let reed_solomon_cache = ReedSolomonCache::default();
         Builder::new()
             .name("solWinInsert".to_string())
@@ -501,6 +496,12 @@ impl WindowService {
                 let handle_duplicate = |possible_duplicate_shred| {
                     let _ = check_duplicate_sender.send(possible_duplicate_shred);
                 };
+                let thread_pool = rayon::ThreadPoolBuilder::new()
+                    .num_threads(get_thread_count().min(8))
+                    .use_current_thread()
+                    .thread_name(|i| format!("solWinInsert{i:02}"))
+                    .build()
+                    .unwrap();
                 let mut metrics = BlockstoreInsertionMetrics::default();
                 let mut ws_metrics = WindowServiceMetrics::default();
                 let mut last_print = Instant::now();
