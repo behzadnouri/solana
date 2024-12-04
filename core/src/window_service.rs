@@ -309,15 +309,31 @@ where
             Some((shred, None))
         }
     };
+    // use rand::Rng;
+    let num_packets = packets.iter().map(PacketBatch::len).sum::<usize>();
+    // if rand::thread_rng().gen_ratio(1, 4_000) {
+    //     error!(
+    //         "run_insert: num_packet_batches: {}, num_packets: {num_packets}",
+    //         packets.len()
+    //     );
+    // }
     let now = Instant::now();
-    let (mut shreds, mut repair_infos): (Vec<_>, Vec<_>) = thread_pool.install(|| {
+    let (mut shreds, mut repair_infos): (Vec<_>, Vec<_>) = if num_packets < 32 {
         packets
-            .par_iter()
-            .flat_map_iter(|packets| packets.iter().filter_map(handle_packet))
+            .iter()
+            .flat_map(|packets| packets.iter().filter_map(handle_packet))
             .unzip()
-    });
+    } else {
+        thread_pool.install(|| {
+            packets
+                .par_iter()
+                .flat_map(PacketBatch::par_iter)
+                .filter_map(handle_packet)
+                .unzip()
+        })
+    };
     ws_metrics.handle_packets_elapsed_us += now.elapsed().as_micros() as u64;
-    ws_metrics.num_packets += packets.iter().map(PacketBatch::len).sum::<usize>();
+    ws_metrics.num_packets += num_packets;
     ws_metrics.num_repairs += repair_infos.iter().filter(|r| r.is_some()).count();
     ws_metrics.num_shreds_received += shreds.len();
     for packet in packets.iter().flat_map(PacketBatch::iter) {
