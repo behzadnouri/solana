@@ -313,7 +313,8 @@ where
     let (mut shreds, mut repair_infos): (Vec<_>, Vec<_>) = thread_pool.install(|| {
         packets
             .par_iter()
-            .flat_map_iter(|packets| packets.iter().filter_map(handle_packet))
+            .flat_map(PacketBatch::par_iter)
+            .filter_map(handle_packet)
             .unzip()
     });
     ws_metrics.handle_packets_elapsed_us += now.elapsed().as_micros() as u64;
