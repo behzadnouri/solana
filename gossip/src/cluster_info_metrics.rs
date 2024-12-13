@@ -189,6 +189,24 @@ pub(crate) fn submit_gossip_stats(
 ) {
     let (crds_stats, table_size, num_nodes, num_pubkeys, purged_values_size, failed_inserts_size) = {
         let gossip_crds = gossip.crds.read().unwrap();
+        use {crate::contact_info::ContactInfo, rand::Rng};
+        if rand::thread_rng().gen_ratio(1, 100) {
+            let nodes: Vec<ContactInfo> = gossip_crds.get_nodes_contact_info().cloned().collect();
+            let (bytes, serialize_elapsed) = {
+                let now = Instant::now();
+                let bytes = bincode::serialize(&nodes).unwrap();
+                (bytes, now.elapsed())
+            };
+            let derserilize_elapsed = {
+                let now = Instant::now();
+                let other: Vec<ContactInfo> = bincode::deserialize(&bytes).unwrap();
+                let elapsed = now.elapsed();
+                assert_eq!(other.len(), nodes.len());
+                let _ = std::hint::black_box(other);
+                elapsed
+            };
+            error!("contact-info-serde: num_nodes: {}, bytes: {}, ser: {serialize_elapsed:?}, de: {derserilize_elapsed:?}", nodes.len(), bytes.len());
+        }
         (
             gossip_crds.take_stats(),
             gossip_crds.len(),
