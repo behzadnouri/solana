@@ -29,6 +29,8 @@ const BIT_MASK: usize = FANOUT - 1;
 ///     non-zero weighted indices.
 #[derive(Clone)]
 pub struct WeightedShuffle<T> {
+    // XXX should adjust this in Self.remove... methods!
+    num_weights: usize,
     // Number of "internal" nodes of the tree.
     num_nodes: usize,
     // Underlying array implementing the tree.
@@ -96,6 +98,7 @@ where
             datapoint_error!("weighted-shuffle-overflow", (name, num_overflow, i64));
         }
         Self {
+            num_weights: weights.len(),
             num_nodes,
             tree,
             weight: sum,
@@ -190,22 +193,13 @@ impl<'a, T: 'a> WeightedShuffle<T>
 where
     T: Copy + ConstZero + PartialOrd + AddAssign + SampleUniform + SubAssign + Sub<Output = T>,
 {
-    pub fn shuffle<R: Rng>(mut self, rng: &'a mut R) -> impl Iterator<Item = usize> + 'a {
-        std::iter::from_fn(move || {
-            if self.weight > Self::ZERO {
-                let sample =
-                    <T as SampleUniform>::Sampler::sample_single(Self::ZERO, self.weight, rng);
-                let (index, weight) = WeightedShuffle::search(&self, sample);
-                self.remove(index, weight);
-                return Some(index);
-            }
-            if self.zeros.is_empty() {
-                return None;
-            }
-            let index =
-                <usize as SampleUniform>::Sampler::sample_single(0usize, self.zeros.len(), rng);
-            Some(self.zeros.swap_remove(index))
-        })
+    pub fn shuffle<R: Rng>(self, rng: &'a mut R) -> Iter<'a, R, T> {
+        let size = self.num_weights;
+        Iter {
+            rng,
+            weighted_shuffle: self,
+            size,
+        }
     }
 }
 
@@ -221,6 +215,59 @@ fn get_num_nodes_and_tree_size(count: usize) -> (/*num_nodes:*/ usize, /*tree_si
         nodes *= FANOUT;
     }
     (size + nodes, size + (count + FANOUT - 1) / FANOUT)
+}
+
+pub struct Iter<'a, R, T> {
+    rng: &'a mut R,
+    weighted_shuffle: WeightedShuffle<T>,
+    size: usize,
+}
+
+impl<'a, R: Rng, T> Iterator for Iter<'a, R, T>
+where
+    T: Copy + ConstZero + PartialOrd + AddAssign + SampleUniform + SubAssign + Sub<Output = T>,
+{
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.weighted_shuffle.weight > WeightedShuffle::<T>::ZERO {
+            let sample = <T as SampleUniform>::Sampler::sample_single(
+                WeightedShuffle::<T>::ZERO,
+                self.weighted_shuffle.weight,
+                self.rng,
+            );
+            let (index, weight) = WeightedShuffle::search(&self.weighted_shuffle, sample);
+            self.weighted_shuffle.remove(index, weight);
+            self.size -= 1;
+            return Some(index);
+        }
+        if self.weighted_shuffle.zeros.is_empty() {
+            return None;
+        }
+        let index = <usize as SampleUniform>::Sampler::sample_single(
+            0usize,
+            self.weighted_shuffle.zeros.len(),
+            self.rng,
+        );
+        self.size -= 1;
+        Some(self.weighted_shuffle.zeros.swap_remove(index))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.size, Some(self.size))
+    }
+}
+
+impl<'a, R, T> ExactSizeIterator for Iter<'a, R, T>
+where
+    R: Rng,
+    T: Copy + ConstZero + PartialOrd + AddAssign + SampleUniform + SubAssign + Sub<Output = T>,
+{
+    #[inline]
+    fn len(&self) -> usize {
+        self.size
+    }
 }
 
 #[cfg(test)]
@@ -407,6 +454,10 @@ mod tests {
         );
         let mut rng = ChaChaRng::from_seed(seed);
         assert_eq!(shuffle.first(&mut rng), Some(17));
+        {
+            let mut shuffle = WeightedShuffle::new("", &weights);
+            dbg!(shuffle.shuffle(&mut rng).size_hint());
+        }
     }
 
     #[test]
