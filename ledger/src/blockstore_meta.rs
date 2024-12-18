@@ -124,16 +124,6 @@ pub struct IndexV2 {
     coding: ShredIndexV2,
 }
 
-impl From<IndexV2> for Index {
-    fn from(index: IndexV2) -> Self {
-        Index {
-            slot: index.slot,
-            data: index.data.into(),
-            coding: index.coding.into(),
-        }
-    }
-}
-
 impl From<Index> for IndexV2 {
     fn from(index: Index) -> Self {
         IndexV2 {
@@ -258,39 +248,42 @@ pub struct FrozenHashStatus {
     pub is_duplicate_confirmed: bool,
 }
 
-impl Index {
+impl IndexV2 {
     pub(crate) fn new(slot: Slot) -> Self {
-        Index {
+        Self {
             slot,
-            data: ShredIndex::default(),
-            coding: ShredIndex::default(),
+            data: ShredIndexV2::default(),
+            coding: ShredIndexV2::default(),
         }
     }
 
-    pub fn data(&self) -> &ShredIndex {
+    pub fn data(&self) -> &ShredIndexV2 {
         &self.data
     }
-    pub fn coding(&self) -> &ShredIndex {
+    pub fn coding(&self) -> &ShredIndexV2 {
         &self.coding
     }
 
-    pub(crate) fn data_mut(&mut self) -> &mut ShredIndex {
+    pub(crate) fn data_mut(&mut self) -> &mut ShredIndexV2 {
         &mut self.data
     }
-    pub(crate) fn coding_mut(&mut self) -> &mut ShredIndex {
+    pub(crate) fn coding_mut(&mut self) -> &mut ShredIndexV2 {
         &mut self.coding
     }
 }
+
 
 /// Superseded by [`ShredIndexV2`].
 ///
 /// TODO: Remove this once new [`ShredIndexV2`] is fully rolled out
 /// and no longer relies on it for fallback.
 impl ShredIndex {
+    #[cfg(test)]
     pub fn num_shreds(&self) -> usize {
         self.index.len()
     }
 
+    #[cfg(test)]
     pub(crate) fn range<R>(&self, bounds: R) -> impl Iterator<Item = &u64>
     where
         R: RangeBounds<u64>,
@@ -298,17 +291,9 @@ impl ShredIndex {
         self.index.range(bounds)
     }
 
-    pub(crate) fn contains(&self, index: u64) -> bool {
-        self.index.contains(&index)
-    }
-
+    #[cfg(test)]
     pub(crate) fn insert(&mut self, index: u64) {
         self.index.insert(index);
-    }
-
-    #[cfg(test)]
-    fn remove(&mut self, index: u64) {
-        self.index.remove(&index);
     }
 }
 
@@ -634,6 +619,7 @@ impl ShredIndexV2 {
             })
     }
 
+    #[cfg(test)]
     fn iter(&self) -> impl Iterator<Item = u64> + '_ {
         self.range(0..MAX_DATA_SHREDS_PER_SLOT as u64)
     }
@@ -655,6 +641,7 @@ impl From<ShredIndex> for ShredIndexV2 {
     }
 }
 
+#[cfg(test)]
 impl From<ShredIndexV2> for ShredIndex {
     fn from(value: ShredIndexV2) -> Self {
         ShredIndex {
@@ -831,7 +818,7 @@ impl ErasureMeta {
         self.fec_set_index.checked_add(num_data)
     }
 
-    pub(crate) fn status(&self, index: &Index) -> ErasureMetaStatus {
+    pub(crate) fn status(&self, index: &IndexV2) -> ErasureMetaStatus {
         use ErasureMetaStatus::*;
 
         let num_coding = index.coding().range(self.coding_shreds_indices()).count();
@@ -1007,7 +994,7 @@ mod test {
             first_received_coding_index: 0,
         };
         let mut rng = thread_rng();
-        let mut index = Index::new(0);
+        let mut index = IndexV2::new(0);
 
         let data_indexes = 0..erasure_config.num_data as u64;
         let coding_indexes = 0..erasure_config.num_coding as u64;
