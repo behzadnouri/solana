@@ -67,7 +67,8 @@ impl<const K: usize, T: ?Sized + Hash> Deduper<K, T> {
     #[allow(clippy::arithmetic_side_effects)]
     pub fn dedup(&self, data: &T) -> bool {
         let mut out = true;
-        for mut hasher in self.hashers.iter().map(AHasher::clone) {
+        for hasher in &self.hashers {
+            let mut hasher = hasher.clone();
             data.hash(&mut hasher);
             let hash: u64 = hasher.finish() % self.num_bits;
             let index = (hash >> 6) as usize;
