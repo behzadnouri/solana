@@ -184,7 +184,8 @@ impl ClusterNodes<RetransmitStage> {
             // If there are 2 nodes in the shuffle with the same socket-addr,
             // we only send shreds to the first one. The hash-set below allows
             // to track if a socket-addr was observed earlier in the shuffle.
-            let mut addrs = HashSet::<SocketAddr>::with_capacity(self.nodes.len());
+            let mut addrs =
+                HashSet::with_capacity_and_hasher(self.nodes.len(), ahash::RandomState::new());
             weighted_shuffle.shuffle(&mut rng).map(move |index| {
                 let node = &self.nodes[index];
                 let addr: Option<SocketAddr> = node
