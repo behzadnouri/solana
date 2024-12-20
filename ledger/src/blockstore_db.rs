@@ -1670,6 +1670,7 @@ where
     /// Get the value associated with a key, applying a function to the raw bytes.
     ///
     /// Like [`get`](Self::get), but delegates deserialization to a provided function.
+    #[cfg(test)]
     pub fn get_with<F>(&self, key: C::Index, f: F) -> Result<Option<C::Type>>
     where
         F: FnOnce(&[u8]) -> Result<C::Type>,
