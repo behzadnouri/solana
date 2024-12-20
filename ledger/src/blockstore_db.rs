@@ -1215,17 +1215,18 @@ impl ColumnName for columns::Index {
 impl TypedColumn for columns::Index {
     type Type = blockstore_meta::Index;
 
-    fn bincode_deserialize(bytes: &[u8]) -> bincode::Result<Self::Type> {
-        // For backward compatibility, try first to read LegacyIndex and
-        // convert from. If that fails retry reading Index.
-        // It can be showed serialized bytes obtained from an Index will always
-        // fail to deserialize into a LegacyIndex because there are not enough
-        // trailing bytes in the payload.
-        bincode::deserialize::<blockstore_meta::LegacyIndex>(bytes)
-            .as_ref()
-            .map(blockstore_meta::Index::from)
-            .or_else(|_| bincode::deserialize::<blockstore_meta::Index>(bytes))
-    }
+    // XXX not backward compatible! for testing only!
+    // fn bincode_deserialize(bytes: &[u8]) -> bincode::Result<Self::Type> {
+    //     // For backward compatibility, try first to read LegacyIndex and
+    //     // convert from. If that fails retry reading Index.
+    //     // It can be showed serialized bytes obtained from an Index will always
+    //     // fail to deserialize into a LegacyIndex because there are not enough
+    //     // trailing bytes in the payload.
+    //     bincode::deserialize::<blockstore_meta::LegacyIndex>(bytes)
+    //         .as_ref()
+    //         .map(blockstore_meta::Index::from)
+    //         .or_else(|_| bincode::deserialize::<blockstore_meta::Index>(bytes))
+    // }
 }
 
 impl SlotColumn for columns::DeadSlots {}
