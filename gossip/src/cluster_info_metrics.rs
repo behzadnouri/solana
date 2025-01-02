@@ -171,6 +171,7 @@ pub struct GossipStats {
     pub(crate) push_vote_read: Counter,
     pub(crate) repair_peers: Counter,
     pub(crate) require_stake_for_gossip_unknown_stakes: Counter,
+    pub(crate) run_socket_consume_time: Counter,
     pub(crate) save_contact_info_time: Counter,
     pub(crate) skip_pull_response_shred_version: Counter,
     pub(crate) skip_pull_shred_version: Counter,
@@ -220,6 +221,11 @@ pub(crate) fn submit_gossip_stats(
         ("num_nodes", num_nodes as i64, i64),
         ("num_nodes_staked", num_nodes_staked as i64, i64),
         ("num_pubkeys", num_pubkeys, i64),
+        (
+            "run_socket_consume_time",
+            stats.run_socket_consume_time.clear(),
+            i64
+        ),
     );
     datapoint_info!(
         "cluster_info_stats2",

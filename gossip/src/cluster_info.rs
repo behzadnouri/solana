@@ -2301,6 +2301,7 @@ impl ClusterInfo {
             }
         }
         let packets = receiver.recv_timeout(RECV_TIMEOUT)?;
+        let _st = ScopedTimer::from(&self.stats.run_socket_consume_time);
         let mut counts = [0u64; 7];
         count_packets_received(&packets, &mut counts);
         let packets = Vec::from(packets);
