@@ -282,8 +282,11 @@ impl ClusterInfo {
     }
 
     // TODO kill insert_info, only used by tests
-    pub fn insert_info(&self, node: ContactInfo) {
-        let entry = CrdsValue::new(CrdsData::ContactInfo(node), &self.keypair());
+    pub fn insert_info<T>(&self, data: T)
+    where
+        CrdsData: From<T>,
+    {
+        let entry = CrdsValue::new(CrdsData::from(data), &self.keypair());
         if let Err(err) = {
             let mut gossip_crds = self.gossip.crds.write().unwrap();
             gossip_crds.insert(entry, timestamp(), GossipRoute::LocalMessage)
@@ -474,7 +477,7 @@ impl ClusterInfo {
         let mut nodes = gossip_crds.get_nodes_contact_info();
         nodes
             .find(|node| node.gossip() == Some(*gossip_addr))
-            .cloned()
+            .map(ContactInfo::from)
     }
 
     pub fn my_contact_info(&self) -> ContactInfo {
@@ -1048,7 +1051,7 @@ impl ClusterInfo {
     pub fn get_node_version(&self, pubkey: &Pubkey) -> Option<solana_version::Version> {
         let gossip_crds = self.gossip.crds.read().unwrap();
         gossip_crds
-            .get::<&ContactInfo>(*pubkey)
+            .get::<&ContactInfo<_>>(*pubkey)
             .map(ContactInfo::version)
             .cloned()
     }
@@ -1068,7 +1071,7 @@ impl ClusterInfo {
             .filter(|node| {
                 node.pubkey() != &self_pubkey && self.check_socket_addr_space(&node.rpc())
             })
-            .cloned()
+            .map(ContactInfo::from)
             .collect()
     }
 
@@ -1077,7 +1080,7 @@ impl ClusterInfo {
         let gossip_crds = self.gossip.crds.read().unwrap();
         gossip_crds
             .get_nodes()
-            .map(|x| (x.value.contact_info().unwrap().clone(), x.local_timestamp))
+            .map(|x| (x.value.contact_info().unwrap().into(), x.local_timestamp))
             .collect()
     }
 
@@ -1088,7 +1091,7 @@ impl ClusterInfo {
             .get_nodes_contact_info()
             // shred_version not considered for gossip peers (ie, spy nodes do not set shred_version)
             .filter(|node| node.pubkey() != &me && self.check_socket_addr_space(&node.gossip()))
-            .cloned()
+            .map(ContactInfo::from)
             .collect()
     }
 
@@ -1101,7 +1104,7 @@ impl ClusterInfo {
                 node.pubkey() != &self_pubkey
                     && self.check_socket_addr_space(&node.tvu(contact_info::Protocol::UDP))
             })
-            .cloned()
+            .map(ContactInfo::from)
             .collect()
     }
 
@@ -1138,7 +1141,7 @@ impl ClusterInfo {
                         Some(lowest_slot) => lowest_slot.lowest <= slot,
                     }
             })
-            .cloned()
+            .map(ContactInfo::from)
             .collect()
     }
 
@@ -1165,7 +1168,7 @@ impl ClusterInfo {
                 node.pubkey() != &self_pubkey
                     && self.check_socket_addr_space(&node.tpu(contact_info::Protocol::UDP))
             })
-            .cloned()
+            .map(ContactInfo::from)
             .collect()
     }
 
@@ -1175,7 +1178,7 @@ impl ClusterInfo {
         let node = {
             let mut node = self.my_contact_info.write().unwrap();
             node.set_wallclock(timestamp());
-            node.clone()
+            ContactInfo::from(node.deref())
         };
         let entries: Vec<_> = [
             CrdsData::ContactInfo(node),
@@ -1328,7 +1331,7 @@ impl ClusterInfo {
             push_messages
                 .into_iter()
                 .filter_map(|(pubkey, messages)| {
-                    let peer: &ContactInfo = gossip_crds.get(pubkey)?;
+                    let peer: &ContactInfo<_> = gossip_crds.get(pubkey)?;
                     Some((peer.gossip()?, messages))
                 })
                 .collect()
@@ -2069,7 +2072,7 @@ impl ClusterInfo {
                 prunes
                     .into_par_iter()
                     .filter_map(|(pubkey, prunes)| {
-                        let addr = gossip_crds.get::<&ContactInfo>(pubkey)?.gossip()?;
+                        let addr = gossip_crds.get::<&ContactInfo<_>>(pubkey)?.gossip()?;
                         Some((pubkey, addr, prunes))
                     })
                     .collect()
