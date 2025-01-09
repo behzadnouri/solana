@@ -951,7 +951,7 @@ impl Blockstore {
         // 2. For new data shreds, check if an erasure set exists. If not, don't try recovery
         // 3. Before trying recovery, check if enough number of shreds have been received
         // 3a. Enough number of shreds = (#data + #coding shreds) > erasure.num_data
-        erasure_metas
+        let out: Vec<_> = erasure_metas
             .iter()
             .filter_map(|(erasure_set, working_erasure_meta)| {
                 let erasure_meta = working_erasure_meta.as_ref();
@@ -972,7 +972,11 @@ impl Blockstore {
                     })
                     .flatten()
             })
-            .collect()
+            .collect();
+        if rand::thread_rng().gen_ratio(1, 1000) {
+            error!("try_shred_recovery: {} metas, {} batches", erasure_metas.len(), out.len());
+        }
+        out
     }
 
     /// Attempts shred recovery and does the following for recovered data
