@@ -988,7 +988,7 @@ impl Blockstore {
         leader_schedule: Option<&LeaderScheduleCache>,
         reed_solomon_cache: &ReedSolomonCache,
         shred_insertion_tracker: &mut ShredInsertionTracker,
-        retransmit_sender: Option<&Sender<Vec</*shred:*/ Vec<u8>>>>,
+        retransmit_sender: &Sender<Vec</*shred:*/ Vec<u8>>>,
         is_trusted: bool,
         metrics: &mut BlockstoreInsertionMetrics,
     ) {
@@ -1039,13 +1039,9 @@ impl Blockstore {
                         }
                     }
                 })
-                // Always collect recovered-shreds so that above insert code is
-                // executed even if retransmit-sender is None.
                 .collect();
             if !recovered_shreds.is_empty() {
-                if let Some(retransmit_sender) = retransmit_sender {
-                    let _ = retransmit_sender.send(recovered_shreds);
-                }
+                let _ = retransmit_sender.send(recovered_shreds);
             }
         }
         start.stop();
@@ -1233,7 +1229,7 @@ impl Blockstore {
         is_repaired: Vec<bool>,
         leader_schedule: Option<&LeaderScheduleCache>,
         is_trusted: bool,
-        retransmit_sender: Option<&Sender<Vec</*shred:*/ Vec<u8>>>>,
+        retransmit_sender: &Sender<Vec</*shred:*/ Vec<u8>>>,
         reed_solomon_cache: &ReedSolomonCache,
         metrics: &mut BlockstoreInsertionMetrics,
     ) -> Result<InsertResults> {
@@ -1310,7 +1306,7 @@ impl Blockstore {
         is_repaired: Vec<bool>,
         leader_schedule: Option<&LeaderScheduleCache>,
         is_trusted: bool,
-        retransmit_sender: Option<&Sender<Vec</*shred:*/ Vec<u8>>>>,
+        retransmit_sender: &Sender<Vec</*shred:*/ Vec<u8>>>,
         handle_duplicate: &F,
         reed_solomon_cache: &ReedSolomonCache,
         metrics: &mut BlockstoreInsertionMetrics,
@@ -1384,6 +1380,7 @@ impl Blockstore {
         }
     }
 
+    // Test-only function!
     pub fn insert_shreds(
         &self,
         shreds: Vec<Shred>,
@@ -1396,7 +1393,7 @@ impl Blockstore {
             vec![false; shreds_len],
             leader_schedule,
             is_trusted,
-            None, // retransmit-sender
+            &dummy_retransmit_sender_for_tests(),
             &ReedSolomonCache::default(),
             &mut BlockstoreInsertionMetrics::default(),
         )?;
@@ -1415,7 +1412,7 @@ impl Blockstore {
                 vec![false],
                 Some(leader_schedule),
                 false,
-                None, // retransmit-sender
+                &dummy_retransmit_sender_for_tests(),
                 &ReedSolomonCache::default(),
                 &mut BlockstoreInsertionMetrics::default(),
             )
@@ -5395,6 +5392,13 @@ fn adjust_ulimit_nofile(enforce_ulimit_nofile: bool) -> Result<()> {
     }
     info!("Maximum open file descriptors: {}", nofile.rlim_cur);
     Ok(())
+}
+
+fn dummy_retransmit_sender_for_tests() -> Sender<Vec</*shred:*/ Vec<u8>>> {
+    // Because we drop the receiver end, the sender side becomes disconnected
+    // and sends return error immediately without blocking.
+    let (sender, _) = crossbeam_channel::bounded(0);
+    sender
 }
 
 #[cfg(test)]
