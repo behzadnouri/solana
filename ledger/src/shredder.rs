@@ -460,7 +460,10 @@ impl ReedSolomonCache {
         });
         // Initialize if needed by only a single thread outside locks.
         entry
-            .get_or_init(|| ReedSolomon::new(data_shards, parity_shards).map(Arc::new))
+            .get_or_init(|| {
+                error!("ReedSolomonCache::get: {data_shards}:{parity_shards}");
+                ReedSolomon::new(data_shards, parity_shards).map(Arc::new)
+            })
             .clone()
     }
 }

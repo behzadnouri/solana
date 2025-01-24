@@ -536,6 +536,7 @@ impl<T: 'static> ClusterNodesCache<T> {
         });
         // Initialize if needed by only a single thread outside locks.
         let (_, nodes) = entry.get_or_init(|| {
+            error!("ClusterNodesCache::get, epoch: {epoch}, slot: {shred_slot}");
             let epoch_staked_nodes = [root_bank, working_bank]
                 .iter()
                 .find_map(|bank| bank.epoch_staked_nodes(epoch))

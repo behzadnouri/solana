@@ -281,9 +281,25 @@ impl Crds {
                         self.votes.remove(&entry.get().ordinal);
                         self.votes.insert(value.ordinal, entry_index);
                     }
-                    CrdsData::EpochSlots(_, _) => {
+                    CrdsData::EpochSlots(_, epoch_slots) => {
                         self.epoch_slots.remove(&entry.get().ordinal);
                         self.epoch_slots.insert(value.ordinal, entry_index);
+                        use {crate::epoch_slots::CompressedSlots, rand::Rng};
+                        if rand::thread_rng().gen_ratio(1, 100) {
+                            let mut counts = [0usize; 2];
+                            for entry in &epoch_slots.slots {
+                                counts[match entry {
+                                    CompressedSlots::Flate2(_) => 0,
+                                    CompressedSlots::Uncompressed(_) => 1,
+                                }] += 1;
+                            }
+                            error!(
+                                "EpochSlots flate2: {}, uncompressed: {}, serialized_size: {}",
+                                counts[0],
+                                counts[1],
+                                bincode::serialized_size(epoch_slots).unwrap()
+                            );
+                        }
                     }
                     CrdsData::DuplicateShred(_, _) => {
                         self.duplicate_shreds.remove(&entry.get().ordinal);
