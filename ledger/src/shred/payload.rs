@@ -41,15 +41,19 @@ impl Payload {
     dispatch!(pub(crate) fn push(&mut self, byte: u8));
 
     #[inline]
+    #[allow(unreachable_code)]
     pub(crate) fn resize(&mut self, size: usize, byte: u8) {
         if self.len() != size {
+            panic!("make_mut_resize!");
             make_mut!(self).resize(size, byte);
         }
     }
 
     #[inline]
+    #[allow(unreachable_code)]
     pub(crate) fn truncate(&mut self, size: usize) {
         if self.len() > size {
+            panic!("make_mut_truncate!");
             make_mut!(self).truncate(size);
         }
     }
