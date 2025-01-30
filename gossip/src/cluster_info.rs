@@ -2350,6 +2350,51 @@ impl ClusterInfo {
     }
 }
 
+fn debug_error_packets(packet_batch: &PacketBatch, now: u64, shred_version: u16, crds: &Crds) {
+    packet_batch
+        .par_iter()
+        .filter_map(|packet| match packet.deserialize_slice::<Protocol, _>(..) {
+            Ok(protocol) => Some((packet.meta().socket_addr(), protocol)),
+            Err(err) => {
+                error!("run_socket_consume_error: {err:?}");
+                None
+            }
+        })
+        .filter_map(|(addr, protocol)| match protocol {
+            Protocol::PushMessage(_, values) => Some((addr, "push", values)),
+            Protocol::PullResponse(_, values) => Some((addr, "puul", values)),
+            _ => None,
+        })
+        .for_each(|(addr, route, values)| {
+            for value in values {
+                let bytes = <[u8; 8]>::try_from(&value.signature().as_ref()[..8]).unwrap();
+                if u64::from_le_bytes(bytes) % 10_007 != 19 {
+                    return;
+                }
+                let age = (now as i64 - value.wallclock() as i64) / 1_000;
+                let x = if crds.upserts(&value) { "+" } else { "-" };
+                let y = crds
+                    .get::<&ContactInfo>(value.pubkey())
+                    .map(|node| {
+                        if node.shred_version() == shred_version {
+                            "="
+                        } else {
+                            "!"
+                        }
+                    })
+                    .unwrap_or("?");
+                error!(
+                    "run_socket_consume: {}, {}, {}, {}{}, {route}, {age:03}{x}{y}, {addr:>20}, {now}",
+                    &format!("{}", value.signature())[..16],
+                    format!("{:17}", value.data().name()),
+                    format!("{:44}", value.pubkey()),
+                    u8::from(value.sanitize().is_ok()),
+                    u8::from(value.verify()),
+                );
+            }
+        })
+}
+
 #[derive(Debug)]
 pub struct Sockets {
     pub gossip: UdpSocket,

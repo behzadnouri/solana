@@ -114,6 +114,25 @@ pub(crate) fn new_rand_timestamp<R: Rng>(rng: &mut R) -> u64 {
 }
 
 impl CrdsData {
+    pub(crate) fn name(&self) -> &'static str {
+        match self {
+            Self::LegacyContactInfo(..) => "LegacyContactInfo",
+            Self::Vote(..) => "Vote",
+            Self::LowestSlot(..) => "LowestSlot",
+            Self::LegacySnapshotHashes(..) => "LegacySnapshotHashes",
+            Self::AccountsHashes(..) => "AccountsHashes",
+            Self::EpochSlots(..) => "EpochSlots",
+            Self::LegacyVersion(..) => "LegacyVersion",
+            Self::Version(..) => "Version",
+            Self::NodeInstance(..) => "NodeInstance",
+            Self::DuplicateShred(..) => "DuplicateShred",
+            Self::SnapshotHashes(..) => "SnapshotHashes",
+            Self::ContactInfo(..) => "ContactInfo",
+            Self::RestartLastVotedForkSlots(..) => "RestartLastVotedForkSlots",
+            Self::RestartHeaviestFork(..) => "RestartHeaviestFork",
+        }
+    }
+
     /// New random CrdsData for tests and benchmarks.
     pub(crate) fn new_rand<R: Rng>(rng: &mut R, pubkey: Option<Pubkey>) -> CrdsData {
         let kind = rng.gen_range(0..8);
