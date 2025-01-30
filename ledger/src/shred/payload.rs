@@ -43,6 +43,7 @@ impl Payload {
     #[inline]
     pub(crate) fn resize(&mut self, size: usize, byte: u8) {
         if self.len() != size {
+            error!("shred_payload_make_mut_resize: {}->{size}", self.len());
             make_mut!(self).resize(size, byte);
         }
     }
@@ -50,6 +51,7 @@ impl Payload {
     #[inline]
     pub(crate) fn truncate(&mut self, size: usize) {
         if self.len() > size {
+            error!("shred_payload_make_mut_truncate: {}->{size}", self.len());
             make_mut!(self).truncate(size);
         }
     }

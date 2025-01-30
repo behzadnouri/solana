@@ -507,6 +507,7 @@ impl<T> ClusterNodesCache<T> {
 }
 
 impl<T: 'static> ClusterNodesCache<T> {
+    #[allow(unreachable_code)]
     pub(crate) fn get(
         &self,
         shred_slot: Slot,
@@ -549,10 +550,7 @@ impl<T: 'static> ClusterNodesCache<T> {
                 .iter()
                 .find_map(|bank| bank.epoch_staked_nodes(epoch))
                 .unwrap_or_else(|| {
-                    error!(
-                        "ClusterNodesCache::get: unknown Bank::epoch_staked_nodes \
-                    for epoch: {epoch}, slot: {shred_slot}"
-                    );
+                    panic!("ClusterNodesCache::get: unknown Bank::epoch_staked_nodes for epoch: {epoch}.");
                     inc_new_counter_error!("cluster_nodes-unknown_epoch_staked_nodes", 1);
                     Arc::<HashMap<Pubkey, /*stake:*/ u64>>::default()
                 });

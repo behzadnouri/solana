@@ -1272,6 +1272,15 @@ impl ClusterInfo {
                     )
                 })
         };
+        let coin_flip = false && rand::thread_rng().gen_ratio(1, 10_000);
+        if coin_flip {
+            error!(
+                "new_push_requests, entries: {}, nodes: {}, messages: {}",
+                entries.len(),
+                push_messages.len(),
+                push_messages.values().map(Vec::len).sum::<usize>()
+            );
+        }
         self.stats
             .push_fanout_num_entries
             .add_relaxed(entries.len() as u64);
@@ -2100,11 +2109,25 @@ impl ClusterInfo {
         let mut dropped_packets_counts = [0u64; 7];
         let mut num_packets = 0;
         let mut packets = VecDeque::with_capacity(2);
-        for packet_batch in receiver
-            .recv_timeout(RECV_TIMEOUT)
-            .map(std::iter::once)?
-            .chain(receiver.try_iter())
-        {
+        if rand::thread_rng().gen_ratio(1, 10_000) {
+            error!("run_socket_consume: {}", receiver.len());
+        }
+        let packet_batch = receiver.recv_timeout(RECV_TIMEOUT)?;
+        let now = timestamp();
+        let (crds, shred_version) = if false && (now / 1000 / 60) % 20 < 2 {
+            (
+                Some(self.gossip.crds.read().unwrap()),
+                self.my_contact_info.read().unwrap().shred_version(),
+            )
+        } else {
+            (None, 0)
+        };
+        for packet_batch in std::iter::once(packet_batch).chain(receiver.try_iter()) {
+            // XXX also log initial sync based on crds table size!
+            if let Some(ref crds) = crds {
+                thread_pool
+                    .install(|| debug_error_packets(&packet_batch, now, shred_version, crds));
+            }
             num_packets += packet_batch.len();
             packets.push_back(packet_batch);
             while num_packets > MAX_GOSSIP_TRAFFIC {
@@ -2183,8 +2206,18 @@ impl ClusterInfo {
         let _st = ScopedTimer::from(&self.stats.gossip_listen_loop_time);
         const RECV_TIMEOUT: Duration = Duration::from_secs(1);
         const SUBMIT_GOSSIP_STATS_INTERVAL: Duration = Duration::from_secs(2);
+        let coin_flip = rand::thread_rng().gen_ratio(1, 10_000);
+        if coin_flip {
+            error!("run_listen: receiver.len(): {} ", receiver.len())
+        }
         let mut packets = VecDeque::from(receiver.recv_timeout(RECV_TIMEOUT)?);
+        if coin_flip {
+            error!("run_listen: packets.len(): {} ", packets.len())
+        }
         for payload in receiver.try_iter() {
+            if coin_flip {
+                error!("run_listen: packets.len(): {} ", payload.len())
+            }
             packets.extend(payload);
             let excess_count = packets.len().saturating_sub(MAX_GOSSIP_TRAFFIC);
             if excess_count > 0 {
