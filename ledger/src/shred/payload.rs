@@ -36,6 +36,29 @@ macro_rules! dispatch {
     }
 }
 
+fn error_backtrace(caller: &str) {
+    use {
+        rand::Rng,
+        std::{
+            collections::HashSet,
+            sync::{LazyLock, RwLock},
+        },
+    };
+    static BACKTRACES: LazyLock<RwLock<HashSet<String>>> = LazyLock::new(RwLock::default);
+    if true || rand::thread_rng().gen_ratio(1, 1_000_000) {
+        let name = std::thread::current().name().map(String::from);
+        let bt = std::backtrace::Backtrace::force_capture();
+        let bt = format!("{name:?} {bt:?}");
+        if !BACKTRACES.read().unwrap().contains(&bt) {
+            let mut bts = BACKTRACES.write().unwrap();
+            if !bts.contains(&bt) {
+                error!("{caller:}_backtrace: {bt:}");
+                bts.insert(bt);
+            }
+        }
+    }
+}
+
 impl Payload {
     #[cfg(test)]
     dispatch!(pub(crate) fn push(&mut self, byte: u8));
@@ -43,6 +66,9 @@ impl Payload {
     #[inline]
     pub(crate) fn resize(&mut self, size: usize, byte: u8) {
         if self.len() != size {
+            trace!("shred_payload_make_mut_resize: {}->{size}", self.len());
+            let name = format!("shred_payload_make_mut_resize: {}->{size},", self.len());
+            error_backtrace(&name);
             make_mut!(self).resize(size, byte);
         }
     }
@@ -50,6 +76,9 @@ impl Payload {
     #[inline]
     pub(crate) fn truncate(&mut self, size: usize) {
         if self.len() > size {
+            trace!("shred_payload_make_mut_truncate: {}->{size}", self.len());
+            let name = format!("shred_payload_make_mut_truncate: {}->{size},", self.len());
+            error_backtrace(&name);
             make_mut!(self).truncate(size);
         }
     }
