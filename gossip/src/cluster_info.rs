@@ -1238,6 +1238,51 @@ impl ClusterInfo {
         let pings = pings
             .into_iter()
             .map(|(addr, ping)| (addr, Protocol::PingMessage(ping)));
+        if rand::thread_rng().gen_ratio(1, 120) {
+            {
+                let pulls = pulls.clone().collect::<Vec<_>>();
+                error!(
+                    "new_pull_requests: {}, {:?}, {:?}",
+                    pulls.len(),
+                    pulls.first().map(|(a, _)| a),
+                    pulls.last().map(|(a, _)| a)
+                );
+            }
+            {
+                let pulls = pulls.clone().collect::<Vec<_>>();
+                error!(
+                    "new_pull_requests: {}, {:?}, {:?}",
+                    pulls.len(),
+                    pulls.first().map(|(a, _)| a),
+                    pulls.last().map(|(a, _)| a)
+                );
+            }
+            {
+                let mut pulls = pulls.clone().peekable();
+                {
+                    let peek: Option<SocketAddr> = pulls.peek().map(|(a, _)| a).cloned();
+                    let pulls = pulls.clone().collect::<Vec<_>>();
+                    error!(
+                        "new_pull_requests: {}, {:?}, {:?}, {:?}",
+                        pulls.len(),
+                        peek,
+                        pulls.first().map(|(a, _)| a),
+                        pulls.last().map(|(a, _)| a)
+                    );
+                }
+                {
+                    let peek: Option<SocketAddr> = pulls.peek().map(|(a, _)| a).cloned();
+                    let pulls = pulls.clone().collect::<Vec<_>>();
+                    error!(
+                        "new_pull_requests: {}, {:?}, {:?}, {:?}",
+                        pulls.len(),
+                        peek,
+                        pulls.first().map(|(a, _)| a),
+                        pulls.last().map(|(a, _)| a)
+                    );
+                }
+            }
+        }
         self.append_entrypoint_to_pulls(thread_pool, max_bloom_filter_bytes, pulls)
             .map(move |(gossip_addr, filter)| {
                 let request = Protocol::PullRequest(filter, self_info.clone());
