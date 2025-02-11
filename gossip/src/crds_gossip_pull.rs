@@ -37,7 +37,7 @@ use {
     },
     solana_streamer::socket::SocketAddrSpace,
     std::{
-        collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+        collections::{HashMap, HashSet, VecDeque},
         convert::TryInto,
         iter::{repeat, repeat_with},
         net::SocketAddr,
@@ -246,7 +246,7 @@ impl CrdsGossipPull {
         ping_cache: &Mutex<PingCache>,
         pings: &mut Vec<(SocketAddr, Ping)>,
         socket_addr_space: &SocketAddrSpace,
-    ) -> Result<Vec<(ContactInfo, Vec<CrdsFilter>)>, CrdsGossipError> {
+    ) -> Result<impl Iterator<Item = (SocketAddr, CrdsFilter)> + Clone, CrdsGossipError> {
         let mut rng = rand::thread_rng();
         // Active and valid gossip nodes with matching shred-version.
         let nodes = crds_gossip::get_gossip_nodes(
@@ -289,17 +289,10 @@ impl CrdsGossipPull {
         let filters = self.build_crds_filters(thread_pool, crds, bloom_size);
         // Associate each pull-request filter with a randomly selected peer.
         let dist = WeightedIndex::new(weights).unwrap();
-        let out = filters.into_iter().fold(HashMap::new(), |mut out, filter| {
+        Ok(filters.into_iter().filter_map(move |filter| {
             let node = &nodes[dist.sample(&mut rng)];
-            match out.entry(*node.pubkey()) {
-                Entry::Vacant(entry) => {
-                    entry.insert((node.clone(), vec![filter]));
-                }
-                Entry::Occupied(mut entry) => entry.get_mut().1.push(filter),
-            };
-            out
-        });
-        Ok(out.into_values().collect())
+            Some((node.gossip()?, filter))
+        }))
     }
 
     /// Create gossip responses to pull requests

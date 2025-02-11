@@ -1161,18 +1161,19 @@ impl ClusterInfo {
         &self,
         thread_pool: &ThreadPool,
         max_bloom_filter_bytes: usize,
-        pulls: &mut Vec<(ContactInfo, Vec<CrdsFilter>)>,
-    ) {
+        pulls: impl Iterator<Item = (SocketAddr, CrdsFilter)> + Clone,
+    ) -> impl Iterator<Item = (SocketAddr, CrdsFilter)> {
         const THROTTLE_DELAY: u64 = CRDS_GOSSIP_PULL_CRDS_TIMEOUT_MS / 2;
+        let mut pulls = pulls.peekable();
         let entrypoint = {
             let mut entrypoints = self.entrypoints.write().unwrap();
             let Some(entrypoint) = entrypoints.choose_mut(&mut rand::thread_rng()) else {
-                return;
+                return Either::Left(pulls);
             };
-            if !pulls.is_empty() {
+            if pulls.peek().is_some() {
                 let now = timestamp();
                 if now <= entrypoint.wallclock().saturating_add(THROTTLE_DELAY) {
-                    return;
+                    return Either::Left(pulls);
                 }
                 entrypoint.set_wallclock(now);
                 if let Some(entrypoint_gossip) = entrypoint.gossip() {
@@ -1181,28 +1182,29 @@ impl ClusterInfo {
                         .get_nodes_contact_info()
                         .any(|node| node.gossip() == Some(entrypoint_gossip))
                     {
-                        return; // Found the entrypoint, no need to pull from it
+                        // Found the entrypoint, no need to pull from it
+                        return Either::Left(pulls);
                     }
                 }
             }
             entrypoint.clone()
         };
-        let filters = if pulls.is_empty() {
+        let Some(addr) = entrypoint.gossip() else {
+            return Either::Left(pulls);
+        };
+        let filters = if pulls.peek().is_none() {
             let _st = ScopedTimer::from(&self.stats.entrypoint2);
-            self.gossip.pull.build_crds_filters(
+            let filters = self.gossip.pull.build_crds_filters(
                 thread_pool,
                 &self.gossip.crds,
                 max_bloom_filter_bytes,
-            )
+            );
+            Either::Left(filters.into_iter())
         } else {
-            pulls
-                .iter()
-                .flat_map(|(_, filters)| filters)
-                .cloned()
-                .collect()
+            Either::Right(pulls.clone().map(|(_, filter)| filter))
         };
         self.stats.pull_from_entrypoint_count.add_relaxed(1);
-        pulls.push((entrypoint, filters));
+        Either::Right(std::iter::repeat(addr).zip(filters).chain(pulls))
     }
 
     fn new_pull_requests(
@@ -1215,7 +1217,7 @@ impl ClusterInfo {
         let self_info = CrdsValue::new(CrdsData::from(self.my_contact_info()), &self.keypair());
         let max_bloom_filter_bytes = get_max_bloom_filter_bytes(&self_info);
         let mut pings = Vec::new();
-        let mut pulls = {
+        let pulls = {
             let _st = ScopedTimer::from(&self.stats.new_pull_requests);
             self.gossip
                 .new_pull_request(
@@ -1230,16 +1232,13 @@ impl ClusterInfo {
                     &mut pings,
                     &self.socket_addr_space,
                 )
-                .unwrap_or_default()
+                .into_iter()
+                .flatten()
         };
-        self.append_entrypoint_to_pulls(thread_pool, max_bloom_filter_bytes, &mut pulls);
         let pings = pings
             .into_iter()
             .map(|(addr, ping)| (addr, Protocol::PingMessage(ping)));
-        pulls
-            .into_iter()
-            .filter_map(|(peer, filters)| Some((peer.gossip()?, filters)))
-            .flat_map(|(addr, filters)| repeat(addr).zip(filters))
+        self.append_entrypoint_to_pulls(thread_pool, max_bloom_filter_bytes, pulls)
             .map(move |(gossip_addr, filter)| {
                 let request = Protocol::PullRequest(filter, self_info.clone());
                 (gossip_addr, request)
