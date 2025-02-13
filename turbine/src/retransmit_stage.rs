@@ -55,10 +55,22 @@ const_assert_eq!(CLUSTER_NODES_CACHE_NUM_EPOCH_CAP, 5);
 const CLUSTER_NODES_CACHE_NUM_EPOCH_CAP: usize = MAX_LEADER_SCHEDULE_STAKES as usize;
 const CLUSTER_NODES_CACHE_TTL: Duration = Duration::from_secs(5);
 
+type AddrCache = crate::addr_cache::AddrCache<29>;
+
+// Output produced by retransmit_shred.
+struct RetransmitShredOutput {
+    shred: ShredId,
+    // This node's distance from the turbine root.
+    root_distance: usize,
+    // Number of nodes the shred was retransmitted to.
+    num_nodes: usize,
+}
+
 #[derive(Default)]
 struct RetransmitSlotStats {
     asof: u64,   // Latest timestamp struct was updated.
     outset: u64, // 1st shred retransmit timestamp.
+    shreds: Vec<ShredId>,
     // Number of shreds sent and received at different
     // distances from the turbine broadcast root.
     num_shreds_received: [usize; MAX_NUM_TURBINE_HOPS],
@@ -190,6 +202,7 @@ fn retransmit(
     quic_endpoint_sender: &AsyncSender<(SocketAddr, Bytes)>,
     stats: &mut RetransmitStats,
     cluster_nodes_cache: &ClusterNodesCache<RetransmitStage>,
+    addr_cache: &mut AddrCache,
     shred_deduper: &mut ShredDeduper,
     max_slots: &MaxSlots,
     rpc_subscriptions: Option<&RpcSubscriptions>,
@@ -244,11 +257,11 @@ fn retransmit(
         })
         .collect();
     let socket_addr_space = cluster_info.socket_addr_space();
-    let record = |mut stats: HashMap<Slot, RetransmitSlotStats>,
-                  (slot, root_distance, num_nodes)| {
+    let record = |mut stats: HashMap<Slot, RetransmitSlotStats>, out: RetransmitShredOutput| {
         let now = timestamp();
-        let entry = stats.entry(slot).or_default();
-        entry.record(now, root_distance, num_nodes);
+        let entry = stats.entry(out.shred.slot()).or_default();
+        entry.record(now, out.root_distance, out.num_nodes);
+        entry.shreds.push(out.shred);
         stats
     };
     let slot_stats = if shreds.len() < PAR_ITER_MIN_NUM_SHREDS {
@@ -293,6 +306,7 @@ fn retransmit(
     stats.upsert_slot_stats(
         slot_stats,
         root_bank.slot(),
+        addr_cache,
         rpc_subscriptions,
         slot_status_notifier,
     );
@@ -312,11 +326,7 @@ fn retransmit_shred(
     socket: &UdpSocket,
     quic_endpoint_sender: &AsyncSender<(SocketAddr, Bytes)>,
     stats: &RetransmitStats,
-) -> Option<(
-    Slot,  // Shred slot.
-    usize, // This node's distance from the turbine root.
-    usize, // Number of nodes the shred was retransmitted to.
-)> {
+) -> Option<RetransmitShredOutput> {
     let key = shred::layout::get_shred_id(shred.as_ref())?;
     let (slot_leader, cluster_nodes) = cache.get(&key.slot())?;
     if shred_deduper.dedup(key, shred.as_ref(), MAX_DUPLICATE_COUNT) {
@@ -368,7 +378,11 @@ fn retransmit_shred(
     stats
         .retransmit_total
         .fetch_add(retransmit_time.as_us(), Ordering::Relaxed);
-    Some((key.slot(), root_distance, num_nodes))
+    Some(RetransmitShredOutput {
+        shred: key,
+        root_distance,
+        num_nodes,
+    })
 }
 
 /// Service to retransmit messages received from other peers in turbine.
@@ -401,10 +415,9 @@ impl RetransmitStage {
             CLUSTER_NODES_CACHE_NUM_EPOCH_CAP,
             CLUSTER_NODES_CACHE_TTL,
         );
-
-        let mut stats = RetransmitStats::new(Instant::now());
-
         let mut rng = rand::thread_rng();
+        let mut addr_cache = AddrCache::default();
+        let mut stats = RetransmitStats::new(Instant::now());
         let mut shred_deduper = ShredDeduper::new(&mut rng, DEDUPER_NUM_BITS);
 
         let thread_pool = {
@@ -431,6 +444,7 @@ impl RetransmitStage {
                     &quic_endpoint_sender,
                     &mut stats,
                     &cluster_nodes_cache,
+                    &mut addr_cache,
                     &mut shred_deduper,
                     &max_slots,
                     rpc_subscriptions.as_deref(),
@@ -456,6 +470,7 @@ impl AddAssign for RetransmitSlotStats {
         let Self {
             asof,
             outset,
+            mut shreds,
             num_shreds_received,
             num_shreds_sent,
         } = other;
@@ -465,6 +480,10 @@ impl AddAssign for RetransmitSlotStats {
         } else {
             self.outset.min(outset)
         };
+        if self.shreds.len() < shreds.len() {
+            std::mem::swap(&mut self.shreds, &mut shreds);
+        }
+        self.shreds.append(&mut shreds);
         for k in 0..MAX_NUM_TURBINE_HOPS {
             self.num_shreds_received[k] += num_shreds_received[k];
             self.num_shreds_sent[k] += num_shreds_sent[k];
@@ -500,12 +519,16 @@ impl RetransmitStats {
         &mut self,
         feed: I,
         root: Slot,
+        addr_cache: &mut AddrCache,
         rpc_subscriptions: Option<&RpcSubscriptions>,
         slot_status_notifier: Option<&SlotStatusNotifier>,
     ) where
         I: IntoIterator<Item = (Slot, RetransmitSlotStats)>,
     {
-        for (slot, slot_stats) in feed {
+        for (slot, mut slot_stats) in feed {
+            for shred in slot_stats.shreds.drain(..) {
+                addr_cache.push(shred);
+            }
             match self.slot_stats.get_mut(&slot) {
                 None => {
                     if let Some(rpc_subscriptions) = rpc_subscriptions {
