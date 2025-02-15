@@ -114,7 +114,7 @@ pub(super) fn get_parent_offset(shred: &[u8]) -> Option<u16> {
 
 // Returns DataShredHeader.flags.
 #[inline]
-pub(crate) fn get_flags(shred: &[u8]) -> Result<ShredFlags, Error> {
+pub fn get_flags(shred: &[u8]) -> Result<ShredFlags, Error> {
     match get_shred_type(shred)? {
         ShredType::Code => Err(Error::InvalidShredType),
         ShredType::Data => {
