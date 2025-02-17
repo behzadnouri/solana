@@ -299,36 +299,31 @@ impl CacheEntry {
         // max-index observed.
         extend_buffer: usize,
     ) -> impl Iterator<Item = (ShredType, /*index:*/ usize)> + '_ {
-        // Move self.index_{code,data} forward until the first missing entry.
         while matches!(self.code.get(self.index_code), Some(Some(_))) {
             self.index_code += 1;
         }
         while matches!(self.data.get(self.index_data), Some(Some(_))) {
             self.index_data += 1;
         }
-        // If the last data shred in the slot is already observed, do not
-        // extend beyond observed max-indices.
         let extend_buffer = if self.last_shred_in_slot {
             0
         } else {
             extend_buffer
         };
-        let mut code = {
-            // There at least as many coding shreds as data shreds.
-            let max_index = self.max_index_code.max(self.max_index_code) as usize + extend_buffer;
-            self.index_code..max_index.min(MAX_CODE_SHREDS_PER_SLOT)
+        let mut index_code = {
+            let index_code_max = self.code.len().max(self.data.len() * 11 / 10) + extend_buffer;
+            self.index_code..index_code_max.min(MAX_CODE_SHREDS_PER_SLOT)
         };
-        let mut data = {
-            let max_index = self.max_index_data as usize + extend_buffer;
-            self.index_data..max_index.min(MAX_DATA_SHREDS_PER_SLOT)
+        let mut index_data = {
+            let index_data_max = self.data.len() + extend_buffer;
+            self.index_data..index_data_max.min(MAX_DATA_SHREDS_PER_SLOT)
         };
         std::iter::from_fn(move || {
-            // Find next missing code and data entries in the cache.
-            let code = code.find(|&k| matches!(self.code.get(k), None | Some(None)));
-            let data = data.find(|&k| matches!(self.data.get(k), None | Some(None)));
+            let index_code = index_code.find(|&k| matches!(self.code.get(k), None | Some(None)));
+            let index_data = index_data.find(|&k| matches!(self.data.get(k), None | Some(None)));
             let out = [
-                code.map(|k| (ShredType::Code, k)),
-                data.map(|k| (ShredType::Data, k)),
+                index_code.map(|k| (ShredType::Code, k)),
+                index_data.map(|k| (ShredType::Data, k)),
             ];
             (!matches!(out, [None, None])).then_some(out)
         })
