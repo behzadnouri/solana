@@ -130,35 +130,29 @@ impl AddrCache {
     // ShredIds are chosen based on which slots have received most number of
     // shreds within the rolling window.
     pub(crate) fn get_shreds(&mut self, num_shreds: usize) -> Vec<ShredId> {
-        fn make_shred(slot: Slot, (shred_type, index): (ShredType, usize)) -> ShredId {
-            ShredId::new(slot, index as u32, shred_type)
+        // Find first two most frequent slots.
+        let mut slots = [None, None];
+        for (&slot, &count) in self.counts.iter() {
+            let entry = Some((count, slot));
+            if entry > slots[0] {
+                slots[1] = slots[0];
+                slots[0] = entry;
+            } else if entry > slots[1] {
+                slots[1] = entry;
+            }
         }
-        if self.counts.len() == 1 {
-            let slot = self.counts.keys().next().copied().unwrap();
-            return self
-                .get_cache_entry_mut(slot)
-                .get_shreds(EXTEND_BUFFER)
-                .take(num_shreds)
-                .map(|entry| make_shred(slot, entry))
-                .collect();
-        }
-        let mut heap: BinaryHeap<(/*count:*/ usize, Slot)> = self
-            .counts
-            .iter()
-            .map(|(&slot, &count)| (count, slot))
-            .collect();
+        slots[1] = slots[1].or(slots[0]);
         let mut out = Vec::with_capacity(num_shreds);
-        while let Some(count) = out.len().checked_sub(num_shreds).filter(|&k| k > 0) {
-            let Some((_, slot)) = heap.pop() else {
-                break;
-            };
-            // Leave some capacity for the 2nd most frequent slot.
-            let count = count.min(num_shreds * 3 / 4);
+        for ((_, slot), num_shreds) in slots
+            .into_iter()
+            .flatten()
+            .zip([num_shreds * 3 / 4, num_shreds / 4])
+        {
             out.extend(
                 self.get_cache_entry_mut(slot)
-                    .get_shreds(EXTEND_BUFFER)
-                    .take(count)
-                    .map(|entry| make_shred(slot, entry)),
+                    .get_shreds(/*extend_buffer:*/ 256)
+                    .take(num_shreds)
+                    .map(move |(shred_type, index)| ShredId::new(slot, index as u32, shred_type)),
             );
         }
         out
