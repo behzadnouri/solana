@@ -69,7 +69,7 @@ struct RetransmitShredOutput {
     // Number of nodes the shred was retransmitted to.
     num_nodes: usize,
     // Addresses the shred was sent to if there was a cache miss.
-    addrs: Option<Vec<SocketAddr>>,
+    addrs: Option<Box<[SocketAddr]>>,
 }
 
 #[derive(Default)]
@@ -87,7 +87,7 @@ pub(crate) struct RetransmitSlotStats {
     num_shreds_sent: [usize; MAX_NUM_TURBINE_HOPS],
     // Root distance and socket-addresses the shreds were sent to if there was
     // a cache miss.
-    pub(crate) addrs: Vec<(ShredId, /*root_distance:*/ u8, Vec<SocketAddr>)>,
+    pub(crate) addrs: Vec<(ShredId, /*root_distance:*/ u8, Box<[SocketAddr]>)>,
 }
 
 struct RetransmitStats {
@@ -409,7 +409,7 @@ fn retransmit_shred(
         root_distance,
         num_nodes,
         addrs: match addrs {
-            Cow::Owned(addrs) => Some(addrs),
+            Cow::Owned(addrs) => Some(Vec::into_boxed_slice(addrs)),
             Cow::Borrowed(_) => None,
         },
     })
@@ -422,7 +422,7 @@ fn get_retransmit_addrs<'a>(
     addr_cache: &'a AddrCache,
     socket_addr_space: &SocketAddrSpace,
     stats: &RetransmitStats,
-) -> Option<(/*root_distance:*/ u8, Cow<'a, Vec<SocketAddr>>)> {
+) -> Option<(/*root_distance:*/ u8, Cow<'a, [SocketAddr]>)> {
     if let Some((root_distance, addrs)) = addr_cache.get(shred) {
         stats.addr_cache_hit.fetch_add(1, Ordering::Relaxed);
         return Some((root_distance, Cow::Borrowed(addrs)));
@@ -479,13 +479,10 @@ fn cache_retransmit_addrs(
     let get_retransmit_addrs = |shred: ShredId| {
         let data_plane_fanout = cluster_nodes::get_data_plane_fanout(shred.slot(), &root_bank);
         let (slot_leader, cluster_nodes) = cache.get(&shred.slot())?;
-        let addrs = cluster_nodes.get_retransmit_addrs(
-            slot_leader,
-            &shred,
-            data_plane_fanout,
-            socket_addr_space,
-        );
-        Some((shred, addrs.ok()?))
+        let (root_distance, addrs) = cluster_nodes
+            .get_retransmit_addrs(slot_leader, &shred, data_plane_fanout, socket_addr_space)
+            .ok()?;
+        Some((shred, (root_distance, addrs.into_boxed_slice())))
     };
     let mut out = false;
     if shreds.len() < PAR_ITER_MIN_NUM_SHREDS {
