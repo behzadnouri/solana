@@ -20,6 +20,7 @@ use {
         signature::Keypair,
     },
     solana_streamer::streamer::{self, PacketBatchReceiver, StreamerReceiveStats},
+    solana_turbine::stl::Server as StlServer,
     std::{
         net::{SocketAddr, UdpSocket},
         sync::{
@@ -41,6 +42,7 @@ const MAX_SHRED_DISTANCE_MINIMUM: u64 = 500;
 
 pub(crate) struct ShredFetchStage {
     thread_hdls: Vec<JoinHandle<()>>,
+    stl_servers: Vec<StlServer>,
 }
 
 #[derive(Clone)]
@@ -244,7 +246,7 @@ impl ShredFetchStage {
         let (mut tvu_threads, tvu_filter) = Self::packet_modifier(
             "solRcvrShred",
             "solTvuPktMod",
-            sockets,
+            vec![],
             exit.clone(),
             sender.clone(),
             recycler.clone(),
@@ -255,6 +257,51 @@ impl ShredFetchStage {
             None, // repair_context
             turbine_disabled.clone(),
         );
+
+        // Turbine shreds over STL protocol.
+        let mut stl_servers = vec![];
+        {
+            let (stl_sender, stl_receiver) = crossbeam_channel::unbounded();
+            for socket in sockets {
+                let server = StlServer::new(socket, exit.clone(), stl_sender.clone());
+                stl_servers.push(server);
+            }
+            let (packet_sender, packet_receiver) = unbounded();
+            let exit = exit.clone();
+            let recycler = recycler.clone();
+            let sender = sender.clone();
+            let bank_forks = bank_forks.clone();
+            let turbine_disabled = turbine_disabled.clone();
+            tvu_threads.extend([
+                Builder::new()
+                    .name("solTvuRecvStl".to_string())
+                    .spawn(|| {
+                        receive_stl_packets(
+                            stl_receiver,
+                            PacketFlags::empty(),
+                            packet_sender,
+                            recycler,
+                            exit,
+                        )
+                    })
+                    .unwrap(),
+                Builder::new()
+                    .name("solTvuFetchStl".to_string())
+                    .spawn(move || {
+                        Self::modify_packets(
+                            packet_receiver,
+                            sender,
+                            &bank_forks,
+                            shred_version,
+                            "shred_fetch_stl",
+                            PacketFlags::empty(),
+                            None, // repair_context
+                            turbine_disabled,
+                        )
+                    })
+                    .unwrap(),
+            ]);
+        }
 
         let (repair_receiver, repair_handler) = Self::packet_modifier(
             "solRcvrShredRep",
@@ -346,10 +393,12 @@ impl ShredFetchStage {
         ]);
         Self {
             thread_hdls: tvu_threads,
+            stl_servers,
         }
     }
 
     pub(crate) fn join(self) -> thread::Result<()> {
+        self.stl_servers.into_iter().try_for_each(StlServer::join)?;
         for thread_hdl in self.thread_hdls {
             thread_hdl.join()?;
         }
@@ -377,6 +426,51 @@ fn verify_repair_nonce(
     outstanding_repair_requests
         .register_response(nonce, shred, now, |_| ())
         .is_some()
+}
+
+pub(crate) fn receive_stl_packets(
+    stl_receiver: Receiver<(Pubkey, SocketAddr, Vec<u8>)>,
+    flags: PacketFlags,
+    sender: Sender<PacketBatch>,
+    recycler: PacketBatchRecycler,
+    exit: Arc<AtomicBool>,
+) {
+    const RECV_TIMEOUT: Duration = Duration::from_secs(1);
+    while !exit.load(Ordering::Relaxed) {
+        let entry = match stl_receiver.recv_timeout(RECV_TIMEOUT) {
+            Ok(entry) => entry,
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => return,
+        };
+        let mut packet_batch =
+            PacketBatch::new_with_recycler(&recycler, PACKETS_PER_BATCH, "receive_quic_datagrams");
+        unsafe {
+            packet_batch.set_len(PACKETS_PER_BATCH);
+        };
+        let deadline = Instant::now() + PACKET_COALESCE_DURATION;
+        let entries = std::iter::once(entry).chain(
+            std::iter::repeat_with(|| stl_receiver.recv_deadline(deadline).ok()).while_some(),
+        );
+        let size = entries
+            .filter(|(_, _, bytes)| bytes.len() <= PACKET_DATA_SIZE)
+            .zip(packet_batch.iter_mut())
+            .map(|((_pubkey, addr, bytes), packet)| {
+                *packet.meta_mut() = Meta {
+                    size: bytes.len(),
+                    addr: addr.ip(),
+                    port: addr.port(),
+                    flags,
+                };
+                packet.buffer_mut()[..bytes.len()].copy_from_slice(&bytes);
+            })
+            .count();
+        if size > 0 {
+            packet_batch.truncate(size);
+            if sender.send(packet_batch).is_err() {
+                return; // The receiver end of the channel is disconnected.
+            }
+        }
+    }
 }
 
 pub(crate) fn receive_quic_datagrams(

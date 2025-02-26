@@ -150,6 +150,7 @@ impl BroadcastRun for BroadcastFakeShredsRun {
         cluster_info: &ClusterInfo,
         sock: &UdpSocket,
         _bank_forks: &RwLock<BankForks>,
+        _stl_client: &StlClient,
         _quic_endpoint_sender: &AsyncSender<(SocketAddr, Bytes)>,
     ) -> Result<()> {
         for (data_shreds, batch_info) in receiver {

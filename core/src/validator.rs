@@ -128,7 +128,7 @@ use {
     solana_tpu_client::tpu_client::{
         DEFAULT_TPU_CONNECTION_POOL_SIZE, DEFAULT_TPU_USE_QUIC, DEFAULT_VOTE_USE_QUIC,
     },
-    solana_turbine::{self, broadcast_stage::BroadcastStageType},
+    solana_turbine::{self, broadcast_stage::BroadcastStageType, stl::Client as StlClient},
     solana_unified_scheduler_pool::DefaultSchedulerPool,
     solana_vote_program::vote_state,
     solana_wen_restart::wen_restart::{wait_for_wen_restart, WenRestartConfig},
@@ -1467,6 +1467,9 @@ impl Validator {
             Arc::<RwLock<repair::repair_service::OutstandingShredRepairs>>::default();
         let cluster_slots =
             Arc::new(crate::cluster_slots_service::cluster_slots::ClusterSlots::default());
+        let stl_client = Arc::new(StlClient::new(
+            solana_net_utils::bind_to_unspecified().unwrap(),
+        ));
 
         let tvu = Tvu::new(
             vote_account,
@@ -1518,6 +1521,7 @@ impl Validator {
             json_rpc_service.is_some().then_some(&connection_cache), // for the cache warmer only used for STS for RPC service
             &prioritization_fee_cache,
             banking_tracer.clone(),
+            stl_client.clone(),
             turbine_quic_endpoint_sender.clone(),
             turbine_quic_endpoint_receiver,
             repair_response_quic_receiver,
@@ -1584,6 +1588,7 @@ impl Validator {
             config.tpu_coalesce,
             duplicate_confirmed_slot_sender,
             &connection_cache,
+            stl_client,
             turbine_quic_endpoint_sender,
             &identity_keypair,
             config.runtime_config.log_messages_bytes_limit,

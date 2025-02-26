@@ -4,6 +4,7 @@ use {
     crate::{
         addr_cache::AddrCache,
         cluster_nodes::{self, ClusterNodes, ClusterNodesCache, Error, MAX_NUM_TURBINE_HOPS},
+        stl::Client as StlClient,
     },
     bytes::Bytes,
     crossbeam_channel::{Receiver, RecvError, TryRecvError},
@@ -216,6 +217,7 @@ fn retransmit(
     cluster_info: &ClusterInfo,
     retransmit_receiver: &Receiver<Vec<shred::Payload>>,
     retransmit_sockets: &[UdpSocket],
+    stl_client: &StlClient,
     quic_endpoint_sender: &AsyncSender<(SocketAddr, Bytes)>,
     stats: &mut RetransmitStats,
     cluster_nodes_cache: &ClusterNodesCache<RetransmitStage>,
@@ -307,6 +309,7 @@ fn retransmit(
             addr_cache,
             socket_addr_space,
             socket,
+            stl_client,
             quic_endpoint_sender,
             stats,
         )
@@ -356,6 +359,7 @@ fn retransmit_shred(
     addr_cache: &AddrCache,
     socket_addr_space: &SocketAddrSpace,
     socket: &UdpSocket,
+    stl_client: &StlClient,
     quic_endpoint_sender: &AsyncSender<(SocketAddr, Bytes)>,
     stats: &RetransmitStats,
 ) -> Option<RetransmitShredOutput> {
@@ -386,16 +390,23 @@ fn retransmit_shred(
                 .filter_map(|&addr| quic_endpoint_sender.try_send((addr, shred.clone())).ok())
                 .count()
         }
-        Protocol::UDP => match multi_target_send(socket, shred, &addrs) {
-            Ok(()) => addrs.len(),
-            Err(SendPktsError::IoError(ioerr, num_failed)) => {
-                error!(
+        Protocol::UDP => {
+            if false {
+                match multi_target_send(socket, shred, &addrs) {
+                    Ok(()) => addrs.len(),
+                    Err(SendPktsError::IoError(ioerr, num_failed)) => {
+                        error!(
                     "retransmit_to multi_target_send error: {ioerr:?}, {num_failed}/{} packets failed",
                     addrs.len(),
                 );
-                addrs.len() - num_failed
+                        addrs.len() - num_failed
+                    }
+                }
+            } else {
+                stl_client.send_many(shred, addrs.iter());
+                addrs.len()
             }
-        },
+        }
     };
     retransmit_time.stop();
     stats
@@ -527,6 +538,7 @@ impl RetransmitStage {
         leader_schedule_cache: Arc<LeaderScheduleCache>,
         cluster_info: Arc<ClusterInfo>,
         retransmit_sockets: Arc<Vec<UdpSocket>>,
+        stl_client: Arc<StlClient>,
         quic_endpoint_sender: AsyncSender<(SocketAddr, Bytes)>,
         retransmit_receiver: Receiver<Vec<shred::Payload>>,
         max_slots: Arc<MaxSlots>,
@@ -563,6 +575,7 @@ impl RetransmitStage {
                     &cluster_info,
                     &retransmit_receiver,
                     &retransmit_sockets,
+                    &stl_client,
                     &quic_endpoint_sender,
                     &mut stats,
                     &cluster_nodes_cache,

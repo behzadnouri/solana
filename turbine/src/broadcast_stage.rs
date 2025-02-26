@@ -8,7 +8,10 @@ use {
         fail_entry_verification_broadcast_run::FailEntryVerificationBroadcastRun,
         standard_broadcast_run::StandardBroadcastRun,
     },
-    crate::cluster_nodes::{self, ClusterNodes, ClusterNodesCache},
+    crate::{
+        cluster_nodes::{self, ClusterNodes, ClusterNodesCache},
+        stl::Client as StlClient,
+    },
     bytes::Bytes,
     crossbeam_channel::{unbounded, Receiver, RecvError, RecvTimeoutError, Sender},
     itertools::{Either, Itertools},
@@ -120,6 +123,7 @@ impl BroadcastStageType {
         blockstore: Arc<Blockstore>,
         bank_forks: Arc<RwLock<BankForks>>,
         shred_version: u16,
+        stl_client: Arc<StlClient>,
         quic_endpoint_sender: AsyncSender<(SocketAddr, Bytes)>,
     ) -> BroadcastStage {
         match self {
@@ -131,6 +135,7 @@ impl BroadcastStageType {
                 exit_sender,
                 blockstore,
                 bank_forks,
+                stl_client,
                 quic_endpoint_sender,
                 StandardBroadcastRun::new(shred_version),
             ),
@@ -143,6 +148,7 @@ impl BroadcastStageType {
                 exit_sender,
                 blockstore,
                 bank_forks,
+                stl_client,
                 quic_endpoint_sender,
                 FailEntryVerificationBroadcastRun::new(shred_version),
             ),
@@ -155,6 +161,7 @@ impl BroadcastStageType {
                 exit_sender,
                 blockstore,
                 bank_forks,
+                stl_client,
                 quic_endpoint_sender,
                 BroadcastFakeShredsRun::new(0, shred_version),
             ),
@@ -167,6 +174,7 @@ impl BroadcastStageType {
                 exit_sender,
                 blockstore,
                 bank_forks,
+                stl_client,
                 quic_endpoint_sender,
                 BroadcastDuplicatesRun::new(shred_version, config.clone()),
             ),
@@ -189,6 +197,7 @@ trait BroadcastRun {
         cluster_info: &ClusterInfo,
         sock: &UdpSocket,
         bank_forks: &RwLock<BankForks>,
+        stl_client: &StlClient,
         quic_endpoint_sender: &AsyncSender<(SocketAddr, Bytes)>,
     ) -> Result<()>;
     fn record(&mut self, receiver: &RecordReceiver, blockstore: &Blockstore) -> Result<()>;
@@ -284,6 +293,7 @@ impl BroadcastStage {
         exit: Arc<AtomicBool>,
         blockstore: Arc<Blockstore>,
         bank_forks: Arc<RwLock<BankForks>>,
+        stl_client: Arc<StlClient>,
         quic_endpoint_sender: AsyncSender<(SocketAddr, Bytes)>,
         mut broadcast_stage_run: impl BroadcastRun + Send + 'static + Clone,
     ) -> Self {
@@ -316,6 +326,7 @@ impl BroadcastStage {
             let mut bs_transmit = broadcast_stage_run.clone();
             let cluster_info = cluster_info.clone();
             let bank_forks = bank_forks.clone();
+            let stl_client = stl_client.clone();
             let quic_endpoint_sender = quic_endpoint_sender.clone();
             let run_transmit = move || loop {
                 let res = bs_transmit.transmit(
@@ -323,6 +334,7 @@ impl BroadcastStage {
                     &cluster_info,
                     &sock,
                     &bank_forks,
+                    &stl_client,
                     &quic_endpoint_sender,
                 );
                 let res = Self::handle_error(res, "solana-broadcaster-transmit");
@@ -442,6 +454,7 @@ pub fn broadcast_shreds(
     cluster_info: &ClusterInfo,
     bank_forks: &RwLock<BankForks>,
     socket_addr_space: &SocketAddrSpace,
+    stl_client: &StlClient,
     quic_endpoint_sender: &AsyncSender<(SocketAddr, Bytes)>,
 ) -> Result<()> {
     let mut result = Ok(());
@@ -479,11 +492,17 @@ pub fn broadcast_shreds(
     transmit_stats.shred_select += shred_select.as_us();
     let num_udp_packets = packets.len();
     let mut send_mmsg_time = Measure::start("send_mmsg");
-    match batch_send(s, packets) {
-        Ok(()) => (),
-        Err(SendPktsError::IoError(ioerr, num_failed)) => {
-            transmit_stats.dropped_packets_udp += num_failed;
-            result = Err(Error::Io(ioerr));
+    if false {
+        match batch_send(s, packets) {
+            Ok(()) => (),
+            Err(SendPktsError::IoError(ioerr, num_failed)) => {
+                transmit_stats.dropped_packets_udp += num_failed;
+                result = Err(Error::Io(ioerr));
+            }
+        }
+    } else {
+        for (shred, addr) in packets {
+            stl_client.send_many(shred, [addr]);
         }
     }
     send_mmsg_time.stop();

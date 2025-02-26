@@ -44,7 +44,10 @@ use {
         signer::keypair::Keypair,
     },
     solana_streamer::socket::SocketAddrSpace,
-    solana_turbine::broadcast_stage::{BroadcastStage, BroadcastStageType},
+    solana_turbine::{
+        broadcast_stage::{BroadcastStage, BroadcastStageType},
+        stl::Client as StlClient,
+    },
     std::{
         collections::BTreeMap,
         fmt::Display,
@@ -803,6 +806,9 @@ impl BankingSimulator {
             random_keypair,
             SocketAddrSpace::Unspecified,
         ));
+        let stl_client = Arc::new(StlClient::new(
+            solana_net_utils::bind_to_unspecified().unwrap(),
+        ));
         // Broadcast stage is needed to save the simulated blocks for post-run analysis by
         // inserting produced shreds into the blockstore.
         let broadcast_stage = BroadcastStageType::Standard.new_broadcast_stage(
@@ -814,6 +820,7 @@ impl BankingSimulator {
             blockstore.clone(),
             bank_forks.clone(),
             shred_version,
+            stl_client,
             sender,
         );
 

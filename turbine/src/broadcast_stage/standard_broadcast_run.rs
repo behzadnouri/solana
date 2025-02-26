@@ -5,7 +5,7 @@ use {
         broadcast_utils::{self, ReceiveResults},
         *,
     },
-    crate::cluster_nodes::ClusterNodesCache,
+    crate::{cluster_nodes::ClusterNodesCache, stl::Client as StlClient},
     solana_entry::entry::Entry,
     solana_ledger::{
         blockstore,
@@ -158,6 +158,7 @@ impl StandardBroadcastRun {
         blockstore: &Blockstore,
         receive_results: ReceiveResults,
         bank_forks: &RwLock<BankForks>,
+        stl_client: &StlClient,
         quic_endpoint_sender: &AsyncSender<(SocketAddr, Bytes)>,
     ) -> Result<()> {
         let (bsend, brecv) = unbounded();
@@ -369,6 +370,7 @@ impl StandardBroadcastRun {
         shreds: Arc<Vec<Shred>>,
         broadcast_shred_batch_info: Option<BroadcastShredBatchInfo>,
         bank_forks: &RwLock<BankForks>,
+        stl_client: &StlClient,
         quic_endpoint_sender: &AsyncSender<(SocketAddr, Bytes)>,
     ) -> Result<()> {
         trace!("Broadcasting {:?} shreds", shreds.len());
@@ -385,6 +387,7 @@ impl StandardBroadcastRun {
             cluster_info,
             bank_forks,
             cluster_info.socket_addr_space(),
+            stl_client,
             quic_endpoint_sender,
         )?;
         transmit_time.stop();
@@ -452,6 +455,7 @@ impl BroadcastRun for StandardBroadcastRun {
         cluster_info: &ClusterInfo,
         sock: &UdpSocket,
         bank_forks: &RwLock<BankForks>,
+        stl_client: &StlClient,
         quic_endpoint_sender: &AsyncSender<(SocketAddr, Bytes)>,
     ) -> Result<()> {
         let (shreds, batch_info) = receiver.recv()?;
@@ -461,6 +465,7 @@ impl BroadcastRun for StandardBroadcastRun {
             shreds,
             batch_info,
             bank_forks,
+            stl_client,
             quic_endpoint_sender,
         )
     }

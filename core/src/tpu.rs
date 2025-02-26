@@ -49,7 +49,10 @@ use {
         quic::{spawn_server_multi, QuicServerParams, SpawnServerResult},
         streamer::StakedNodes,
     },
-    solana_turbine::broadcast_stage::{BroadcastStage, BroadcastStageType},
+    solana_turbine::{
+        broadcast_stage::{BroadcastStage, BroadcastStageType},
+        stl::Client as StlClient,
+    },
     std::{
         collections::HashMap,
         net::{SocketAddr, UdpSocket},
@@ -111,6 +114,7 @@ impl Tpu {
         tpu_coalesce: Duration,
         duplicate_confirmed_slot_sender: DuplicateConfirmedSlotsSender,
         connection_cache: &Arc<ConnectionCache>,
+        stl_client: Arc<StlClient>,
         turbine_quic_endpoint_sender: AsyncSender<(SocketAddr, Bytes)>,
         keypair: &Keypair,
         log_messages_bytes_limit: Option<usize>,
@@ -306,6 +310,7 @@ impl Tpu {
             blockstore,
             bank_forks,
             shred_version,
+            stl_client,
             turbine_quic_endpoint_sender,
         );
 
