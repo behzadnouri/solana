@@ -187,7 +187,7 @@ impl CrdsValue {
         }
     }
 
-    pub(crate) fn contact_info(&self) -> Option<&ContactInfo> {
+    pub fn contact_info(&self) -> Option<&ContactInfo> {
         let CrdsData::ContactInfo(node) = &self.data else {
             return None;
         };

@@ -122,6 +122,10 @@ harness = false
 name = "solana-gossip"
 path = "src/main.rs"
 
+[[bin]]
+name = "socket_main"
+path = "src/socket_main.rs"
+
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
 
