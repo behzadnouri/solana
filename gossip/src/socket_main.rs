@@ -232,14 +232,15 @@ fn run(matches: &ArgMatches) -> Result<(), Box<dyn error::Error>> {
         .num_threads(num_worker_threads)
         .build()
         .unwrap();
-    let sockets = {
-        let config = SocketConfig::default()
-            .reuseport(true)
-            .recv_buffer_size(128 * 1024 * 1024)
-            .send_buffer_size(128 * 1024 * 1024);
-        bind_more_with_config(socket, num_worker_threads, config).unwrap()
-    };
-    info!("sockets: {sockets:?}");
+    // let sockets = {
+    //     let config = SocketConfig::default()
+    //         .reuseport(true)
+    //         .recv_buffer_size(128 * 1024 * 1024)
+    //         .send_buffer_size(128 * 1024 * 1024);
+    //     bind_more_with_config(socket, num_worker_threads, config).unwrap()
+    // };
+    // info!("sockets: {sockets:?}");
+    socket.set_nonblocking(false).unwrap();
     for k in 0..num_reps {
         info!("rep: {k}");
         let packets = make_packets(&mut rng, num_packets);
@@ -248,19 +249,19 @@ fn run(matches: &ArgMatches) -> Result<(), Box<dyn error::Error>> {
         thread_pool.install(|| {
             packets.into_par_iter().for_each(|packet| {
                 let index = thread_pool.current_thread_index().unwrap();
-                let socket = &sockets[0]; // index % sockets.len()];
-                // for addr in &addrs[index] {
-                //     if socket.send_to(&packet, addr).is_err() {
-                //         num_errs.fetch_add(1, Ordering::Relaxed);
-                //     }
-                // }
-                match multi_target_send(socket, packet, &addrs[index]) {
-                    Ok(()) => (),
-                    Err(SendPktsError::IoError(err, num)) => {
-                        num_errs.fetch_add(num, Ordering::Relaxed);
-                        trace!("{err:?}, {:?}", &addrs[index]);
+                // let socket = &sockets[index % sockets.len()];
+                for addr in &addrs[index] {
+                    if socket.send_to(&packet, addr).is_err() {
+                        num_errs.fetch_add(1, Ordering::Relaxed);
                     }
-                };
+                }
+                // match multi_target_send(socket, packet, &addrs[index]) {
+                //     Ok(()) => (),
+                //     Err(SendPktsError::IoError(err, num)) => {
+                //         num_errs.fetch_add(num, Ordering::Relaxed);
+                //         trace!("{err:?}, {:?}", &addrs[index]);
+                //     }
+                // };
             })
         });
         let elapsed = now.elapsed();
