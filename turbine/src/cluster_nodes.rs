@@ -56,7 +56,7 @@ pub enum Error {
     Loopback { leader: Pubkey, shred: ShredId },
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 #[allow(clippy::large_enum_variant)]
 enum NodeId {
     // TVU node obtained through gossip (staked or not).
@@ -75,6 +75,7 @@ pub(crate) struct ContactInfo {
     tvu_udp: Option<SocketAddr>,
 }
 
+#[derive(Clone, Debug)]
 pub struct Node {
     node: NodeId,
     stake: u64,
@@ -403,6 +404,7 @@ fn dedup_tvu_addrs(nodes: &mut Vec<Node>) {
     // Maps IP addresses to number of nodes at that IP address.
     let mut counts = HashMap::with_capacity(capacity);
     nodes.retain_mut(|node| {
+        let node_clone = node.clone();
         let node_stake = node.stake;
         let Some(node) = node.contact_info_mut() else {
             // Need to keep staked identities without gossip ContactInfo for
@@ -426,10 +428,14 @@ fn dedup_tvu_addrs(nodes: &mut Vec<Node>) {
         }
         // Always keep staked nodes for deterministic shuffle,
         // but drop non-staked nodes if they have no valid TVU address.
-        node_stake > 0u64
+        let out = node_stake > 0u64
             || TVU_PROTOCOLS
                 .into_iter()
-                .any(|protocol| node.tvu(protocol).is_some())
+                .any(|protocol| node.tvu(protocol).is_some());
+        if !out {
+            error!("dedup_tvu_addrs: {node_clone:?}");
+        }
+        out
     })
 }
 
