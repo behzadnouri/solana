@@ -20,7 +20,7 @@ agave-unstable-api = []
 
 [dependencies]
 chrono = { workspace = true, features = ["default"] }
-clap = { version = "2.33.0", default-features = false, features = ["suggestions"] }
+clap = { version = "4.5.31", default-features = false, features = ["suggestions"] }
 rpassword = { workspace = true }
 solana-bls-signatures = { workspace = true }
 solana-clock = { workspace = true }
