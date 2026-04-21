@@ -28,7 +28,7 @@ fuzz = [
 ]
 
 [dependencies]
-clap = { version = "4.5.2", features = ["derive"], optional = true }
+clap = { version = "4.6.0", features = ["derive"], optional = true }
 prost = { workspace = true, optional = true }
 solana-svm-test-harness-fixture = { workspace = true }
 solana-svm-test-harness-instr = { workspace = true }
